@@ -38,12 +38,12 @@ type Pane struct {
 	win    *Window
 	parent *split
 
-	root          *gtk.Box
-	header        *gtk.Box
-	headerLabel   *gtk.Label
-	headerSpinner *gtk.Spinner
-	stack         *gtk.Stack
-	term          *vte.Terminal
+	root        *gtk.Box
+	header      *gtk.Box
+	headerLabel *gtk.Label
+	headerDot   *gtk.Label
+	stack       *gtk.Stack
+	term        *vte.Terminal
 
 	emptyTitle    *gtk.Label
 	emptyHint     *gtk.Label
@@ -81,8 +81,9 @@ func newPane(w *Window) *Pane {
 	// The header names the session. It is only shown when the window is split.
 	p.header, _ = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, headerSpacing)
 	addClass(p.header, "ttt-pane-header")
-	p.headerSpinner, _ = gtk.SpinnerNew()
-	p.headerSpinner.SetNoShowAll(true)
+	p.headerDot, _ = gtk.LabelNew(dot)
+	addClass(p.headerDot, "ttt-busy-dot")
+	p.headerDot.SetNoShowAll(true)
 	p.headerLabel, _ = gtk.LabelNew("")
 	p.headerLabel.SetEllipsize(pango.ELLIPSIZE_END)
 	p.headerLabel.SetHExpand(true)
@@ -91,7 +92,7 @@ func newPane(w *Window) *Pane {
 	closeBtn.SetFocusOnClick(false)
 	closeBtn.SetTooltipText("Close Pane")
 	closeBtn.Connect("clicked", func() { w.ClosePane(p) })
-	p.header.PackStart(p.headerSpinner, false, false, 0)
+	p.header.PackStart(p.headerDot, false, false, 0)
 	p.header.PackStart(p.headerLabel, true, true, 0)
 	p.header.PackEnd(closeBtn, false, false, 0)
 	// The header is hidden until the window splits. ShowAll skips it, so show its
@@ -308,12 +309,7 @@ func (p *Pane) syncSession(snap *tmux.Snapshot) {
 func (p *Pane) updateHeader(name string, busy bool, showHeader bool) {
 	p.headerLabel.SetText(name)
 	p.header.SetVisible(showHeader)
-	p.headerSpinner.SetVisible(busy && showHeader)
-	if busy {
-		p.headerSpinner.Start()
-	} else {
-		p.headerSpinner.Stop()
-	}
+	p.headerDot.SetVisible(busy && showHeader)
 	setClass(p.root, "ttt-active", p.win.activePane == p)
 }
 

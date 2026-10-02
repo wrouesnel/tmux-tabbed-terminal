@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/vte"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
@@ -58,6 +59,11 @@ type App struct {
 	client  *tmux.Client
 	gtkApp  *gtk.Application
 	tracker *activity.Tracker
+	grouper *sessionlist.Grouper
+	// groups maps session IDs to their application group.
+	groups map[string]string
+	// grouped is whether session lists are grouped by application.
+	grouped bool
 
 	appearance  *Appearance
 	terminalCSS *gtk.CssProvider
@@ -93,6 +99,9 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		client:   cfg.Tmux.Client(),
 		gtkApp:   gtkApp,
 		tracker:  activity.NewTracker(cfg.Activity.Timeout),
+		grouper:  sessionlist.NewGrouper(cfg.Sidebar.GroupHold),
+		groups:   map[string]string{},
+		grouped:  cfg.Sidebar.GroupByApplication,
 		snapshot: &tmux.Snapshot{},
 		windows:  map[*Window]struct{}{},
 		kick:     make(chan struct{}, 1),
@@ -140,6 +149,7 @@ func (a *App) startup() {
 	defer cancel()
 	if snap, err := a.client.Snapshot(ctx); err == nil {
 		a.snapshot = snap
+		a.updateGroups()
 	} else {
 		a.log.Warn("Could not read tmux sessions", zap.Error(err))
 	}
@@ -283,8 +293,32 @@ func (a *App) applySnapshot(snap *tmux.Snapshot) {
 		a.tracker.Observe(s.ID, s.Activity(), visible[s.ID], now)
 	}
 	a.tracker.Retain(ids)
+	a.updateGroups()
 
 	for w := range a.windows {
+		w.refresh()
+	}
+}
+
+// updateGroups assigns each session in the snapshot to its application group.
+func (a *App) updateGroups() {
+	now := time.Now()
+	groups := make(map[string]string, len(a.snapshot.Sessions))
+	ids := map[string]bool{}
+	for i := range a.snapshot.Sessions {
+		s := &a.snapshot.Sessions[i]
+		groups[s.ID] = a.grouper.Group(s, now)
+		ids[s.ID] = true
+	}
+	a.grouper.Retain(ids)
+	a.groups = groups
+}
+
+// setGrouped turns grouping by application on or off in every window.
+func (a *App) setGrouped(grouped bool) {
+	a.grouped = grouped
+	for w := range a.windows {
+		w.syncGroupAction()
 		w.refresh()
 	}
 }

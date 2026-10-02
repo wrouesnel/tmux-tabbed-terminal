@@ -28,9 +28,28 @@ const stylesheet = `
 .ttt-session-subtitle {
 	font-size: smaller;
 }
+@keyframes ttt-pulse {
+	from { opacity: 1; }
+	to { opacity: 0.2; }
+}
+.ttt-busy-dot {
+	color: @theme_selected_bg_color;
+	animation: ttt-pulse 1.1s ease-in-out infinite alternate;
+}
 .ttt-unseen-dot {
 	color: @theme_selected_bg_color;
 	font-size: smaller;
+}
+row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
+	color: @theme_selected_fg_color;
+}
+.ttt-group-header {
+	padding: 10px 10px 2px 10px;
+	font-size: smaller;
+	font-weight: bold;
+}
+.ttt-search {
+	margin: 6px;
 }
 .ttt-sidebar-toolbar {
 	padding: 2px;

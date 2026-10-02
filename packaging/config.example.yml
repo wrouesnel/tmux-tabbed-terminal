@@ -34,6 +34,14 @@ activity:
   # How long a session shows as busy after its last output.
   timeout: 2s
 
+sidebar:
+  # Group sessions by the program running in their current window, such as claude or vim.
+  # The toggle under the session list changes it while running.
+  group-by-application: true
+  # How long a session must run a new program before it moves to that program's group,
+  # so short commands don't move it.
+  group-hold: 3s
+
 behaviour:
   # Create a session when a window opens and there are none.
   create-session-on-start: true

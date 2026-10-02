@@ -9,8 +9,11 @@ or split the window to watch several sessions side by side.
 * **Session list.** Every session on your tmux server, in tmux's order, with what its
   current window is running. Sessions made or killed outside the app show up within a
   second.
-* **Activity.** A session producing output shows a spinner in the list and in its pane
-  header. A session that produced output while it wasn't on screen is shown in bold
+* **Grouping and search.** Sessions are grouped by the program running in their current
+  window, so all your `claude` sessions sit together (toggle it under the list). The
+  search box at the top filters by session name, program or window name.
+* **Activity.** A session producing output shows a gently pulsing dot in the list and in
+  its pane header. A session that produced output while it wasn't on screen is shown in bold
   with a dot until you look at it. Activity comes from tmux's own `window_activity`
   time, so it works for sessions that aren't displayed.
 * **Splits.** Split a pane right or down, then pick a session for the new pane from
@@ -70,6 +73,7 @@ program is using the mouse) gives copy, paste and split.
 | Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste |
 | Ctrl+plus / Ctrl+minus / Ctrl+0 | Zoom in / out / reset |
 | Ctrl+Shift+S | Show or hide the session list |
+| Ctrl+Shift+F | Search sessions (Enter opens the first match, Escape returns to the terminal) |
 | Ctrl+Shift+N | New window |
 | Ctrl+Shift+Q | Close window |
 | F11 | Full screen |
@@ -154,6 +158,7 @@ One-time setup:
 | `pkg/ui` | The GTK3 interface: application, windows, sidebar, pane split tree, terminal panes, appearance and menus. |
 | `pkg/vte` | cgo bindings for the parts of VTE the UI uses. |
 | `pkg/tmux` | Runs tmux commands and parses their format output into snapshots of sessions, windows and clients. |
+| `pkg/sessionlist` | Groups sessions by application, orders and filters the session list. |
 | `pkg/activity` | Decides which sessions are busy or have unseen output, from successive snapshots. |
 | `pkg/theme` | Color parsing and GNOME Terminal's built-in palettes. |
 | `packaging/` | Desktop entry, icon, AppStream metadata and example configuration for the package. |

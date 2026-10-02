@@ -11,6 +11,7 @@ import (
 	"github.com/gotk3/gotk3/pango"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
 
@@ -22,6 +23,8 @@ const (
 	indicatorWidth  = 16
 	rowSpacing      = 8
 	sidebarMinWidth = 120
+	// dot is the activity indicator. Busy dots pulse; unseen ones are still.
+	dot = "●"
 )
 
 // sessionRow is one session in the sidebar.
@@ -31,27 +34,60 @@ type sessionRow struct {
 	name      *gtk.Label
 	subtitle  *gtk.Label
 	indicator *gtk.Stack
-	spinner   *gtk.Spinner
 }
 
-// sidebar lists the tmux sessions.
+// sidebar lists the tmux sessions, optionally grouped by application, with a search
+// entry to filter them.
 type sidebar struct {
-	win   *Window
-	root  *gtk.Box
-	list  *gtk.ListBox
-	rows  map[string]*sessionRow
-	order []string
+	win    *Window
+	root   *gtk.Box
+	search *gtk.SearchEntry
+	list   *gtk.ListBox
+	rows   map[string]*sessionRow
+	// rowIDs maps a row's native pointer to its session ID.
+	rowIDs map[uintptr]string
+	order  []sessionlist.Entry
+	query  string
 }
 
 func newSidebar(w *Window) *sidebar {
-	sb := &sidebar{win: w, rows: map[string]*sessionRow{}}
+	sb := &sidebar{win: w, rows: map[string]*sessionRow{}, rowIDs: map[uintptr]string{}}
+
+	sb.search, _ = gtk.SearchEntryNew()
+	sb.search.SetPlaceholderText("Search sessions")
+	sb.search.SetTooltipText("Search sessions (Ctrl+Shift+F)")
+	addClass(sb.search, "ttt-search")
+	sb.search.Connect("search-changed", func() {
+		sb.query, _ = sb.search.GetText()
+		sb.list.InvalidateFilter()
+		sb.list.InvalidateHeaders()
+	})
+	// Enter opens the first match. Escape clears the search and returns to the terminal.
+	sb.search.Connect("activate", func() {
+		if ids := sb.visibleIDs(); len(ids) > 0 {
+			w.ShowSession(ids[0])
+		}
+	})
+	sb.search.Connect("stop-search", func() {
+		sb.search.SetText("")
+		w.activePane.Focus()
+	})
+	sb.search.Connect("key-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		if gdk.EventKeyNewFromEvent(ev).KeyVal() == gdk.KEY_Down {
+			sb.focusFirstRow()
+			return true
+		}
+		return false
+	})
 
 	sb.list, _ = gtk.ListBoxNew()
 	sb.list.SetSelectionMode(gtk.SELECTION_SINGLE)
 	sb.list.SetActivateOnSingleClick(true)
 	addClass(sb.list, "ttt-sidebar")
+	sb.list.SetFilterFunc(sb.filter)
+	sb.list.SetHeaderFunc(sb.header)
 	sb.list.Connect("row-activated", func(_ interface{}, row *gtk.ListBoxRow) {
-		if id := sb.idAt(row.GetIndex()); id != "" {
+		if id := sb.rowIDs[row.Native()]; id != "" {
 			w.ShowSession(id)
 		}
 	})
@@ -59,7 +95,7 @@ func newSidebar(w *Window) *sidebar {
 		return sb.onButtonPress(gdk.EventButtonNewFromEvent(ev))
 	})
 
-	placeholder, _ := gtk.LabelNew("No tmux sessions")
+	placeholder, _ := gtk.LabelNew("No sessions")
 	addClass(placeholder, "dim-label")
 	placeholder.Show()
 	sb.list.SetPlaceholder(placeholder)
@@ -73,14 +109,23 @@ func newSidebar(w *Window) *sidebar {
 	newBtn.SetTooltipText("New Session (Ctrl+Shift+T)")
 	newBtn.SetActionName("win.new-session")
 	newBtn.SetRelief(gtk.RELIEF_NONE)
+	groupBtn, _ := gtk.ToggleButtonNew()
+	groupIcon, _ := gtk.ImageNewFromIconName(firstIcon("view-list-bullet-symbolic", "view-list-symbolic"),
+		gtk.ICON_SIZE_BUTTON)
+	groupBtn.SetImage(groupIcon)
+	groupBtn.SetTooltipText("Group by Application")
+	groupBtn.SetActionName("win.group-sessions")
+	groupBtn.SetRelief(gtk.RELIEF_NONE)
 	toolbar, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
 	addClass(toolbar, "ttt-sidebar-toolbar")
 	toolbar.PackStart(newBtn, false, false, 0)
+	toolbar.PackEnd(groupBtn, false, false, 0)
 
 	sb.root, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	addClass(sb.root, "sidebar")
 	addClass(sb.root, "ttt-nav")
 	sb.root.SetSizeRequest(sidebarMinWidth, -1)
+	sb.root.PackStart(sb.search, false, false, 0)
 	sb.root.PackStart(scroller, true, true, 0)
 	sep, _ := gtk.SeparatorNew(gtk.ORIENTATION_HORIZONTAL)
 	sb.root.PackStart(sep, false, false, 0)
@@ -88,12 +133,73 @@ func newSidebar(w *Window) *sidebar {
 	return sb
 }
 
-// idAt returns the session ID of the row at index, or "".
-func (sb *sidebar) idAt(index int) string {
-	if index < 0 || index >= len(sb.order) {
-		return ""
+// entry returns the display entry of a session, or nil.
+func (sb *sidebar) entry(id string) *sessionlist.Entry {
+	for i := range sb.order {
+		if sb.order[i].ID == id {
+			return &sb.order[i]
+		}
 	}
-	return sb.order[index]
+	return nil
+}
+
+// matches reports whether a session matches the search.
+func (sb *sidebar) matches(id string) bool {
+	s := sb.win.app.snapshot.Session(id)
+	if s == nil {
+		return false
+	}
+	return sessionlist.Matches(s, sb.win.app.groups[id], sb.query)
+}
+
+// filter is the list's filter function.
+func (sb *sidebar) filter(row *gtk.ListBoxRow) bool {
+	return sb.matches(sb.rowIDs[row.Native()])
+}
+
+// header puts a group heading above the first visible row of each group.
+func (sb *sidebar) header(row *gtk.ListBoxRow, before *gtk.ListBoxRow) {
+	e := sb.entry(sb.rowIDs[row.Native()])
+	if e == nil || e.Group == "" {
+		row.SetHeader(nil)
+		return
+	}
+	if before != nil && before.Object != nil {
+		if prev := sb.entry(sb.rowIDs[before.Native()]); prev != nil && prev.Group == e.Group {
+			row.SetHeader(nil)
+			return
+		}
+	}
+	label, _ := gtk.LabelNew(e.Group)
+	label.SetXAlign(0)
+	label.SetEllipsize(pango.ELLIPSIZE_END)
+	addClass(label, "ttt-group-header")
+	addClass(label, "dim-label")
+	label.Show()
+	row.SetHeader(label)
+}
+
+// visibleIDs returns the sessions shown in the list, in order.
+func (sb *sidebar) visibleIDs() []string {
+	ids := []string{}
+	for _, e := range sb.order {
+		if sb.matches(e.ID) {
+			ids = append(ids, e.ID)
+		}
+	}
+	return ids
+}
+
+// focusFirstRow moves keyboard focus to the first visible session.
+func (sb *sidebar) focusFirstRow() {
+	if ids := sb.visibleIDs(); len(ids) > 0 {
+		sb.rows[ids[0]].row.GrabFocus()
+	}
+}
+
+// FocusSearch shows the sidebar if needed and puts the cursor in the search entry.
+func (sb *sidebar) FocusSearch() {
+	sb.search.GrabFocus()
 }
 
 func newSessionRow(id string) *sessionRow {
@@ -105,12 +211,13 @@ func newSessionRow(id string) *sessionRow {
 	r.indicator.SetSizeRequest(indicatorWidth, -1)
 	r.indicator.SetVAlign(gtk.ALIGN_CENTER)
 	none, _ := gtk.LabelNew("")
-	r.spinner, _ = gtk.SpinnerNew()
-	dot, _ := gtk.LabelNew("●")
-	addClass(dot, "ttt-unseen-dot")
+	busy, _ := gtk.LabelNew(dot)
+	addClass(busy, "ttt-busy-dot")
+	unseen, _ := gtk.LabelNew(dot)
+	addClass(unseen, "ttt-unseen-dot")
 	r.indicator.AddNamed(none, indicatorNone)
-	r.indicator.AddNamed(r.spinner, indicatorBusy)
-	r.indicator.AddNamed(dot, indicatorUnseen)
+	r.indicator.AddNamed(busy, indicatorBusy)
+	r.indicator.AddNamed(unseen, indicatorUnseen)
 
 	r.name, _ = gtk.LabelNew("")
 	r.name.SetXAlign(0)
@@ -144,12 +251,9 @@ func (r *sessionRow) update(s *tmux.Session, state activity.State, shown bool, o
 	switch {
 	case state.Active:
 		r.indicator.SetVisibleChildName(indicatorBusy)
-		r.spinner.Start()
 	case state.Unseen:
-		r.spinner.Stop()
 		r.indicator.SetVisibleChildName(indicatorUnseen)
 	default:
-		r.spinner.Stop()
 		r.indicator.SetVisibleChildName(indicatorNone)
 	}
 	setClass(r.row, "ttt-unseen", state.Unseen)
@@ -204,34 +308,41 @@ func (sb *sidebar) update(snap *tmux.Snapshot, tracker *activity.Tracker, shown 
 			others[c.SessionID]++
 		}
 	}
-	order := make([]string, 0, len(snap.Sessions))
 	for i := range snap.Sessions {
 		s := &snap.Sessions[i]
-		order = append(order, s.ID)
 		row, ok := sb.rows[s.ID]
 		if !ok {
 			row = newSessionRow(s.ID)
 			sb.rows[s.ID] = row
+			sb.rowIDs[row.row.Native()] = s.ID
 		}
 		row.update(s, tracker.State(s.ID, now), shown[s.ID], others[s.ID])
 	}
 
-	if !equalStrings(order, sb.order) {
-		// Rebuild in tmux's order. The rows are kept, so only their position changes.
+	order := sessionlist.Order(snap.Sessions, sb.win.app.groups, sb.win.app.grouped)
+	if !equalEntries(order, sb.order) {
+		// Rebuild in display order. The rows are kept, so only their position changes.
 		keep := map[string]bool{}
-		for _, id := range order {
-			keep[id] = true
+		for _, e := range order {
+			keep[e.ID] = true
 		}
-		for _, id := range sb.order {
-			sb.list.Remove(sb.rows[id].row)
-			if !keep[id] {
-				delete(sb.rows, id)
+		for _, e := range sb.order {
+			row := sb.rows[e.ID]
+			sb.list.Remove(row.row)
+			if !keep[e.ID] {
+				delete(sb.rowIDs, row.row.Native())
+				delete(sb.rows, e.ID)
 			}
 		}
-		for i, id := range order {
-			sb.list.Insert(sb.rows[id].row, i)
-		}
 		sb.order = order
+		for i, e := range order {
+			sb.list.Insert(sb.rows[e.ID].row, i)
+		}
+		sb.list.InvalidateHeaders()
+	}
+	// Session names and commands may have changed what the search matches.
+	if sb.query != "" {
+		sb.list.InvalidateFilter()
 	}
 
 	sb.selectSession(selected)
@@ -257,7 +368,7 @@ func (sb *sidebar) onButtonPress(ev *gdk.EventButton) bool {
 	if row == nil {
 		return false
 	}
-	id := sb.idAt(row.GetIndex())
+	id := sb.rowIDs[row.Native()]
 	if id == "" {
 		return false
 	}
@@ -310,7 +421,7 @@ func sessionMenu(id string) *glib.MenuModel {
 	return &menu.MenuModel
 }
 
-func equalStrings(a, b []string) bool {
+func equalEntries(a, b []sessionlist.Entry) bool {
 	if len(a) != len(b) {
 		return false
 	}

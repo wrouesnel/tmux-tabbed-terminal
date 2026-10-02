@@ -32,8 +32,10 @@ type Window struct {
 	layout     *layout
 	activePane *Pane
 
-	actions    map[string]*glib.SimpleAction
-	fullscreen bool
+	actions       map[string]*glib.SimpleAction
+	sidebarAction *glib.SimpleAction
+	groupAction   *glib.SimpleAction
+	fullscreen    bool
 }
 
 func newWindow(app *App) *Window {
@@ -144,13 +146,33 @@ func (w *Window) installActions() {
 	addStr("session-rename", w.RenameSession)
 	addStr("session-kill", w.KillSession)
 
+	add("find-session", func() {
+		w.setSidebarVisible(true)
+		w.sidebar.FocusSearch()
+	})
+
+	group := glib.SimpleActionNewStateful("group-sessions", nil, glib.VariantFromBoolean(w.app.grouped))
+	group.Connect("activate", func() { w.app.setGrouped(!w.app.grouped) })
+	m.AddAction(group)
+	w.groupAction = group
+
 	showSidebar := glib.SimpleActionNewStateful("show-sidebar", nil, glib.VariantFromBoolean(true))
 	showSidebar.Connect("activate", func() {
-		visible := !showSidebar.GetState().GetBoolean()
-		showSidebar.SetState(glib.VariantFromBoolean(visible))
-		w.sidebar.root.SetVisible(visible)
+		w.setSidebarVisible(!showSidebar.GetState().GetBoolean())
 	})
 	m.AddAction(showSidebar)
+	w.sidebarAction = showSidebar
+}
+
+// setSidebarVisible shows or hides the session list.
+func (w *Window) setSidebarVisible(visible bool) {
+	w.sidebarAction.SetState(glib.VariantFromBoolean(visible))
+	w.sidebar.root.SetVisible(visible)
+}
+
+// syncGroupAction shows the application's grouping setting on the window's toggle.
+func (w *Window) syncGroupAction() {
+	w.groupAction.SetState(glib.VariantFromBoolean(w.app.grouped))
 }
 
 // updateActionState enables the actions which make sense for the active pane.
@@ -291,29 +313,29 @@ func (w *Window) NewSession(p *Pane) {
 	w.app.requestPoll()
 }
 
-// cycleSession shows the next or previous session in the active pane.
+// cycleSession shows the next or previous session of the list in the active pane.
 func (w *Window) cycleSession(delta int) {
-	sessions := w.app.snapshot.Sessions
-	if len(sessions) == 0 {
+	ids := w.sidebar.visibleIDs()
+	if len(ids) == 0 {
 		return
 	}
 	current := -1
-	for i, s := range sessions {
-		if s.ID == w.activePane.SessionID() {
+	for i, id := range ids {
+		if id == w.activePane.SessionID() {
 			current = i
 		}
 	}
-	next := (current + delta + len(sessions)) % len(sessions)
+	next := (current + delta + len(ids)) % len(ids)
 	if current < 0 && delta < 0 {
-		next = len(sessions) - 1
+		next = len(ids) - 1
 	}
-	w.ShowSession(sessions[next].ID)
+	w.ShowSession(ids[next])
 }
 
 // switchToIndex shows the session at a position in the list.
 func (w *Window) switchToIndex(index int) {
-	if index < len(w.app.snapshot.Sessions) {
-		w.ShowSession(w.app.snapshot.Sessions[index].ID)
+	if ids := w.sidebar.visibleIDs(); index < len(ids) {
+		w.ShowSession(ids[index])
 	}
 }
 

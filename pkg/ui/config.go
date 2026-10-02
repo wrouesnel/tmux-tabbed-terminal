@@ -11,6 +11,7 @@ type Config struct {
 	Tmux       TmuxConfig       `yaml:"tmux"`
 	Appearance AppearanceConfig `yaml:"appearance"`
 	Activity   ActivityConfig   `yaml:"activity"`
+	Sidebar    SidebarConfig    `yaml:"sidebar"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
 }
 
@@ -66,6 +67,14 @@ type ActivityConfig struct {
 	Timeout time.Duration `yaml:"timeout"`
 }
 
+// SidebarConfig sets how the session list is arranged.
+type SidebarConfig struct {
+	// GroupByApplication groups sessions by the program running in their current window.
+	GroupByApplication bool `yaml:"group-by-application"`
+	// GroupHold is how long a session must run a new program before it changes group.
+	GroupHold time.Duration `yaml:"group-hold"`
+}
+
 // BehaviourConfig sets what the application does on its own.
 type BehaviourConfig struct {
 	// CreateSessionOnStart creates a session when a window opens and there are none.
@@ -83,6 +92,7 @@ const (
 	defaultActivityTimeout = 2 * time.Second
 	defaultSidebarWidth    = 220
 	defaultScrollback      = 1000
+	defaultGroupHold       = 3 * time.Second
 	// minPollInterval stops a bad config from spinning tmux processes continuously.
 	minPollInterval = 100 * time.Millisecond
 )
@@ -99,6 +109,10 @@ func DefaultConfig() Config {
 		Activity: ActivityConfig{
 			PollInterval: defaultPollInterval,
 			Timeout:      defaultActivityTimeout,
+		},
+		Sidebar: SidebarConfig{
+			GroupByApplication: true,
+			GroupHold:          defaultGroupHold,
 		},
 		Behaviour: BehaviourConfig{
 			CreateSessionOnStart: true,
