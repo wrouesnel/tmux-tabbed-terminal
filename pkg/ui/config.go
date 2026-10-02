@@ -13,6 +13,8 @@ type Config struct {
 	Activity   ActivityConfig   `yaml:"activity"`
 	Sidebar    SidebarConfig    `yaml:"sidebar"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
+	// Hosts are remote hosts whose sessions are listed, besides those added in the UI.
+	Hosts []HostConfig `yaml:"hosts"`
 }
 
 // TmuxConfig selects the tmux server.

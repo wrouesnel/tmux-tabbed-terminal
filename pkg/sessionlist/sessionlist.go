@@ -130,14 +130,18 @@ func groupLess(a, b string) bool {
 }
 
 // Matches reports whether a session matches a search. Every word of the query must
-// appear, ignoring case, in the session's name, its group, or the name or command of one
-// of its windows. An empty query matches everything.
-func Matches(s *tmux.Session, group string, query string) bool {
+// appear, ignoring case, in the session's name, the name or command of one of its
+// windows, or one of extra, such as its group and host. An empty query matches
+// everything.
+func Matches(s *tmux.Session, query string, extra ...string) bool {
 	words := strings.Fields(strings.ToLower(query))
 	if len(words) == 0 {
 		return true
 	}
-	haystack := []string{strings.ToLower(s.Name), strings.ToLower(group)}
+	haystack := []string{strings.ToLower(s.Name)}
+	for _, e := range extra {
+		haystack = append(haystack, strings.ToLower(e))
+	}
 	for _, w := range s.Windows {
 		haystack = append(haystack, strings.ToLower(w.Name), strings.ToLower(w.Command))
 	}

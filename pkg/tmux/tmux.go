@@ -20,9 +20,10 @@ import (
 // ErrNoSession is returned when a session that was asked for doesn't exist.
 var ErrNoSession = errors.New("no such tmux session")
 
-// fieldSep separates fields in format output. tmux escapes control characters in names
-// when printing them, so a tab can't appear inside a field.
-const fieldSep = "\t"
+// fieldSep separates fields in format output. It's printable ASCII because tmux replaces
+// control characters, such as tabs, with "_" when its locale isn't UTF-8, as is common
+// over ssh.
+const fieldSep = "^|^"
 
 // Client runs tmux commands against one tmux server.
 type Client struct {
@@ -32,6 +33,9 @@ type Client struct {
 	SocketName string
 	// SocketPath selects a server by socket path, as with tmux -S. It wins over SocketName.
 	SocketPath string
+	// SSH, if set, runs tmux on another host. Binary and the socket settings then apply
+	// to the remote tmux.
+	SSH *SSH
 }
 
 // NewClient returns a client for the default tmux server.
@@ -60,17 +64,35 @@ func (c *Client) binary() string {
 	return c.Binary
 }
 
-// Argv returns the full command line to run the given tmux command on this client's
-// server.
-func (c *Client) Argv(args ...string) []string {
-	argv := []string{c.binary()}
+// tmuxArgv returns the tmux command line, as run on the host with the server. -u makes
+// tmux use UTF-8 even when the locale doesn't say so, as over ssh without LANG.
+func (c *Client) tmuxArgv(args ...string) []string {
+	argv := []string{c.binary(), "-u"}
 	argv = append(argv, c.ServerArgs()...)
 	return append(argv, args...)
 }
 
-// AttachArgv returns the command line of a tmux client attached to session.
+// Argv returns the full command line to run the given tmux command on this client's
+// server: tmux itself, or ssh running it on the remote host.
+func (c *Client) Argv(args ...string) []string {
+	if c.SSH != nil {
+		return c.SSH.argv(false, c.tmuxArgv(args...))
+	}
+	return c.tmuxArgv(args...)
+}
+
+// AttachArgv returns the command line of a tmux client attached to session. For a remote
+// server it's an interactive ssh, so ssh can prompt in the terminal if it needs to.
 func (c *Client) AttachArgv(session string) []string {
-	return c.Argv("attach-session", "-t", session)
+	if c.SSH != nil {
+		return c.SSH.argv(true, c.tmuxArgv("attach-session", "-t", session))
+	}
+	return c.tmuxArgv("attach-session", "-t", session)
+}
+
+// Remote reports whether the server is on another host.
+func (c *Client) Remote() bool {
+	return c.SSH != nil
 }
 
 // Environ returns env without the variables which make tmux think it's running inside
@@ -88,6 +110,11 @@ func Environ(env []string) []string {
 
 // run runs a tmux command and returns its standard output.
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
+	if c.SSH != nil {
+		if err := c.SSH.ensureMaster(ctx); err != nil {
+			return "", err
+		}
+	}
 	argv := c.Argv(args...)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // the binary is configured by the user
 	cmd.Env = Environ(os.Environ())

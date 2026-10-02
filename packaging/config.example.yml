@@ -50,3 +50,11 @@ behaviour:
   new-session-directory: ""
   # Ask before killing a session.
   confirm-kill: true
+
+# Remote hosts whose sessions are listed, besides those added with "Add Host" (which are
+# saved to ~/.config/tmux-tabbed-terminal/hosts.yml). Each is reached with ssh.
+hosts: []
+#  - destination: buildbox
+#  - destination: admin@db.example.com
+#    ssh-options: ["-p", "2222"]
+#    socket-name: work

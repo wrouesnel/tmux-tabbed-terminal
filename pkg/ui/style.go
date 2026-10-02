@@ -51,6 +51,23 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-search {
 	margin: 6px;
 }
+.ttt-sidebar row.ttt-host {
+	padding: 8px 4px 4px 8px;
+}
+.ttt-host-name {
+	font-weight: bold;
+}
+.ttt-host-status {
+	font-size: smaller;
+}
+.ttt-host-error .ttt-host-status {
+	color: @error_color;
+}
+.ttt-host button {
+	min-height: 16px;
+	min-width: 16px;
+	padding: 0 2px;
+}
 .ttt-sidebar-toolbar {
 	padding: 2px;
 }

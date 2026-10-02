@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"strings"
@@ -50,6 +51,8 @@ type Pane struct {
 	reattachBtn   *gtk.Button
 	newSessionBtn *gtk.Button
 
+	// hostName and sessionID are the session shown, or last shown.
+	hostName  string
 	sessionID string
 	tty       string
 	cmd       *exec.Cmd
@@ -66,8 +69,13 @@ func (p *Pane) setParent(s *split)  { p.parent = s }
 func (p *Pane) leaves() []*Pane     { return []*Pane{p} }
 func (p *Pane) firstLeaf() *Pane    { return p }
 
-// SessionID returns the session the pane shows, or last showed.
-func (p *Pane) SessionID() string { return p.sessionID }
+// SessionKey returns the key of the session the pane shows, or last showed, or "".
+func (p *Pane) SessionKey() string {
+	if p.sessionID == "" {
+		return ""
+	}
+	return sessionKey(p.hostName, p.sessionID)
+}
 
 // Running reports whether the pane's tmux client is running.
 func (p *Pane) Running() bool { return p.running }
@@ -116,7 +124,7 @@ func newPane(w *Window) *Pane {
 		w.setActivePane(p)
 		return false
 	})
-	p.term.Connect("contents-changed", func() { w.app.requestPoll() })
+	p.term.Connect("contents-changed", func() { w.app.requestPoll(p.hostName) })
 	// After VTE's own handler, so a program using the mouse gets the click unless Shift
 	// is held, as in GNOME Terminal.
 	p.term.ConnectAfter("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
@@ -153,7 +161,7 @@ func (p *Pane) buildEmptyPage() gtk.IWidget {
 	buttons, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, paneSpacing)
 	buttons.SetHAlign(gtk.ALIGN_CENTER)
 	p.reattachBtn, _ = gtk.ButtonNewWithLabel("Reattach")
-	p.reattachBtn.Connect("clicked", func() { p.attach(p.sessionID) })
+	p.reattachBtn.Connect("clicked", func() { p.attach(p.SessionKey()) })
 	p.reattachBtn.Connect("focus-in-event", func() bool {
 		p.win.setActivePane(p)
 		return false
@@ -203,36 +211,50 @@ func (p *Pane) Focus() {
 	p.win.setActivePane(p)
 }
 
-// Show makes the pane show a session. A running client is switched to it, which keeps
-// the terminal and is quicker than starting a new client.
-func (p *Pane) Show(sessionID string) {
-	if p.running && p.tty != "" {
-		if p.sessionID == sessionID {
-			return
-		}
-		ctx, cancel := p.win.app.commandContext()
-		defer cancel()
-		err := p.win.app.client.SwitchClient(ctx, p.tty, sessionID)
-		if err == nil {
-			p.sessionID = sessionID
-			p.win.app.tracker.MarkSeen(sessionID)
-			p.win.refresh()
-			return
-		}
-		p.win.app.log.Debug("switch-client failed: starting a new client", zap.Error(err))
+// Show makes the pane show a session, by key. A running local client is switched to it
+// with switch-client, which keeps the terminal and is quicker than a new client. A remote
+// one is replaced: its tty is on the other host. The ssh master connection makes that
+// quick too.
+func (p *Pane) Show(key string) {
+	hostName, id := splitKey(key)
+	if p.running && p.SessionKey() == key {
+		return
 	}
-	p.attach(sessionID)
+	if p.running && p.tty != "" && hostName == LocalHost && p.hostName == LocalHost {
+		h := p.win.app.host(LocalHost)
+		tty := p.tty
+		generation := p.generation
+		runAsync(p.win.app, func(ctx context.Context) (struct{}, error) {
+			return struct{}{}, h.client.SwitchClient(ctx, tty, id)
+		}, func(_ struct{}, err error) {
+			if p.closed || generation != p.generation {
+				return
+			}
+			if err != nil {
+				p.win.app.log.Debug("switch-client failed: starting a new client", zap.Error(err))
+				p.attach(key)
+				return
+			}
+			p.sessionID = id
+			p.win.app.tracker.MarkSeen(key)
+			p.win.refresh()
+		})
+		return
+	}
+	p.attach(key)
 }
 
 // attach starts a tmux client for a session in the pane's terminal, replacing any
 // running one.
-func (p *Pane) attach(sessionID string) {
-	if sessionID == "" || p.closed {
+func (p *Pane) attach(key string) {
+	hostName, id := splitKey(key)
+	h := p.win.app.host(hostName)
+	if id == "" || h == nil || p.closed {
 		return
 	}
-	log := p.win.app.log.With(zap.String("session", sessionID))
+	log := p.win.app.log.With(zap.String("host", hostName), zap.String("session", id))
 
-	argv := p.win.app.client.AttachArgv(sessionID)
+	argv := h.client.AttachArgv(id)
 	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // the tmux binary is configured by the user
 	cmd.Env = terminalEnv(os.Environ())
 	if home, err := os.UserHomeDir(); err == nil {
@@ -251,8 +273,8 @@ func (p *Pane) attach(sessionID string) {
 	}
 	log.Debug("Started tmux client", zap.String("tty", tty), zap.Int("pid", cmd.Process.Pid))
 
-	p.cmd, p.tty, p.sessionID, p.running = cmd, tty, sessionID, true
-	p.win.app.tracker.MarkSeen(sessionID)
+	p.cmd, p.tty, p.hostName, p.sessionID, p.running = cmd, tty, hostName, id, true
+	p.win.app.tracker.MarkSeen(key)
 	p.stack.SetVisibleChildName(pageTerminal)
 	if p.win.activePane == p {
 		p.term.GrabFocus()
@@ -295,9 +317,10 @@ func (p *Pane) close() {
 	}
 }
 
-// syncSession follows a client which changed session inside tmux.
+// syncSession follows a local client which changed session inside tmux. Remote clients'
+// ttys are on the other host, so they can't be followed.
 func (p *Pane) syncSession(snap *tmux.Snapshot) {
-	if !p.running || p.tty == "" {
+	if !p.running || p.tty == "" || p.hostName != LocalHost {
 		return
 	}
 	if id := snap.ClientSession(p.tty); id != "" && id != p.sessionID {

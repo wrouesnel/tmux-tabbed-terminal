@@ -100,8 +100,9 @@ func TestMatches(t *testing.T) {
 		"zfs nothing":  false,
 		"kubernetes":   false,
 		"   bug   zfs": true,
+		"buildbox":     true,
 	} {
-		if got := sessionlist.Matches(&s, "claude", query); got != want {
+		if got := sessionlist.Matches(&s, query, "claude", "buildbox"); got != want {
 			t.Errorf("%q: got %v, want %v", query, got, want)
 		}
 	}

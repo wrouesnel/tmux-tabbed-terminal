@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -36,6 +37,8 @@ type Window struct {
 	sidebarAction *glib.SimpleAction
 	groupAction   *glib.SimpleAction
 	fullscreen    bool
+	// status replaces the title bar subtitle while something is in progress.
+	status string
 }
 
 func newWindow(app *App) *Window {
@@ -131,8 +134,9 @@ func (w *Window) installActions() {
 	add("prev-session", func() { w.cycleSession(-1) })
 	add("next-pane", func() { w.cyclePane(1) })
 	add("prev-pane", func() { w.cyclePane(-1) })
-	add("rename-session", func() { w.RenameSession(w.activePane.SessionID()) })
-	add("kill-session", func() { w.KillSession(w.activePane.SessionID()) })
+	add("rename-session", func() { w.RenameSession(w.activePane.SessionKey()) })
+	add("kill-session", func() { w.KillSession(w.activePane.SessionKey()) })
+	add("add-host", w.AddHostDialog)
 	add("fullscreen", w.toggleFullscreen)
 	add("close-window", func() { w.window.Close() })
 	for i := 1; i <= sessionShortcuts; i++ {
@@ -145,6 +149,8 @@ func (w *Window) installActions() {
 	addStr("session-split-down", func(id string) { w.OpenInSplit(id, gtk.ORIENTATION_VERTICAL) })
 	addStr("session-rename", w.RenameSession)
 	addStr("session-kill", w.KillSession)
+	addStr("host-new-session", func(host string) { w.NewSessionOn(w.activePane, host) })
+	addStr("host-remove", w.app.RemoveHost)
 
 	add("find-session", func() {
 		w.setSidebarVisible(true)
@@ -180,7 +186,8 @@ func (w *Window) updateActionState() {
 	p := w.activePane
 	w.actions["copy"].SetEnabled(p.running && p.term.HasSelection())
 	w.actions["paste"].SetEnabled(p.running)
-	hasSession := p.SessionID() != "" && w.app.snapshot.Session(p.SessionID()) != nil
+	_, s := w.app.lookup(p.SessionKey())
+	hasSession := s != nil
 	w.actions["rename-session"].SetEnabled(hasSession)
 	w.actions["kill-session"].SetEnabled(hasSession)
 }
@@ -245,51 +252,59 @@ func (w *Window) ClosePane(p *Pane) {
 
 // paneExited handles a pane whose tmux client stopped.
 func (w *Window) paneExited(p *Pane) {
-	id := p.SessionID()
-	// Read the sessions now: the last poll may not know a session made since.
-	ctx, cancel := w.app.commandContext()
-	snap, err := w.app.client.Snapshot(ctx)
-	cancel()
-	if err != nil {
-		w.app.log.Warn("Could not read tmux sessions", zap.Error(err))
-	} else {
-		w.app.applySnapshot(snap)
-	}
-
-	switch {
-	case w.app.snapshot.Session(id) != nil:
-		// The client detached, but the session is still there.
-		p.showEmpty("Detached", fmt.Sprintf("The session “%s” is still running.", w.sessionName(id)), true)
-	case len(w.panes()) > 1:
-		w.ClosePane(p)
+	key := p.SessionKey()
+	hostName, _ := splitKey(key)
+	h := w.app.host(hostName)
+	if h == nil {
+		p.showEmpty("Host removed", "The host of this session is no longer listed.", false)
+		w.refresh()
 		return
-	default:
-		// The session ended. Move on to another one, as tmux does with detach-on-destroy off.
-		if next := w.app.pickSession(w.app.visibleSessions()); next != "" && next != id {
-			p.attach(next)
-		} else {
-			p.showEmpty("No sessions", "There are no tmux sessions running.", false)
-		}
 	}
-	w.app.requestPoll()
-	w.refresh()
+	// Read the sessions now: the last poll may not know a session made since.
+	runAsync(w.app, h.client.Snapshot, func(snap *tmux.Snapshot, err error) {
+		if p.closed || p.running {
+			return
+		}
+		if err != nil {
+			w.app.log.Warn("Could not read tmux sessions", zap.String("host", h.Name), zap.Error(err))
+		}
+		w.app.applySnapshot(h, snap, err)
+
+		_, s := w.app.lookup(key)
+		switch {
+		case s != nil:
+			// The client detached, but the session is still there.
+			p.showEmpty("Detached", fmt.Sprintf("The session “%s” is still running.", w.app.sessionName(key)), true)
+		case err != nil:
+			p.showEmpty("Disconnected", fmt.Sprintf("Could not reach %s: %v", h.Name, err), true)
+		case len(w.panes()) > 1:
+			w.ClosePane(p)
+			return
+		default:
+			// The session ended. Move on to another one, as tmux does with detach-on-destroy off.
+			if next := w.app.pickSession(w.app.visibleSessions()); next != "" && next != key {
+				p.attach(next)
+			} else {
+				p.showEmpty("No sessions", "There are no tmux sessions running.", false)
+			}
+		}
+		w.refresh()
+	})
 }
 
-// sessionName returns the name of a session, or its ID if it isn't known.
-func (w *Window) sessionName(id string) string {
-	if s := w.app.snapshot.Session(id); s != nil {
-		return s.Name
-	}
-	return id
-}
-
-// newSessionDir returns the directory for a new session: that of the active pane's
-// session if known, so a new session opens where the user is working.
-func (w *Window) newSessionDir() string {
-	if s := w.app.snapshot.Session(w.activePane.SessionID()); s != nil {
-		if aw := s.ActiveWindow(); aw != nil && aw.Path != "" {
-			return aw.Path
+// newSessionDir returns the directory for a new session on a host: that of the active
+// pane's session if it's on the same host, so a new session opens where the user is
+// working. Remote sessions otherwise start in the remote home directory.
+func (w *Window) newSessionDir(hostName string) string {
+	if p := w.activePane; p.hostName == hostName {
+		if _, s := w.app.lookup(p.SessionKey()); s != nil {
+			if aw := s.ActiveWindow(); aw != nil && aw.Path != "" {
+				return aw.Path
+			}
 		}
+	}
+	if hostName != LocalHost {
+		return ""
 	}
 	if dir := w.app.cfg.Behaviour.NewSessionDirectory; dir != "" {
 		return os.ExpandEnv(dir)
@@ -298,19 +313,38 @@ func (w *Window) newSessionDir() string {
 	return home
 }
 
-// NewSession creates a session and shows it in a pane.
+// NewSession creates a session and shows it in a pane. It goes on the host of the
+// session the pane last showed, or this machine.
 func (w *Window) NewSession(p *Pane) {
-	ctx, cancel := w.app.commandContext()
-	defer cancel()
-	id, err := w.app.client.NewSession(ctx, "", w.newSessionDir())
-	if err != nil {
-		w.app.log.Error("Could not create tmux session", zap.Error(err))
-		w.showError("Could not create a tmux session", err.Error())
+	hostName := p.hostName
+	if hostName == "" || w.app.host(hostName) == nil {
+		hostName = LocalHost
+	}
+	w.NewSessionOn(p, hostName)
+}
+
+// NewSessionOn creates a session on a host and shows it in a pane.
+func (w *Window) NewSessionOn(p *Pane, hostName string) {
+	h := w.app.host(hostName)
+	if h == nil {
 		return
 	}
-	p.Show(id)
-	p.Focus()
-	w.app.requestPoll()
+	dir := w.newSessionDir(hostName)
+	runAsync(w.app, func(ctx context.Context) (string, error) {
+		return h.client.NewSession(ctx, "", dir)
+	}, func(id string, err error) {
+		if err != nil {
+			w.app.log.Error("Could not create tmux session", zap.String("host", hostName), zap.Error(err))
+			w.showError("Could not create a tmux session on "+hostName, err.Error())
+			return
+		}
+		if p.closed {
+			return
+		}
+		p.Show(sessionKey(hostName, id))
+		p.Focus()
+		h.requestPoll()
+	})
 }
 
 // cycleSession shows the next or previous session of the list in the active pane.
@@ -321,7 +355,7 @@ func (w *Window) cycleSession(delta int) {
 	}
 	current := -1
 	for i, id := range ids {
-		if id == w.activePane.SessionID() {
+		if id == w.activePane.SessionKey() {
 			current = i
 		}
 	}
@@ -361,44 +395,55 @@ func (w *Window) toggleFullscreen() {
 
 // refresh redraws the window from the application's current state.
 func (w *Window) refresh() {
-	snap := w.app.snapshot
 	panes := w.panes()
 	split := len(panes) > 1
 
 	shown := map[string]bool{}
 	for _, p := range panes {
 		if p.running {
-			shown[p.SessionID()] = true
+			shown[p.SessionKey()] = true
 		}
 	}
 	selected := ""
 	if w.activePane.running {
-		selected = w.activePane.SessionID()
+		selected = w.activePane.SessionKey()
 	}
-	w.sidebar.update(snap, w.app.tracker, shown, selected, w.app.ownTTYs())
+	w.sidebar.update(shown, selected)
 
 	now := timeNow()
 	for _, p := range panes {
 		name := "Empty"
 		busy := false
 		if p.running {
-			name = w.sessionName(p.SessionID())
-			busy = w.app.tracker.State(p.SessionID(), now).Active
+			name = w.app.sessionName(p.SessionKey())
+			busy = w.app.tracker.State(p.SessionKey(), now).Active
 		}
 		p.updateHeader(name, busy, split)
 	}
 
 	title, subtitle := version.Name, ""
-	if s := snap.Session(selected); s != nil {
+	if h, s := w.app.lookup(selected); s != nil {
 		title = s.Name
 		if aw := s.ActiveWindow(); aw != nil {
 			subtitle = windowSubtitle(aw)
 		}
+		if !h.Local() {
+			subtitle = h.Name + " · " + subtitle
+		}
+	}
+	if w.status != "" {
+		subtitle = w.status
 	}
 	w.header.SetTitle(title)
 	w.header.SetSubtitle(subtitle)
 	w.window.SetTitle(title)
 	w.updateActionState()
+}
+
+// setStatus shows a message in the title bar until it's cleared with "".
+func (w *Window) setStatus(msg string) {
+	w.status = msg
+	w.refresh()
 }
 
 // windowSubtitle describes a tmux window for the title bar.
@@ -416,11 +461,13 @@ func (w *Window) destroyed() {
 	}
 }
 
-// RenameSession asks for a new name for a session.
-func (w *Window) RenameSession(id string) {
-	if id == "" {
+// RenameSession asks for a new name for a session, by key.
+func (w *Window) RenameSession(key string) {
+	h, sess := w.app.lookup(key)
+	if sess == nil {
 		return
 	}
+	id := sess.ID
 	dlg, err := gtk.DialogNewWithButtons("Rename Session", w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT|
 		gtk.DIALOG_USE_HEADER_BAR,
 		[]interface{}{"_Cancel", gtk.RESPONSE_CANCEL},
@@ -435,14 +482,10 @@ func (w *Window) RenameSession(id string) {
 	}
 
 	entry, _ := gtk.EntryNew()
-	entry.SetText(w.sessionName(id))
+	entry.SetText(sess.Name)
 	entry.SetActivatesDefault(true)
-	entry.SetMarginStart(12)  //nolint:mnd // dialog padding
-	entry.SetMarginEnd(12)    //nolint:mnd
-	entry.SetMarginTop(12)    //nolint:mnd
-	entry.SetMarginBottom(12) //nolint:mnd
 	content, _ := dlg.GetContentArea()
-	content.PackStart(entry, true, true, 0)
+	content.PackStart(padded(entry), true, true, 0)
 	dlg.ShowAll()
 
 	if dlg.Run() != gtk.RESPONSE_ACCEPT {
@@ -452,22 +495,26 @@ func (w *Window) RenameSession(id string) {
 	if name == "" {
 		return
 	}
-	ctx, cancel := w.app.commandContext()
-	defer cancel()
-	if err := w.app.client.RenameSession(ctx, id, name); err != nil {
-		w.showError("Could not rename the session", err.Error())
-	}
-	w.app.requestPoll()
+	runAsync(w.app, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, h.client.RenameSession(ctx, id, name)
+	}, func(_ struct{}, err error) {
+		if err != nil {
+			w.showError("Could not rename the session", err.Error())
+		}
+		h.requestPoll()
+	})
 }
 
-// KillSession destroys a session, after confirming if configured to.
-func (w *Window) KillSession(id string) {
-	if id == "" {
+// KillSession destroys a session, by key, after confirming if configured to.
+func (w *Window) KillSession(key string) {
+	h, sess := w.app.lookup(key)
+	if sess == nil {
 		return
 	}
+	id := sess.ID
 	if w.app.cfg.Behaviour.ConfirmKill {
 		dlg := gtk.MessageDialogNew(w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
-			gtk.MESSAGE_WARNING, gtk.BUTTONS_NONE, "Kill session “%s”?", w.sessionName(id))
+			gtk.MESSAGE_WARNING, gtk.BUTTONS_NONE, "Kill session “%s”?", w.app.sessionName(key))
 		dlg.FormatSecondaryText("All programs running in the session will be terminated.")
 		_, _ = dlg.AddButton("_Cancel", gtk.RESPONSE_CANCEL)
 		killBtn, _ := dlg.AddButton("_Kill Session", gtk.RESPONSE_ACCEPT)
@@ -479,12 +526,67 @@ func (w *Window) KillSession(id string) {
 			return
 		}
 	}
-	ctx, cancel := w.app.commandContext()
-	defer cancel()
-	if err := w.app.client.KillSession(ctx, id); err != nil {
-		w.showError("Could not kill the session", err.Error())
+	runAsync(w.app, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, h.client.KillSession(ctx, id)
+	}, func(_ struct{}, err error) {
+		if err != nil {
+			w.showError("Could not kill the session", err.Error())
+		}
+		h.requestPoll()
+	})
+}
+
+// AddHostDialog asks for a host to list sessions from.
+func (w *Window) AddHostDialog() {
+	dlg, err := gtk.DialogNewWithButtons("Add Host", w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT|
+		gtk.DIALOG_USE_HEADER_BAR,
+		[]interface{}{"_Cancel", gtk.RESPONSE_CANCEL},
+		[]interface{}{"_Add", gtk.RESPONSE_ACCEPT})
+	if err != nil {
+		return
 	}
-	w.app.requestPoll()
+	defer dlg.Destroy()
+	dlg.SetDefaultResponse(gtk.RESPONSE_ACCEPT)
+	if btn, err := dlg.GetWidgetForResponse(gtk.RESPONSE_ACCEPT); err == nil {
+		addClass(btn.ToWidget(), "suggested-action")
+	}
+
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, paneSpacing)
+	entry, _ := gtk.EntryNew()
+	entry.SetPlaceholderText("user@example.com")
+	entry.SetActivatesDefault(true)
+	entry.SetWidthChars(36) //nolint:mnd // room for a typical user@host
+	hint, _ := gtk.LabelNew("An ssh destination or ~/.ssh/config alias. The host needs key or " +
+		"agent authentication, and tmux installed.")
+	hint.SetLineWrap(true)
+	hint.SetMaxWidthChars(48) //nolint:mnd // dialog width
+	hint.SetXAlign(0)
+	addClass(hint, "dim-label")
+	box.PackStart(entry, false, false, 0)
+	box.PackStart(hint, false, false, 0)
+	content, _ := dlg.GetContentArea()
+	content.PackStart(padded(box), true, true, 0)
+	dlg.ShowAll()
+
+	if dlg.Run() != gtk.RESPONSE_ACCEPT {
+		return
+	}
+	destination, _ := entry.GetText()
+	w.app.AddHost(destination, w)
+}
+
+// dialogPadding is the margin around dialog content.
+const dialogPadding = 12
+
+// padded gives a dialog's content its margin.
+func padded(widget gtk.IWidget) gtk.IWidget {
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	box.SetMarginStart(dialogPadding)
+	box.SetMarginEnd(dialogPadding)
+	box.SetMarginTop(dialogPadding)
+	box.SetMarginBottom(dialogPadding)
+	box.PackStart(widget, true, true, 0)
+	return box
 }
 
 // showError shows an error dialog.

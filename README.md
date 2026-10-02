@@ -9,6 +9,9 @@ or split the window to watch several sessions side by side.
 * **Session list.** Every session on your tmux server, in tmux's order, with what its
   current window is running. Sessions made or killed outside the app show up within a
   second.
+* **Other hosts.** "Add Host" under the list connects to another machine over ssh and
+  lists its tmux sessions under its own heading, below this machine's ("local"). Remote
+  sessions open in panes like local ones.
 * **Grouping and search.** Sessions are grouped by the program running in their current
   window, so all your `claude` sessions sit together (toggle it under the list). The
   search box at the top filters by session name, program or window name.
@@ -100,6 +103,31 @@ activity:
   timeout: 2s              # how long a session shows as busy after output stops
 ```
 
+## Remote hosts
+
+"Add Host" takes an ssh destination: `user@host`, or an alias from `~/.ssh/config`, which
+is the place for ports, jump hosts and keys. The host needs tmux installed, and key or
+agent authentication: the session list is polled in the background with ssh's
+`BatchMode`, so it can't prompt for a password. If ssh has never seen the host's key,
+connect to it once by hand to accept it.
+
+All commands to a host share one ssh master connection (`ControlMaster`), started on first
+use and kept for 10 minutes after the last. Its socket is under
+`$XDG_RUNTIME_DIR/tmux-tabbed-terminal/`. Hosts added in the UI are saved to
+`~/.config/tmux-tabbed-terminal/hosts.yml`, and the configuration file's `hosts:` key can
+list more:
+
+```yaml
+hosts:
+  - destination: buildbox
+  - destination: admin@db.example.com
+    ssh-options: ["-p", "2222"]
+    socket-name: work      # a tmux server other than the default, as with tmux -L
+```
+
+The host's ⋯ menu creates a session there or removes the host. Removing a host leaves
+panes already attached to its sessions running.
+
 ## Building
 
 Building needs Go, the GTK3 and VTE development headers, and tmux for the tests. On Ubuntu:
@@ -157,14 +185,14 @@ One-time setup:
 | `pkg/entrypoints/tmux_tabbed_terminal` | Command line, logging, configuration loading, and the `run` and `config` commands. |
 | `pkg/ui` | The GTK3 interface: application, windows, sidebar, pane split tree, terminal panes, appearance and menus. |
 | `pkg/vte` | cgo bindings for the parts of VTE the UI uses. |
-| `pkg/tmux` | Runs tmux commands and parses their format output into snapshots of sessions, windows and clients. |
+| `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
 | `pkg/sessionlist` | Groups sessions by application, orders and filters the session list. |
 | `pkg/activity` | Decides which sessions are busy or have unseen output, from successive snapshots. |
 | `pkg/theme` | Color parsing and GNOME Terminal's built-in palettes. |
 | `packaging/` | Desktop entry, icon, AppStream metadata and example configuration for the package. |
 | `magefile.go`, `magefile_deb.go` | The build system, plus the Debian package and APT repository targets. |
 
-A background goroutine polls tmux once per `poll-interval` with one command that lists
+Each host has a background goroutine which polls its tmux server once per `poll-interval` with one command that lists
 sessions, windows and clients. It polls sooner when a visible terminal shows output. Each
 snapshot is handed to the GTK main loop, which updates the session list, the activity
 indicators, and which session each pane shows (a client can change session inside tmux,

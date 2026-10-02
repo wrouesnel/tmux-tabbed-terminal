@@ -9,6 +9,7 @@ import (
 	"context"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/gotk3/gotk3/gdk"
@@ -56,21 +57,22 @@ type App struct {
 	ctx     context.Context
 	log     *zap.Logger
 	cfg     Config
-	client  *tmux.Client
 	gtkApp  *gtk.Application
 	tracker *activity.Tracker
 	grouper *sessionlist.Grouper
-	// groups maps session IDs to their application group.
+	// groups maps session keys to their application group.
 	groups map[string]string
 	// grouped is whether session lists are grouped by application.
 	grouped bool
 
+	// hosts are the tmux servers listed, the local one first.
+	hosts []*Host
+	// pollCtx stops every host's poller when the application shuts down.
+	pollCtx context.Context
+
 	appearance  *Appearance
 	terminalCSS *gtk.CssProvider
-	snapshot    *tmux.Snapshot
 	windows     map[*Window]struct{}
-
-	kick chan struct{}
 }
 
 // Run runs the application until its last window closes or ctx is cancelled.
@@ -92,28 +94,23 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		return errors.Wrap(err, "creating GTK application")
 	}
 
-	app := &App{
-		ctx:      ctx,
-		log:      logutil.FromCtx(ctx),
-		cfg:      cfg,
-		client:   cfg.Tmux.Client(),
-		gtkApp:   gtkApp,
-		tracker:  activity.NewTracker(cfg.Activity.Timeout),
-		grouper:  sessionlist.NewGrouper(cfg.Sidebar.GroupHold),
-		groups:   map[string]string{},
-		grouped:  cfg.Sidebar.GroupByApplication,
-		snapshot: &tmux.Snapshot{},
-		windows:  map[*Window]struct{}{},
-		kick:     make(chan struct{}, 1),
-	}
-
 	pollCtx, stopPolling := context.WithCancel(ctx)
 	defer stopPolling()
 
-	gtkApp.Connect("startup", func() {
-		app.startup()
-		go app.pollLoop(pollCtx)
-	})
+	app := &App{
+		ctx:     ctx,
+		log:     logutil.FromCtx(ctx),
+		cfg:     cfg,
+		gtkApp:  gtkApp,
+		tracker: activity.NewTracker(cfg.Activity.Timeout),
+		grouper: sessionlist.NewGrouper(cfg.Sidebar.GroupHold),
+		groups:  map[string]string{},
+		grouped: cfg.Sidebar.GroupByApplication,
+		pollCtx: pollCtx,
+		windows: map[*Window]struct{}{},
+	}
+
+	gtkApp.Connect("startup", app.startup)
 	gtkApp.Connect("activate", func() { app.NewWindow() })
 	gtkApp.Connect("shutdown", stopPolling)
 
@@ -144,14 +141,139 @@ func (a *App) startup() {
 	}
 	a.installActions()
 
-	// Fill the session list before the first window opens.
+	// Fill the local session list before the first window opens. Remote hosts fill in as
+	// their first polls come back.
+	local := newHost(LocalHost, HostConfig{}, a.cfg.Tmux.Client())
 	ctx, cancel := a.commandContext()
 	defer cancel()
-	if snap, err := a.client.Snapshot(ctx); err == nil {
-		a.snapshot = snap
-		a.updateGroups()
+	if snap, err := local.client.Snapshot(ctx); err == nil {
+		local.snapshot, local.polled = snap, true
 	} else {
 		a.log.Warn("Could not read tmux sessions", zap.Error(err))
+	}
+	a.startHost(local)
+
+	saved, err := loadHosts(hostsFile())
+	if err != nil {
+		a.log.Warn("Could not read saved hosts", zap.Error(err))
+	}
+	for _, cfg := range append(append([]HostConfig{}, a.cfg.Hosts...), saved...) {
+		if cfg.Destination != "" && a.host(cfg.Destination) == nil {
+			a.startHost(newHost(cfg.Destination, cfg, remoteClient(cfg)))
+		}
+	}
+	a.updateGroups()
+}
+
+// startHost adds a host to the list and starts polling it.
+func (a *App) startHost(h *Host) {
+	ctx, cancel := context.WithCancel(a.pollCtx)
+	h.cancel = cancel
+	a.hosts = append(a.hosts, h)
+	go a.pollHost(ctx, h)
+}
+
+// host returns the host with a name, or nil.
+func (a *App) host(name string) *Host {
+	for _, h := range a.hosts {
+		if h.Name == name {
+			return h
+		}
+	}
+	return nil
+}
+
+// lookup returns the host and session of a session key. Either is nil if it's gone.
+func (a *App) lookup(key string) (*Host, *tmux.Session) {
+	name, id := splitKey(key)
+	h := a.host(name)
+	if h == nil {
+		return nil, nil
+	}
+	return h, h.snapshot.Session(id)
+}
+
+// sessionName returns a session's name, with its host if it's remote.
+func (a *App) sessionName(key string) string {
+	h, s := a.lookup(key)
+	_, id := splitKey(key)
+	name := id
+	if s != nil {
+		name = s.Name
+	}
+	if h != nil && !h.Local() {
+		return name + " (" + h.Name + ")"
+	}
+	return name
+}
+
+// AddHost lists a remote host's sessions. It checks that tmux on the host can be reached
+// before adding it, and saves it for next time.
+func (a *App) AddHost(destination string, parent *Window) {
+	destination = strings.TrimSpace(destination)
+	if destination == "" {
+		return
+	}
+	if a.host(destination) != nil {
+		parent.showError("Host already added", destination+" is already in the list.")
+		return
+	}
+	cfg := HostConfig{Destination: destination}
+	h := newHost(destination, cfg, remoteClient(cfg))
+	parent.setStatus("Connecting to " + destination + "…")
+	runAsync(a, h.client.Snapshot, func(snap *tmux.Snapshot, err error) {
+		parent.setStatus("")
+		if err != nil {
+			parent.showError("Could not reach tmux on "+destination,
+				err.Error()+"\n\nThe host needs key or agent authentication for ssh, and tmux installed.")
+			return
+		}
+		if a.host(destination) != nil {
+			return
+		}
+		h.snapshot, h.polled = snap, true
+		a.startHost(h)
+		a.saveHosts()
+		a.updateGroups()
+		a.refreshAll()
+	})
+}
+
+// RemoveHost stops listing a remote host. Panes attached to it keep running.
+func (a *App) RemoveHost(name string) {
+	for i, h := range a.hosts {
+		if h.Name == name && !h.Local() {
+			h.cancel()
+			a.hosts = append(a.hosts[:i], a.hosts[i+1:]...)
+			a.saveHosts()
+			a.updateGroups()
+			a.refreshAll()
+			return
+		}
+	}
+}
+
+// saveHosts writes the remote hosts not already in the configuration file.
+func (a *App) saveHosts() {
+	inConfig := map[string]bool{}
+	for _, cfg := range a.cfg.Hosts {
+		inConfig[cfg.Destination] = true
+	}
+	saved := []HostConfig{}
+	for _, h := range a.hosts {
+		if !h.Local() && !inConfig[h.Name] {
+			saved = append(saved, h.Config)
+		}
+	}
+	if err := saveHosts(hostsFile(), saved); err != nil {
+		a.log.Error("Could not save hosts", zap.Error(err))
+	}
+}
+
+// refreshAll redraws every window.
+func (a *App) refreshAll() {
+	for w := range a.windows {
+		w.refresh()
 	}
 }
 
@@ -179,18 +301,22 @@ func (a *App) NewWindow() *Window {
 	return w
 }
 
-// pickSession returns the session with the latest activity, preferring ones not in
-// exclude. It returns "" if there are no sessions.
+// pickSession returns the key of the local session with the latest activity, preferring
+// ones not in exclude. It returns "" if there are none.
 func (a *App) pickSession(exclude map[string]bool) string {
+	local := a.host(LocalHost)
+	if local == nil {
+		return ""
+	}
 	best, bestHidden := "", ""
 	var bestTime, bestHiddenTime time.Time
-	for _, s := range a.snapshot.Sessions {
-		act := s.Activity()
+	for _, s := range local.snapshot.Sessions {
+		key, act := sessionKey(LocalHost, s.ID), s.Activity()
 		if best == "" || act.After(bestTime) {
-			best, bestTime = s.ID, act
+			best, bestTime = key, act
 		}
-		if !exclude[s.ID] && (bestHidden == "" || act.After(bestHiddenTime)) {
-			bestHidden, bestHiddenTime = s.ID, act
+		if !exclude[key] && (bestHidden == "" || act.After(bestHiddenTime)) {
+			bestHidden, bestHiddenTime = key, act
 		}
 	}
 	if bestHidden != "" {
@@ -199,73 +325,32 @@ func (a *App) pickSession(exclude map[string]bool) string {
 	return best
 }
 
-// requestPoll asks for a snapshot soon, as when a terminal shows new output.
-func (a *App) requestPoll() {
-	select {
-	case a.kick <- struct{}{}:
-	default:
+// requestPoll asks a host for a snapshot soon, as when a terminal shows new output.
+func (a *App) requestPoll(hostName string) {
+	if h := a.host(hostName); h != nil {
+		h.requestPoll()
 	}
 }
 
-// pollLoop reads the tmux state at the poll interval, and when asked to, and hands it to
-// the main loop.
-func (a *App) pollLoop(ctx context.Context) {
-	ticker := time.NewTicker(a.cfg.Activity.PollInterval)
-	defer ticker.Stop()
-	var last time.Time
-	var lastErr string
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		case <-a.kick:
-			if wait := minKickInterval - time.Since(last); wait > 0 {
-				select {
-				case <-ctx.Done():
-					return
-				case <-time.After(wait):
-				}
-			}
-		}
-		last = time.Now()
-
-		cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
-		snap, err := a.client.Snapshot(cmdCtx)
-		cancel()
-		if err != nil {
-			// Log a persistent error once, not on every poll.
-			if err.Error() != lastErr && ctx.Err() == nil {
-				a.log.Warn("Could not read tmux sessions", zap.Error(err))
-			}
-			lastErr = err.Error()
-			continue
-		}
-		lastErr = ""
-		glib.IdleAdd(func() { a.applySnapshot(snap) })
-	}
-}
-
-// visibleSessions returns the sessions shown in any pane of any window.
+// visibleSessions returns the keys of the sessions shown in any pane of any window.
 func (a *App) visibleSessions() map[string]bool {
 	visible := map[string]bool{}
 	for w := range a.windows {
 		for _, p := range w.panes() {
 			if p.Running() {
-				visible[p.SessionID()] = true
+				visible[p.SessionKey()] = true
 			}
 		}
 	}
 	return visible
 }
 
-// ownTTYs returns the ttys of this application's tmux clients.
+// ownTTYs returns the ttys of this application's local tmux clients.
 func (a *App) ownTTYs() map[string]bool {
 	ttys := map[string]bool{}
 	for w := range a.windows {
 		for _, p := range w.panes() {
-			if p.tty != "" {
+			if p.tty != "" && p.hostName == LocalHost {
 				ttys[p.tty] = true
 			}
 		}
@@ -273,44 +358,77 @@ func (a *App) ownTTYs() map[string]bool {
 	return ttys
 }
 
-// applySnapshot updates every window from new tmux state.
-func (a *App) applySnapshot(snap *tmux.Snapshot) {
-	a.snapshot = snap
-
-	// A client may have switched session inside tmux.
+// ownClients counts this application's panes attached to each session.
+func (a *App) ownClients() map[string]int {
+	counts := map[string]int{}
 	for w := range a.windows {
 		for _, p := range w.panes() {
-			p.syncSession(snap)
+			if p.Running() {
+				counts[p.SessionKey()]++
+			}
+		}
+	}
+	return counts
+}
+
+// applySnapshot records a host's new state, or why it couldn't be read, and updates
+// every window.
+func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
+	if a.host(h.Name) != h {
+		// The host was removed while the poll ran.
+		return
+	}
+	h.polled, h.err = true, err
+	if err != nil {
+		// The sessions can't be reached, so don't offer them.
+		snap = &tmux.Snapshot{}
+	}
+	h.snapshot = snap
+
+	// A local client may have switched session inside tmux.
+	if h.Local() {
+		for w := range a.windows {
+			for _, p := range w.panes() {
+				p.syncSession(snap)
+			}
 		}
 	}
 
 	visible := a.visibleSessions()
 	now := time.Now()
-	ids := map[string]bool{}
-	for i := range snap.Sessions {
-		s := &snap.Sessions[i]
-		ids[s.ID] = true
-		a.tracker.Observe(s.ID, s.Activity(), visible[s.ID], now)
+	keys := map[string]bool{}
+	for _, host := range a.hosts {
+		for i := range host.snapshot.Sessions {
+			s := &host.snapshot.Sessions[i]
+			key := sessionKey(host.Name, s.ID)
+			keys[key] = true
+			if host == h {
+				a.tracker.Observe(key, s.Activity(), visible[key], now)
+			}
+		}
 	}
-	a.tracker.Retain(ids)
+	a.tracker.Retain(keys)
 	a.updateGroups()
-
-	for w := range a.windows {
-		w.refresh()
-	}
+	a.refreshAll()
 }
 
-// updateGroups assigns each session in the snapshot to its application group.
+// updateGroups assigns every session to its application group.
 func (a *App) updateGroups() {
 	now := time.Now()
-	groups := make(map[string]string, len(a.snapshot.Sessions))
-	ids := map[string]bool{}
-	for i := range a.snapshot.Sessions {
-		s := &a.snapshot.Sessions[i]
-		groups[s.ID] = a.grouper.Group(s, now)
-		ids[s.ID] = true
+	groups := map[string]string{}
+	keys := map[string]bool{}
+	for _, h := range a.hosts {
+		for i := range h.snapshot.Sessions {
+			s := &h.snapshot.Sessions[i]
+			key := sessionKey(h.Name, s.ID)
+			// The grouper remembers sessions by ID: give it the key instead.
+			keyed := *s
+			keyed.ID = key
+			groups[key] = a.grouper.Group(&keyed, now)
+			keys[key] = true
+		}
 	}
-	a.grouper.Retain(ids)
+	a.grouper.Retain(keys)
 	a.groups = groups
 }
 

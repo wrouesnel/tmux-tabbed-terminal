@@ -195,7 +195,12 @@ func themeColors(w *gtk.Widget) (theme.Color, theme.Color) {
 	if err != nil {
 		return fg, bg
 	}
-	if c := ctx.GetColor(ctx.GetState()); c != nil {
+	// The theme's named colors don't depend on where the widget is, so they're right
+	// even for a widget not yet in a window. Its own color is the fallback.
+	if c, ok := ctx.LookupColor("theme_text_color"); ok {
+		f := c.Floats()
+		fg = theme.Color{R: f[0], G: f[1], B: f[2], A: f[3]}
+	} else if c := ctx.GetColor(ctx.GetState()); c != nil {
 		f := c.Floats()
 		fg = theme.Color{R: f[0], G: f[1], B: f[2], A: f[3]}
 	}

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -94,13 +96,13 @@ func TestSessionLifecycle(t *testing.T) {
 }
 
 func TestParseSnapshot(t *testing.T) {
-	out := "S\t$1\tmain\t100\t1\n" +
-		"S\t$2\tother\t200\t0\n" +
-		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\ttitle\twith tab\n" +
-		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t\n" +
-		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t\n" +
-		"C\t/dev/pts/4\t$1\n" +
-		"garbage\n"
+	out := strings.ReplaceAll("S\t$1\tmain\t100\t1\n"+
+		"S\t$2\tother\t200\t0\n"+
+		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\ttitle\twith sep\n"+
+		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t\n"+
+		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t\n"+
+		"C\t/dev/pts/4\t$1\n"+
+		"garbage\n", "\t", "^|^")
 	snap := tmux.ParseSnapshot(out)
 	if len(snap.Sessions) != 2 {
 		t.Fatalf("got %d sessions, want 2", len(snap.Sessions))
@@ -115,7 +117,7 @@ func TestParseSnapshot(t *testing.T) {
 	if got := main.ActiveWindow().Path; got != "/src" {
 		t.Errorf("path: got %q, want /src", got)
 	}
-	if got := main.ActiveWindow().Title; got != "title\twith tab" {
+	if got := main.ActiveWindow().Title; got != "title^|^with sep" {
 		t.Errorf("title: got %q", got)
 	}
 	if got := main.Activity().Unix(); got != 300 {
@@ -134,5 +136,66 @@ func TestEnviron(t *testing.T) {
 	want := []string{"HOME=/h", "TMUXP=keep"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestShellQuote(t *testing.T) {
+	cases := map[string]string{
+		"":              "''",
+		"list-sessions": "list-sessions",
+		"$1":            "'$1'",
+		";":             "';'",
+		"#{session_id}": "'#{session_id}'",
+		"it's":          `'it'\''s'`,
+		"a\tb":          "'a\tb'",
+	}
+	for in, want := range cases {
+		if got := tmux.ShellQuote(in); got != want {
+			t.Errorf("%q: got %s, want %s", in, got, want)
+		}
+	}
+}
+
+// TestRemoteThroughSSH runs a session lifecycle through the ssh code path, with a fake ssh
+// that runs the remote command through a local shell. That checks the remote command
+// survives the remote shell's parsing.
+func TestRemoteThroughSSH(t *testing.T) {
+	ctx := context.Background()
+	local := newTestClient(t)
+	fake, err := filepath.Abs("testdata/fake-ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote := &tmux.Client{
+		Binary:     "tmux",
+		SocketName: local.SocketName,
+		SSH:        &tmux.SSH{Destination: "test-host", Binary: fake, ControlDir: t.TempDir()},
+	}
+	if !remote.Remote() {
+		t.Fatal("client with SSH is not remote")
+	}
+
+	snap, err := remote.Snapshot(ctx)
+	if err != nil || len(snap.Sessions) != 0 {
+		t.Fatalf("Snapshot before start: %+v, %v", snap, err)
+	}
+	id, err := remote.NewSession(ctx, "it's remote", "")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	snap, err = remote.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if s := snap.Session(id); s == nil || s.Name != "it's remote" || len(s.Windows) != 1 {
+		t.Fatalf("session through ssh: %+v", snap)
+	}
+	if err := remote.KillSession(ctx, id); err != nil {
+		t.Fatalf("KillSession: %v", err)
+	}
+
+	argv := remote.AttachArgv("$7")
+	if argv[0] != fake || argv[1] != "-t" || argv[len(argv)-1] != "tmux -u -L "+local.SocketName+" attach-session -t '$7'" {
+		t.Fatalf("attach argv: %q", argv)
 	}
 }

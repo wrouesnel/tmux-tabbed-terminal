@@ -1,0 +1,13 @@
+#!/bin/sh
+# Stands in for ssh in tests: drops ssh's options and runs the remote command locally,
+# through a shell as sshd would.
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--) shift; break ;;
+	-o|-p|-l|-i|-F|-O) shift 2 ;;
+	*) shift ;;
+	esac
+done
+# $1 is the destination; the rest is the remote command.
+shift
+exec sh -c "$*"
