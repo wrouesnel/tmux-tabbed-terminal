@@ -53,10 +53,13 @@ is skipped. Set `SKIP_WEB=1` to skip it regardless.
 
 ## Packaging
 
-Packages target Ubuntu noble. `go run mage.go deb <os-arch>` builds the `.deb` from
-`packaging/`, and takes its library dependencies from `dpkg-shlibdeps`, so it must run on
-noble for the architecture it packages. `go run mage.go aptRepo` builds the GitHub Pages
-APT repository. See the README for the release workflow.
+GitHub releases carry code only: the vendored source tarball and binary archives, with
+checksums. Packages are built from source by Launchpad (the PPA, for Ubuntu 24.04 and
+26.04, from `go run mage.go debSource <suite>`) and COPR (for RHEL 8 and 10, from
+`go run mage.go srpm`). Both build offline with Go 1.26, so the source packages carry the
+Go modules vendored, and `go.mod` must not need a newer Go than 1.26.0. Integration CI
+builds each package the way its build service does. See the README for the release
+workflow.
 
 ## Testing the GUI
 

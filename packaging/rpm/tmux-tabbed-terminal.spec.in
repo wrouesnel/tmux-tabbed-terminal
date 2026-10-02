@@ -1,0 +1,60 @@
+# Built from the release's source tarball, which has the Go modules vendored, so it builds
+# without network access, as COPR and mock do. `go run mage.go srpm` fills in the version
+# and date.
+
+# Go binaries carry no DWARF worth extracting once stripped.
+%global debug_package %{nil}
+
+Name:           tmux-tabbed-terminal
+Version:        @VERSION@
+Release:        1%{?dist}
+Summary:        GNOME Terminal style terminal for switching between tmux sessions
+# The source is MIT. The binary links github.com/yuseferi/zax, which is GPL-3.0.
+License:        MIT AND GPL-3.0-only
+URL:            https://github.com/wrouesnel/tmux-tabbed-terminal
+Source0:        %{name}-%{version}.tar.gz
+
+BuildRequires:  golang >= 1.26
+BuildRequires:  gcc
+BuildRequires:  pkgconfig(gtk+-3.0)
+BuildRequires:  pkgconfig(vte-2.91)
+Requires:       tmux >= 2.7
+Requires:       hicolor-icon-theme
+
+%description
+A terminal which looks like GNOME Terminal and lists the tmux sessions running for
+the user, on this machine and on other hosts over ssh, in a sidebar. Clicking a
+session switches to it, and the window can be split to show several sessions side
+by side. Sessions producing output show a pulsing dot, and sessions with output you
+haven't seen are marked.
+
+%prep
+%autosetup
+
+%build
+export GOFLAGS="-mod=vendor -trimpath" GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=1
+export GOCACHE="$PWD/.gocache" GOPATH="$PWD/.gopath"
+go build -tags "$(sh packaging/gotk3-tags.sh)" \
+    -ldflags "-s -w -B gobuildid -X github.com/wrouesnel/tmux-tabbed-terminal/version.Version=v%{version}" \
+    -o tmux-tabbed-terminal ./cmd/tmux-tabbed-terminal
+
+%install
+install -D -m0755 tmux-tabbed-terminal %{buildroot}%{_bindir}/tmux-tabbed-terminal
+install -D -m0644 packaging/linux/io.github.wrouesnel.TmuxTabbedTerminal.desktop \
+    %{buildroot}%{_datadir}/applications/io.github.wrouesnel.TmuxTabbedTerminal.desktop
+install -D -m0644 packaging/linux/io.github.wrouesnel.TmuxTabbedTerminal.svg \
+    %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/io.github.wrouesnel.TmuxTabbedTerminal.svg
+install -D -m0644 packaging/linux/io.github.wrouesnel.TmuxTabbedTerminal.metainfo.xml \
+    %{buildroot}%{_metainfodir}/io.github.wrouesnel.TmuxTabbedTerminal.metainfo.xml
+
+%files
+%license LICENSE
+%doc README.md packaging/config.example.yml
+%{_bindir}/tmux-tabbed-terminal
+%{_datadir}/applications/io.github.wrouesnel.TmuxTabbedTerminal.desktop
+%{_datadir}/icons/hicolor/scalable/apps/io.github.wrouesnel.TmuxTabbedTerminal.svg
+%{_metainfodir}/io.github.wrouesnel.TmuxTabbedTerminal.metainfo.xml
+
+%changelog
+* @DATE@ Will Rouesnel <wrouesnel@wrouesnel.com> - @VERSION@-1
+- Release @VERSION@.

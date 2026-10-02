@@ -1,45 +1,41 @@
 ---
+# GitHub releases carry code only: the vendored source tarball and compiled binary
+# archives, with checksums. Packages are built from source and published by Launchpad
+# (Ubuntu, through the PPA) and COPR (RHEL); none are attached to the release.
 name: Release
 on:
   push:
     tags:
       - v*
-  # Rebuild the package repositories from the existing releases without making a new one.
-  workflow_dispatch:
 
 env:
-  BUILD_DEPS: libgtk-3-dev libvte-2.91-dev tmux
-  # The PPA the Ubuntu 26.04 source package is uploaded to.
+  # The PPA source packages are uploaded to.
   PPA: ${{ vars.PPA || 'ppa:w-rouesnel/tmux-tabbed-terminal' }}
-  # The Ubuntu suite the PPA builds for.
-  PPA_SUITE: resolute
+  # The COPR project the source RPM is built in, as owner/project.
+  COPR_PROJECT: ${{ vars.COPR_PROJECT }}
 
 jobs:
   integration:
-    if: github.event_name == 'push'
     uses: ./.github/workflows/integration.yml
 
   generate-release-matrix:
-    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     outputs:
       release-matrix: ${{ steps.generate-matrix.outputs.release-matrix }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-
       - name: Generate Release Matrix
         id: generate-matrix
         run: go run mage.go githubReleaseMatrix
 
-  # Ubuntu 24.04 packages and archives. The UI links GTK3 and VTE with cgo, so each
-  # architecture builds on its own runner.
-  release-build:
+  # Binary archives, built natively per architecture since the UI links GTK3 and VTE with
+  # cgo. They link Ubuntu 24.04's libraries.
+  binaries:
     needs:
       - integration
       - generate-release-matrix
@@ -50,104 +46,72 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-
-      - name: Fetch tags
-        run: git fetch --prune --unshallow --tags -f
-
+        with:
+          fetch-depth: 0
       - name: Install build dependencies
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $BUILD_DEPS
-
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev libvte-2.91-dev
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-
-      - name: Release Build
-        run: go run mage.go release ${{ matrix.osarch }}
-
-      - name: Debian Package
-        run: go run mage.go deb ${{ matrix.osarch }}
-
+      - name: Binary archive
+        run: |
+          go run mage.go release ${{ matrix.osarch }}
+          cd release && for f in *.tar.gz; do sha256sum "$f" > "$f.sha256"; done
       - uses: actions/upload-artifact@v7
         with:
-          name: release-${{ matrix.osarch }}
-          path: release/*
+          name: binaries-${{ matrix.osarch }}
+          path: |
+            release/*.tar.gz
+            release/*.sha256
 
-  # RPMs for RHEL 8 and 10, built in a container of each, so they link its GTK and VTE.
-  rpm-build:
+  # The GitHub release: the vendored source tarball, which packages are built from, and
+  # the binary archives.
+  github-release:
     needs:
       - integration
-    strategy:
-      matrix:
-        el: [el8, el10]
-        arch: [amd64, arm64]
-        include:
-          - el: el8
-            image: docker.io/library/rockylinux:8
-            repos: --enablerepo=powertools
-          - el: el10
-            image: docker.io/library/almalinux:10
-            repos: --enablerepo=crb
-          - arch: amd64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    container: ${{ matrix.image }}
+      - binaries
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
     steps:
-      - name: Install build dependencies
-        run: dnf install -y ${{ matrix.repos }} gcc git gtk3-devel vte291-devel rpm-build tmux tar gzip
-
       - name: Checkout
         uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Trust the checkout
-        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
-
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      - name: RPM
-        run: go run mage.go rpm linux-${{ matrix.arch }}
+      - name: Source tarball
+        run: go run mage.go source
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: rpm-${{ matrix.el }}-${{ matrix.arch }}
-          path: release/*.rpm
-
-  release:
-    permissions:
-      contents: write
-    runs-on: ubuntu-24.04
-    needs:
-      - release-build
-      - rpm-build
-    steps:
-      - name: Download artifacts
+      - name: Download binary archives
         uses: actions/download-artifact@v8
         with:
-          pattern: "{release,rpm}-*"
+          pattern: binaries-*
           merge-multiple: true
-          path: release
+          path: release/binaries
 
       - name: Release
         uses: softprops/action-gh-release@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          generate_release_notes: true
           files: |
-            release/*
+            release/source/*
+            release/binaries/*
 
-  # Uploads a signed source package for Ubuntu 26.04 to the PPA, where Launchpad builds
-  # it. Needs the PPA created on Launchpad, with the signing key registered to the
-  # account: see the README.
+  # Uploads signed source packages to the PPA, where Launchpad builds them. Needs the PPA
+  # on Launchpad with the signing key registered to the account, and, for Ubuntu 24.04, a
+  # dependency on ppa:longsleep/golang-backports for Go 1.26: see the README.
   ppa:
     needs:
       - integration
+    strategy:
+      matrix:
+        suite: [noble, resolute]
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
@@ -171,80 +135,44 @@ jobs:
           fingerprint: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
 
       - name: Source package
-        run: DEB_SIGNING_KEY="$SIGNING_KEY" go run mage.go debSource "$PPA_SUITE"
+        run: DEB_SIGNING_KEY="$SIGNING_KEY" go run mage.go debSource ${{ matrix.suite }}
 
       - name: Upload to the PPA
-        run: dput "$PPA" release/ppa/*_source.changes
+        run: dput "$PPA" release/ppa/${{ matrix.suite }}/*_source.changes
 
-  # Publishes the package repositories to GitHub Pages: APT for Ubuntu 24.04 and dnf for
-  # RHEL 8 and 10, from the packages of every release. They're rebuilt from the release
-  # assets each time, so Pages holds no state of its own. Needs Pages set to deploy from
-  # GitHub Actions, the PACKAGE_SIGNING_KEY and PACKAGE_SIGNING_KEY_PASSPHRASE secrets,
-  # and the PACKAGE_SIGNING_KEY_FINGERPRINT variable: see the README.
-  publish-pages:
+  # Builds the source RPM in COPR, which builds and signs the RHEL packages. Needs the
+  # COPR project, the COPR_PROJECT variable and the COPR_CONFIG secret: see the README.
+  copr:
     needs:
-      - release
-    # Run after a release, or on its own when dispatched.
-    if: always() && (needs.release.result == 'success' || github.event_name == 'workflow_dispatch')
+      - integration
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    concurrency:
-      group: pages
-      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
-      - name: Install repository tools
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm pipx
+          pipx install copr-cli
 
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
-      - name: Download packages from every release
+      - name: Source RPM
+        run: go run mage.go srpm
+
+      - name: Build in COPR
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
         run: |
-          mkdir -p .pool
-          gh release list --limit 1000 --json tagName --jq '.[].tagName' | while read -r tag; do
-            gh release download "$tag" --pattern '*.deb' --pattern '*.rpm' --dir .pool --skip-existing
-          done
-          ls -l .pool
-
-      - name: Import signing key
-        uses: ./.github/actions/import-signing-key
-        with:
-          key: ${{ secrets.PACKAGE_SIGNING_KEY }}
-          passphrase: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
-          fingerprint: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
-
-      # The site's real address, which is a custom domain if the account's Pages has one.
-      - name: Configure Pages
-        id: pages
-        uses: actions/configure-pages@v6
-
-      - name: Build package repositories
-        env:
-          APT_POOL_DIR: .pool
-          RPM_POOL_DIR: .pool
-          APT_REPO_URL: ${{ steps.pages.outputs.base_url }}
-        run: |
-          APT_SIGNING_KEY="$SIGNING_KEY" go run mage.go aptRepo
-          RPM_SIGNING_KEY="$SIGNING_KEY" go run mage.go rpmRepo
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: .apt-repo
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v5
+          if [ -z "$COPR_CONFIG" ] || [ -z "$COPR_PROJECT" ]; then
+            echo "::error::The COPR_CONFIG secret or COPR_PROJECT variable is not set"
+            exit 1
+          fi
+          mkdir -p ~/.config
+          printf '%s\n' "$COPR_CONFIG" > ~/.config/copr
+          copr-cli build "$COPR_PROJECT" release/srpm/*.src.rpm

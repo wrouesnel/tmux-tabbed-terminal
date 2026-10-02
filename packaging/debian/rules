@@ -1,7 +1,9 @@
 #!/usr/bin/make -f
-# Builds from vendor/, with the distribution's Go and no network, as Launchpad's
-# builders require.
+# Builds from vendor/, with Go 1.26 and no network, as Launchpad's builders require. Go
+# 1.26 is golang-1.26-go: in the archive from Ubuntu 26.04, and from the
+# ppa:longsleep/golang-backports dependency of the PPA for Ubuntu 24.04.
 
+export PATH := /usr/lib/go-1.26/bin:$(PATH)
 export GOFLAGS := -mod=vendor -trimpath
 export GOTOOLCHAIN := local
 export GOPROXY := off

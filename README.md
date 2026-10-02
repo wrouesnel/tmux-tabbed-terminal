@@ -53,52 +53,39 @@ never kills a session.
 
 ## Install
 
-Packages are built for Ubuntu 24.04 and 26.04 and for RHEL 8 and 10 (and rebuilds such as
-Rocky Linux and AlmaLinux), for amd64 and arm64. They're signed with the key
-`4EE9 6BF5 C3BE 937F DD2D  0109 47CC C9AA 4B3F D5DE`. Each
-[GitHub release](https://github.com/wrouesnel/tmux-tabbed-terminal/releases) also has them
-attached.
+Packages are built from source by Launchpad and COPR, for amd64 and arm64.
 
-### Ubuntu 26.04 (PPA)
+### Ubuntu 24.04 and 26.04
+
+From the PPA [ppa:w-rouesnel/tmux-tabbed-terminal](https://launchpad.net/~w-rouesnel/+archive/ubuntu/tmux-tabbed-terminal):
 
 ```sh
 sudo add-apt-repository ppa:w-rouesnel/tmux-tabbed-terminal
 sudo apt install tmux-tabbed-terminal
 ```
 
-### Ubuntu 24.04
-
-An APT repository on GitHub Pages:
-
-```sh
-sudo install -d -m 0755 /etc/apt/keyrings
-sudo curl -fsSLo /etc/apt/keyrings/tmux-tabbed-terminal.gpg \
-    https://blog.wrouesnel.com/tmux-tabbed-terminal/key.gpg
-sudo tee /etc/apt/sources.list.d/tmux-tabbed-terminal.sources <<EOF
-Types: deb
-URIs: https://blog.wrouesnel.com/tmux-tabbed-terminal
-Suites: noble
-Components: main
-Signed-By: /etc/apt/keyrings/tmux-tabbed-terminal.gpg
-EOF
-sudo apt update
-sudo apt install tmux-tabbed-terminal
-```
-
 ### RHEL 8 and 10
 
-A dnf repository on GitHub Pages. Use `el8` or `el10` to match the release:
+From COPR, [wrouesnel/tmux-tabbed-terminal](https://copr.fedorainfracloud.org/coprs/wrouesnel/tmux-tabbed-terminal/),
+for RHEL and its rebuilds such as Rocky Linux and AlmaLinux:
 
 ```sh
-sudo curl -fsSLo /etc/yum.repos.d/tmux-tabbed-terminal.repo \
-    https://blog.wrouesnel.com/tmux-tabbed-terminal/rpm/tmux-tabbed-terminal-el10.repo
+sudo dnf install dnf-plugins-core
+sudo dnf copr enable wrouesnel/tmux-tabbed-terminal
 sudo dnf install tmux-tabbed-terminal
 ```
 
-dnf asks to import the signing key the first time. RHEL 8's tmux is 2.7, which works.
-RHEL 10's tmux is a pre-release snapshot (it reports `next-3.4`) whose `capture-pane`
-corrupts its memory and kills the server, so Save Scrollback refuses to run against it
-rather than end every session; everything else works.
+RHEL 8's tmux is 2.7, which works. RHEL 10's tmux is a pre-release snapshot (it reports
+`next-3.4`) whose `capture-pane` corrupts its memory and kills the server, so Save
+Scrollback refuses to run against it rather than end every session; everything else
+works.
+
+### From a release
+
+Each [GitHub release](https://github.com/wrouesnel/tmux-tabbed-terminal/releases) has the
+source, as a tarball with the Go modules vendored, and binary archives for amd64 and
+arm64, each with a SHA-256 checksum. The binaries link GTK3 and VTE dynamically and are
+built on Ubuntu 24.04.
 
 ## Usage
 
@@ -218,40 +205,41 @@ go run mage.go binary
 | `go run mage.go binary` | Builds into `bin/` and symlinks the binary into the repository root. |
 | `go run mage.go test` | Runs the tests. The GUI test runs under `xvfb-run` and is skipped without it. |
 | `go run mage.go lint` / `style` | golangci-lint and formatting checks, as CI runs them. |
-| `go run mage.go rpm linux-amd64` | Builds `release/tmux-tabbed-terminal-<version>-1.<dist>.x86_64.rpm` on the RHEL release it's for, with `gtk3-devel`, `vte291-devel` and `rpm-build` installed. |
-| `go run mage.go debSource resolute` | Builds a source package for an Ubuntu suite, with the Go modules vendored, in `release/ppa/`; `DEB_SIGNING_KEY` signs it. |
-| `go run mage.go deb linux-amd64` | Builds `release/tmux-tabbed-terminal_<version>_amd64.deb`. Dependencies come from `dpkg-shlibdeps`, so build on the release you're packaging for. |
-| `go run mage.go aptRepo` | Builds an APT repository in `.apt-repo/` from the `.deb` files in `release/` and `$APT_POOL_DIR`, signed with the gpg key whose fingerprint is `$APT_SIGNING_KEY` (and passphrase `$APT_SIGNING_PASSPHRASE`, if it has one). |
-| `go run mage.go rpmRepo` | Adds dnf repositories for each RHEL release and architecture, and their `.repo` files, to `.apt-repo/rpm` from the `.rpm` files in `release/` and `$RPM_POOL_DIR`, signed with `$RPM_SIGNING_KEY`. Run it after `aptRepo`, which starts the site afresh. |
+| `go run mage.go source` | Builds the vendored source tarball and its checksum in `release/source/`. |
+| `go run mage.go srpm` | Builds the source RPM for COPR in `release/srpm/`. `rpmbuild --rebuild` it on RHEL, after `dnf builddep`, to build the package. |
+| `go run mage.go debSource noble` | Builds the source package for an Ubuntu suite (`noble`, `resolute`) in `release/ppa/<suite>/`; `DEB_SIGNING_KEY` signs it. `dpkg-buildpackage -b` it to build the package. |
 
 The application uses cgo to link GTK3 and VTE, so each architecture is built on a machine
 of that architecture. Cross-compiling needs `CC` and `PKG_CONFIG_LIBDIR` set for the target.
 
-## Releases and package repositories
+## Releases and packages
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`. It does the following:
 
-1. Runs the integration checks.
-2. Builds the archive and Ubuntu 24.04 `.deb` for amd64 on `ubuntu-24.04` and arm64 on
-   `ubuntu-24.04-arm`.
-3. Builds the RHEL 8 and 10 RPMs in Rocky Linux 8 and AlmaLinux 10 containers, on both
-   architectures, with `go run mage.go rpm`. Older GTK libraries, as on RHEL 8, are
-   detected with `pkg-config` and selected in gotk3 with build tags.
-4. Attaches them all to a GitHub release.
-5. Builds a signed source package for Ubuntu 26.04 with `go run mage.go debSource
-   resolute`, Go modules vendored in, and uploads it to the PPA, where Launchpad builds
-   it. Launchpad builds offline with Ubuntu's Go, which is why `go.mod` targets Go 1.26.0;
-   CI checks the package builds that way.
-6. Rebuilds the APT and dnf repositories from the packages of every release, signs them,
-   and deploys them to GitHub Pages. Pages holds no state of its own.
+1. Runs the integration checks, which build every package as its repository will.
+2. Builds the binary archives for amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm`,
+   and the vendored source tarball (`go run mage.go source`), and makes a GitHub release
+   of them with their checksums. Releases carry only code: no packages.
+3. Builds signed source packages for Ubuntu 24.04 (noble) and 26.04 (resolute) with
+   `go run mage.go debSource <suite>` and uploads them to the PPA, where Launchpad builds
+   them.
+4. Builds the source RPM (`go run mage.go srpm`) and submits it to COPR, which builds,
+   signs and publishes the RHEL 8 and 10 packages.
 
-The repositories can be rebuilt without a release by running the workflow manually.
+Both build services build without network access, so the source packages carry the Go
+modules vendored, and use Go 1.26: Ubuntu 26.04's own, Ubuntu 24.04's from
+[golang-backports](https://launchpad.net/~longsleep/+archive/ubuntu/golang-backports), and
+RHEL's. That's why `go.mod` targets Go 1.26.0. Older GTK libraries, as on RHEL 8, are
+detected by `packaging/gotk3-tags.sh` and selected in gotk3 with build tags.
+
+CI checks every package builds that way on each push and pull request: the source RPM is
+rebuilt in Rocky Linux 8 and AlmaLinux 10 containers with `dnf builddep`, and both PPA
+packages in Ubuntu containers from their vendored source.
 
 One-time setup:
 
-* Under Settings → Pages, set the source to **GitHub Actions**.
 * Create the package signing key in your personal keyring (`~/.gnupg`), with its
-  passphrase kept in the login keyring:
+  passphrase kept in the login keyring. The PPA uploads are signed with it.
 
   ```sh
   secret-tool store --label "tmux-tabbed-terminal package signing key passphrase" \
@@ -263,13 +251,11 @@ One-time setup:
   ```
 
   Your keyring holds the key from then on; scripts and configuration refer to it by
-  fingerprint. It's RSA, as RHEL 8's rpm can't check EdDSA signatures. Users trust its
-  public part through the repositories' `key.gpg` and `key.asc`, so replacing it breaks
-  their `apt update` and `dnf`.
+  fingerprint.
 * Give the release workflow the key. This is the one step where the private key leaves
-  your keyring, so it's one you run deliberately: the workflow signs each release's
-  repository metadata on GitHub's runners, which can't reach your keyring. GitHub keeps
-  secrets encrypted and only hands them to workflow runs of this repository.
+  your keyring, so it's one you run deliberately: the workflow signs the PPA uploads on
+  GitHub's runners, which can't reach your keyring. GitHub keeps secrets encrypted and
+  only hands them to workflow runs of this repository.
 
   ```sh
   gpg --armor --export-secret-keys "$FPR" | gh secret set PACKAGE_SIGNING_KEY
@@ -277,7 +263,7 @@ One-time setup:
       gh secret set PACKAGE_SIGNING_KEY_PASSPHRASE
   gh variable set PACKAGE_SIGNING_KEY_FINGERPRINT --body "$FPR"
   ```
-* For the PPA, on Launchpad: create the PPA `tmux-tabbed-terminal`
+* On Launchpad: create the PPA `tmux-tabbed-terminal`
   (https://launchpad.net/~w-rouesnel/+activate-ppa), and register the signing key with the
   account (https://launchpad.net/~w-rouesnel/+editpgpkeys) after publishing its public
   part, which Launchpad fetches from the Ubuntu keyserver:
@@ -286,9 +272,22 @@ One-time setup:
   gpg --keyserver keyserver.ubuntu.com --send-keys "$FPR"
   ```
 
-  Launchpad emails a message encrypted to the key; decrypting it confirms it. The
-  workflow uploads to `ppa:w-rouesnel/tmux-tabbed-terminal`, or to the PPA named by the
-  `PPA` repository variable.
+  Launchpad emails a message encrypted to the key; decrypting it confirms it. Then, in
+  the PPA's settings, add `ppa:longsleep/golang-backports` as a dependency (Edit PPA
+  dependencies), so Ubuntu 24.04 builds find Go 1.26, and enable arm64 under Change
+  details. The workflow uploads to `ppa:w-rouesnel/tmux-tabbed-terminal`, or to the PPA
+  named by the `PPA` repository variable.
+* On COPR: create the project `tmux-tabbed-terminal`
+  (https://copr.fedorainfracloud.org/coprs/add/) with the chroots `epel-8-x86_64`,
+  `epel-8-aarch64`, `epel-10-x86_64` and `epel-10-aarch64`. Then give the workflow an API
+  token, from https://copr.fedorainfracloud.org/api/, and name the project:
+
+  ```sh
+  gh secret set COPR_CONFIG < ~/.config/copr
+  gh variable set COPR_PROJECT --body wrouesnel/tmux-tabbed-terminal
+  ```
+
+  COPR signs the packages it builds with its own key for the project.
 
 ## License
 
@@ -310,8 +309,8 @@ MIT: see [LICENSE](LICENSE). The binary links
 | `pkg/sessionlist` | Groups sessions by application, orders and filters the session list. |
 | `pkg/activity` | Decides which sessions are busy or have unseen output, from successive snapshots. |
 | `pkg/theme` | Color parsing and GNOME Terminal's built-in palettes. |
-| `packaging/` | Desktop entry, icon, AppStream metadata and example configuration for the package. |
-| `magefile.go`, `magefile_deb.go` | The build system, plus the Debian package and APT repository targets. |
+| `packaging/` | Desktop entry, icon, AppStream metadata, example configuration, the RPM spec, the Debian packaging and the gotk3 build tag detection. |
+| `magefile.go`, `magefile_pkg.go` | The build system, plus the source tarball, source RPM and Debian source package targets. |
 
 Each host has a background goroutine which polls its tmux server once per `poll-interval` with one command that lists
 sessions, windows and clients. It polls sooner when a visible terminal shows output. Each
