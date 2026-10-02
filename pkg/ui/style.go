@@ -68,6 +68,9 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-host-error .ttt-host-status {
 	color: @error_color;
 }
+.ttt-host-separator {
+	margin: 6px 0 0 0;
+}
 .ttt-host button {
 	min-height: 16px;
 	min-width: 16px;

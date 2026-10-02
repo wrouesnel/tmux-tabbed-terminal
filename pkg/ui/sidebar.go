@@ -52,6 +52,10 @@ type sidebar struct {
 	query   string
 	// pressKey is the entry under the last button press, which a drag starts from.
 	pressKey string
+	// hostFilter limits the list to one host's sessions, or is "" for all hosts.
+	hostFilter string
+	// settingFilter is set while the filter buttons are synced, to ignore their toggles.
+	settingFilter bool
 }
 
 // listEntry is one row of the list: a host, or a session of the host above it.
@@ -69,6 +73,8 @@ type hostRow struct {
 	row    *gtk.ListBoxRow
 	status *gtk.Label
 	icon   *gtk.Image
+	// filter shows only this host's sessions while it's active.
+	filter *gtk.ToggleButton
 }
 
 func newSidebar(w *Window) *sidebar {
@@ -194,7 +200,7 @@ func (sb *sidebar) entry(key string) *listEntry {
 // matches reports whether a session matches the search.
 func (sb *sidebar) matches(key string) bool {
 	h, s := sb.win.app.lookup(key)
-	if s == nil {
+	if s == nil || (sb.hostFilter != "" && h.Name != sb.hostFilter) {
 		return false
 	}
 	return sessionlist.Matches(s, sb.query, sb.win.app.groups[key], h.Name)
@@ -203,6 +209,9 @@ func (sb *sidebar) matches(key string) bool {
 // hostMatches reports whether a host row is shown: always without a search, otherwise
 // when any of its sessions match.
 func (sb *sidebar) hostMatches(name string) bool {
+	if sb.hostFilter != "" && name != sb.hostFilter {
+		return false
+	}
 	if strings.TrimSpace(sb.query) == "" {
 		return true
 	}
@@ -230,7 +239,19 @@ func (sb *sidebar) filter(row *gtk.ListBoxRow) bool {
 // header puts an application heading above the first visible session of each group.
 func (sb *sidebar) header(row *gtk.ListBoxRow, before *gtk.ListBoxRow) {
 	e := sb.entry(sb.rowKeys[row.Native()])
-	if e == nil || e.isHost || e.group == "" {
+	if e != nil && e.isHost {
+		// A line separates each host from the one above it.
+		if before != nil && before.Object != nil {
+			sep, _ := gtk.SeparatorNew(gtk.ORIENTATION_HORIZONTAL)
+			addClass(sep, "ttt-host-separator")
+			sep.Show()
+			row.SetHeader(sep)
+		} else {
+			row.SetHeader(nil)
+		}
+		return
+	}
+	if e == nil || e.group == "" {
 		row.SetHeader(nil)
 		return
 	}
@@ -303,12 +324,20 @@ func newHostRow(name string, local bool, newSession func(string)) *hostRow {
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, rowSpacing)
 	box.PackStart(r.icon, false, false, 0)
 	box.PackStart(label, true, true, 0)
+	r.filter, _ = gtk.ToggleButtonNew()
+	filterIcon, _ := gtk.ImageNewFromIconName(firstIcon("funnel-symbolic", "view-filter-symbolic",
+		"edit-find-symbolic"), gtk.ICON_SIZE_MENU)
+	r.filter.SetImage(filterIcon)
+	r.filter.SetRelief(gtk.RELIEF_NONE)
+	r.filter.SetTooltipText("Show Only " + name)
+
 	addBtn, _ := gtk.ButtonNewFromIconName("list-add-symbolic", gtk.ICON_SIZE_MENU)
 	addBtn.SetRelief(gtk.RELIEF_NONE)
 	addBtn.SetTooltipText("New Session on " + name)
 	addBtn.Connect("clicked", func() { newSession(name) })
 
 	box.PackStart(r.status, false, false, 0)
+	box.PackStart(r.filter, false, false, 0)
 	box.PackStart(addBtn, false, false, 0)
 	box.PackStart(menuBtn, false, false, 0)
 	r.row.Add(box)
@@ -454,6 +483,17 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 		hr, ok := sb.hostRows[h.Name]
 		if !ok {
 			hr = newHostRow(h.Name, h.Local(), func(name string) { sb.win.NewSessionOn(sb.win.activePane, name) })
+			name := h.Name
+			hr.filter.Connect("toggled", func() {
+				if sb.settingFilter {
+					return
+				}
+				if hr.filter.GetActive() {
+					sb.setHostFilter(name)
+				} else {
+					sb.setHostFilter("")
+				}
+			})
 			sb.hostRows[h.Name] = hr
 			sb.rowKeys[hr.row.Native()] = h.Name
 		}
@@ -500,6 +540,10 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 		for _, e := range sb.order {
 			row := sb.rowOf(e)
 			sb.list.Remove(row)
+			if e.isHost && !keep[e.key] && sb.hostFilter == e.key {
+				// The filtered host was removed: show every host again.
+				defer sb.setHostFilter("")
+			}
 			if !keep[e.key] {
 				delete(sb.rowKeys, row.Native())
 				if e.isHost {
@@ -521,6 +565,23 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 	}
 
 	sb.selectSession(selected)
+}
+
+// setHostFilter shows only one host's sessions, or every host's for "".
+func (sb *sidebar) setHostFilter(name string) {
+	sb.hostFilter = name
+	sb.settingFilter = true
+	for hostName, hr := range sb.hostRows {
+		hr.filter.SetActive(hostName == name)
+	}
+	sb.settingFilter = false
+	if name == "" {
+		sb.search.SetPlaceholderText("Search sessions")
+	} else {
+		sb.search.SetPlaceholderText("Search " + name)
+	}
+	sb.list.InvalidateFilter()
+	sb.list.InvalidateHeaders()
 }
 
 // rowOf returns the row widget of an entry.
