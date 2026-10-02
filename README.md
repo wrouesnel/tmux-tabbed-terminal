@@ -192,7 +192,7 @@ go run mage.go binary
 | `go run mage.go test` | Runs the tests. The GUI test runs under `xvfb-run` and is skipped without it. |
 | `go run mage.go lint` / `style` | golangci-lint and formatting checks, as CI runs them. |
 | `go run mage.go deb linux-amd64` | Builds `release/tmux-tabbed-terminal_<version>_amd64.deb`. Dependencies come from `dpkg-shlibdeps`, so build on the release you're packaging for. |
-| `go run mage.go aptRepo` | Builds an APT repository in `.apt-repo/` from the `.deb` files in `release/` and `$APT_POOL_DIR`, signed with the gpg key named by `$APT_SIGNING_KEY`. |
+| `go run mage.go aptRepo` | Builds an APT repository in `.apt-repo/` from the `.deb` files in `release/` and `$APT_POOL_DIR`, signed with the gpg key whose fingerprint is `$APT_SIGNING_KEY` (and passphrase `$APT_SIGNING_PASSPHRASE`, if it has one). |
 
 The application uses cgo to link GTK3 and VTE, so each architecture is built on a machine
 of that architecture. Cross-compiling needs `CC` and `PKG_CONFIG_LIBDIR` set for the target.
@@ -213,17 +213,32 @@ The repository can be rebuilt without a release by running the workflow manually
 One-time setup:
 
 * Under Settings → Pages, set the source to **GitHub Actions**.
-* Create a signing key without a passphrase and store the private key as the
-  `APT_SIGNING_KEY` secret:
+* Create the package signing key in your personal keyring (`~/.gnupg`), with its
+  passphrase kept in the login keyring:
 
   ```sh
-  export GNUPGHOME=$(mktemp -d)
-  gpg --batch --passphrase '' --quick-gen-key "tmux-tabbed-terminal APT repository" ed25519 sign never
-  gpg --armor --export-secret-keys | gh secret set APT_SIGNING_KEY
+  secret-tool store --label "tmux-tabbed-terminal package signing key passphrase" \
+      gpg-passphrase tmux-tabbed-terminal-packages
+  secret-tool lookup gpg-passphrase tmux-tabbed-terminal-packages |
+      gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
+          --quick-gen-key "tmux-tabbed-terminal packages <wrouesnel@wrouesnel.com>" ed25519 sign 5y
+  FPR=$(gpg --with-colons --list-keys "tmux-tabbed-terminal packages" | awk -F: '/^fpr/ { print $10; exit }')
   ```
 
-  Keep a copy of the key somewhere safe. Users trust it through `key.gpg`, so replacing
-  it breaks their `apt update`.
+  Your keyring holds the key from then on; scripts and configuration refer to it by
+  fingerprint. Users trust its public part through the repository's `key.gpg`, so
+  replacing it breaks their `apt update`.
+* Give the release workflow the key. This is the one step where the private key leaves
+  your keyring, so it's one you run deliberately: the workflow signs each release's
+  repository metadata on GitHub's runners, which can't reach your keyring. GitHub keeps
+  secrets encrypted and only hands them to workflow runs of this repository.
+
+  ```sh
+  gpg --armor --export-secret-keys "$FPR" | gh secret set PACKAGE_SIGNING_KEY
+  secret-tool lookup gpg-passphrase tmux-tabbed-terminal-packages |
+      gh secret set PACKAGE_SIGNING_KEY_PASSPHRASE
+  gh variable set PACKAGE_SIGNING_KEY_FINGERPRINT --body "$FPR"
+  ```
 
 ## Implementation
 

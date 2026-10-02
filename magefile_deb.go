@@ -413,9 +413,18 @@ func AptRepo() error {
 	if signingKey == "" {
 		fmt.Println("APT_SIGNING_KEY is not set: the repository is unsigned")
 	} else {
+		// A passphrase, if the key has one, goes in on stdin rather than the command line.
+		passphrase := os.Getenv("APT_SIGNING_PASSPHRASE")
 		gpg := func(args ...string) error {
-			_, err := runIn(out, "gpg", append([]string{"--batch", "--yes", "--local-user", signingKey}, args...)...)
-			return err
+			base := []string{"--batch", "--yes", "--local-user", signingKey}
+			if passphrase != "" {
+				base = append(base, "--pinentry-mode", "loopback", "--passphrase-fd", "0")
+			}
+			cmd := exec.Command("gpg", append(base, args...)...)
+			cmd.Dir = out
+			cmd.Stdin = strings.NewReader(passphrase + "\n")
+			cmd.Stderr = os.Stderr
+			return errors.Wrapf(cmd.Run(), "gpg %s", strings.Join(args, " "))
 		}
 		if err := gpg("--clearsign", "--output", path.Join(dist, "InRelease"), path.Join(dist, "Release")); err != nil {
 			return err

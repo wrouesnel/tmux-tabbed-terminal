@@ -92,8 +92,9 @@ jobs:
 
   # Publishes an APT repository of every release's packages to GitHub Pages. The
   # repository is rebuilt from the release assets each time, so Pages holds no state of
-  # its own. Needs Pages set to deploy from GitHub Actions, and the APT_SIGNING_KEY secret
-  # holding an ASCII-armored private key without a passphrase.
+  # its own. Needs Pages set to deploy from GitHub Actions, the PACKAGE_SIGNING_KEY and
+  # PACKAGE_SIGNING_KEY_PASSPHRASE secrets, and the PACKAGE_SIGNING_KEY_FINGERPRINT variable:
+  # see the README.
   publish-apt:
     needs:
       - release
@@ -131,18 +132,19 @@ jobs:
 
       - name: Import signing key
         env:
-          APT_SIGNING_KEY_PRIVATE: ${{ secrets.APT_SIGNING_KEY }}
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+          FINGERPRINT: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
         run: |
-          if [ -z "$APT_SIGNING_KEY_PRIVATE" ]; then
-            echo "::error::The APT_SIGNING_KEY secret is not set"
+          if [ -z "$PACKAGE_SIGNING_KEY" ] || [ -z "$FINGERPRINT" ]; then
+            echo "::error::The PACKAGE_SIGNING_KEY secret or PACKAGE_SIGNING_KEY_FINGERPRINT variable is not set"
             exit 1
           fi
-          echo "$APT_SIGNING_KEY_PRIVATE" | gpg --batch --import
-          fpr="$(gpg --batch --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')"
-          echo "APT_SIGNING_KEY=$fpr" >> "$GITHUB_ENV"
+          printf '%s\n' "$PACKAGE_SIGNING_KEY" | gpg --batch --import
+          echo "APT_SIGNING_KEY=$FINGERPRINT" >> "$GITHUB_ENV"
 
       - name: Build APT repository
         env:
+          APT_SIGNING_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
           APT_POOL_DIR: .apt-pool
           APT_REPO_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
         run: go run mage.go aptRepo
