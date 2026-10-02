@@ -428,6 +428,12 @@ func (c *Client) ScrollPane(ctx context.Context, pane string, lines int) (Scroll
 	return parseScroll(fields[0], fields[1], fields[2]), nil
 }
 
+// CaptureHistory returns all the history and visible text of a session's current pane,
+// with lines tmux wrapped joined again.
+func (c *Client) CaptureHistory(ctx context.Context, session string) (string, error) {
+	return c.run(ctx, "capture-pane", "-p", "-J", "-S", "-", "-E", "-", "-t", session)
+}
+
 // HasSession reports whether a session exists.
 func (c *Client) HasSession(ctx context.Context, session string) (bool, error) {
 	_, err := c.run(ctx, "has-session", "-t", session)

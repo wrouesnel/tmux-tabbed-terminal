@@ -12,6 +12,10 @@ or split the window to watch several sessions side by side.
 * **Other hosts.** "Add Host" under the list connects to another machine over ssh and
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones.
+* **Saving scrollback.** Right-click a session, or a terminal, and choose Save Scrollback
+  to save the whole tmux history of its current pane as text, under
+  `~/.local/share/tmux-tabbed-terminal/scrollback/<host>/<session>/<date-time>.txt`, or
+  Save Scrollback As… to choose where.
 * **Pinned sessions.** Right-click a session and choose Pin to list it at the top, in a
   collapsible Pinned section, as well as in its usual place. Pins are kept by host and
   session name, so they survive tmux restarts. A pinned session that isn't running is

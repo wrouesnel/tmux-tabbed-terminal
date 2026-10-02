@@ -85,6 +85,7 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 
 	// Scrolling up enters copy mode; scrolling back down to the bottom leaves it.
+
 	argv := c.Argv("send-keys", "-t", id, "seq 1 200", "Enter")
 	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil { //nolint:gosec // test
 		t.Fatalf("send-keys: %v: %s", err, out)
@@ -113,6 +114,14 @@ func TestSessionLifecycle(t *testing.T) {
 	snap, _ = c.Snapshot(ctx)
 	if snap.Session(id).ActiveWindow().InMode {
 		t.Fatal("scrolling to the bottom didn't leave copy mode")
+	}
+
+	history, err := c.CaptureHistory(ctx, id)
+	if err != nil {
+		t.Fatalf("CaptureHistory: %v", err)
+	}
+	if !strings.Contains(history, "\n1\n2\n3\n") || !strings.Contains(history, "\n200\n") {
+		t.Errorf("history doesn't hold the output: %q", history)
 	}
 
 	if ok, err := c.HasSession(ctx, id); err != nil || !ok {

@@ -917,6 +917,9 @@ func sessionMenu(id string, pinned bool) *glib.MenuModel {
 	open.AppendItem(item("Open", "win.session-open"))
 	open.AppendItem(item("Open in Split Right", "win.session-split-right"))
 	open.AppendItem(item("Open in Split Down", "win.session-split-down"))
+	save := glib.MenuNew()
+	save.AppendItem(item("Save Scrollback", "win.session-save-scrollback"))
+	save.AppendItem(item("Save Scrollback As…", "win.session-save-scrollback-as"))
 	manage := glib.MenuNew()
 	if pinned {
 		manage.AppendItem(item("Unpin", "win.session-unpin"))
@@ -927,6 +930,7 @@ func sessionMenu(id string, pinned bool) *glib.MenuModel {
 	manage.AppendItem(item("Kill Session…", "win.session-kill"))
 	menu := glib.MenuNew()
 	menu.AppendSectionWithoutLabel(&open.MenuModel)
+	menu.AppendSectionWithoutLabel(&save.MenuModel)
 	menu.AppendSectionWithoutLabel(&manage.MenuModel)
 	return &menu.MenuModel
 }

@@ -151,6 +151,10 @@ func (w *Window) installActions() {
 	addStr("session-split-down", func(id string) { w.OpenInSplit(id, gtk.ORIENTATION_VERTICAL) })
 	addStr("session-rename", w.RenameSession)
 	addStr("session-kill", w.KillSession)
+	addStr("session-save-scrollback", func(key string) { w.SaveScrollback(key, false) })
+	addStr("session-save-scrollback-as", func(key string) { w.SaveScrollback(key, true) })
+	add("save-scrollback", func() { w.SaveScrollback(w.activePane.SessionKey(), false) })
+	add("save-scrollback-as", func() { w.SaveScrollback(w.activePane.SessionKey(), true) })
 	addStr("host-new-session", func(host string) { w.NewSessionOn(w.activePane, host) })
 	addStr("session-pin", func(key string) {
 		if pin, ok := w.app.pinOf(key); ok {
@@ -208,6 +212,8 @@ func (w *Window) updateActionState() {
 	hasSession := s != nil
 	w.actions["rename-session"].SetEnabled(hasSession)
 	w.actions["kill-session"].SetEnabled(hasSession)
+	w.actions["save-scrollback"].SetEnabled(hasSession)
+	w.actions["save-scrollback-as"].SetEnabled(hasSession)
 }
 
 // panes returns the window's panes.

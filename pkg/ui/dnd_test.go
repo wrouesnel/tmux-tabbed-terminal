@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestZoneAt(t *testing.T) {
 	cases := []struct {
@@ -23,5 +26,18 @@ func TestZoneAt(t *testing.T) {
 	}
 	if got := zoneAt(1, 1, 0, 0); got != zoneCenter {
 		t.Errorf("unallocated pane: got %d", got)
+	}
+}
+
+func TestScrollbackPath(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "/data")
+	at := time.Date(2026, 10, 3, 9, 5, 7, 0, time.UTC)
+	got := scrollbackPath("db via bastion", "my/session", at)
+	want := "/data/tmux-tabbed-terminal/scrollback/db_via_bastion/my_session/2026-10-03_09-05-07.txt"
+	if got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+	if fileSafe("..") != "_" || fileSafe("") != "_" {
+		t.Fatal("dot names aren't made safe")
 	}
 }
