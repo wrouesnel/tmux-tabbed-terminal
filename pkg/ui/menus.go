@@ -13,6 +13,7 @@ import (
 var accelerators = func() map[string][]string {
 	accels := map[string][]string{
 		"app.new-window":     {"<Primary><Shift>n"},
+		"app.preferences":    {"<Primary>comma"},
 		"win.close-window":   {"<Primary><Shift>q"},
 		"win.new-session":    {"<Primary><Shift>t"},
 		"win.close-pane":     {"<Primary><Shift>w"},
@@ -65,7 +66,7 @@ func mainMenu() *glib.MenuModel {
 		section("Zoom In", "win.zoom-in", "Zoom Out", "win.zoom-out", "Normal Size", "win.zoom-normal"),
 		section("Find Session…", "win.find-session", "Group Sessions by Application", "win.group-sessions"),
 		section("Show Sessions", "win.show-sidebar", "Full Screen", "win.fullscreen"),
-		section("About", "app.about"),
+		section("Preferences", "app.preferences", "About", "app.about"),
 	)
 }
 

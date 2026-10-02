@@ -65,3 +65,20 @@ func TestOffset(t *testing.T) {
 		t.Errorf("CSS: got %s", got)
 	}
 }
+
+func TestSchemesParse(t *testing.T) {
+	for _, s := range theme.Schemes {
+		if _, err := theme.ParseColor(s.Foreground); err != nil {
+			t.Errorf("%s foreground: %v", s.ID, err)
+		}
+		if _, err := theme.ParseColor(s.Background); err != nil {
+			t.Errorf("%s background: %v", s.ID, err)
+		}
+		if _, ok := theme.Palettes[s.Palette]; !ok {
+			t.Errorf("%s: no palette %q", s.ID, s.Palette)
+		}
+		if theme.SchemeByID(s.ID) == nil {
+			t.Errorf("%s: not found by ID", s.ID)
+		}
+	}
+}

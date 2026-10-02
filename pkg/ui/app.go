@@ -78,7 +78,14 @@ type App struct {
 
 	appearance  *Appearance
 	terminalCSS *gtk.CssProvider
-	windows     map[*Window]struct{}
+	// watched are the GSettings the appearance was read from, and their change handlers,
+	// so edits in GNOME Terminal or the desktop settings show up straight away.
+	watched []watchedSettings
+	// prefs is the open Preferences dialog, or nil.
+	prefs *preferences
+	// reloadPending is set while an appearance reload is queued.
+	reloadPending bool
+	windows       map[*Window]struct{}
 }
 
 // Run runs the application until its last window closes or ctx is cancelled.
@@ -149,9 +156,8 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 func (a *App) startup() {
 	glib.SetApplicationName(version.Name)
 	gtk.WindowSetDefaultIconName(IconName)
-	a.appearance = ResolveAppearance(a.cfg.Appearance, a.log)
 	installCSS(a.log)
-	a.installTerminalCSS()
+	a.reloadAppearance()
 	// Theme colors change with the GTK theme.
 	if settings, err := gtk.SettingsGetDefault(); err == nil {
 		for _, prop := range []string{"notify::gtk-theme-name", "notify::gtk-application-prefer-dark-theme"} {
@@ -182,6 +188,62 @@ func (a *App) startup() {
 		}
 	}
 	a.updateGroups()
+}
+
+// watchedSettings is a GSettings object and the handler watching it.
+type watchedSettings struct {
+	settings *glib.Settings
+	handler  glib.SignalHandle
+}
+
+// reloadAppearance works out the terminal look again and applies it everywhere: at
+// startup, when Preferences change, and when the GNOME Terminal profile or desktop font
+// it came from changes.
+func (a *App) reloadAppearance() {
+	for _, w := range a.watched {
+		w.settings.HandlerDisconnect(w.handler)
+	}
+	a.watched = nil
+
+	appearance, profile := ResolveAppearance(a.cfg.Appearance, a.state.Appearance, a.log)
+	a.appearance = appearance
+	watch := func(s *glib.Settings) {
+		// Several keys change at once when a profile is edited: reload once for them all.
+		handler := s.Connect("changed", func() { a.scheduleReload() })
+		a.watched = append(a.watched, watchedSettings{settings: s, handler: handler})
+	}
+	if profile != nil {
+		watch(profile)
+	}
+	if hasSchema(schemaInterface) {
+		watch(glib.SettingsNew(schemaInterface))
+	}
+
+	for w := range a.windows {
+		for _, p := range w.panes() {
+			a.appearance.Apply(p.term)
+		}
+	}
+	a.installTerminalCSS()
+}
+
+// scheduleReload reloads the appearance soon, once however many settings change.
+func (a *App) scheduleReload() {
+	if a.reloadPending {
+		return
+	}
+	a.reloadPending = true
+	glib.IdleAdd(func() {
+		a.reloadPending = false
+		a.reloadAppearance()
+	})
+}
+
+// setAppearancePrefs applies and remembers appearance choices from Preferences.
+func (a *App) setAppearancePrefs(prefs AppearancePrefs) {
+	a.state.Appearance = prefs
+	a.saveState()
+	a.reloadAppearance()
 }
 
 // startHost adds a host to the list and starts polling it.
@@ -508,6 +570,7 @@ func (a *App) activeWindow() *Window {
 func (a *App) installActions() {
 	addAction(a.gtkApp.IActionMap, "new-window", func() { a.NewWindow() })
 	addAction(a.gtkApp.IActionMap, "about", func() { a.showAbout() })
+	addAction(a.gtkApp.IActionMap, "preferences", func() { a.showPreferences() })
 	addAction(a.gtkApp.IActionMap, "quit", func() {
 		for w := range a.windows {
 			w.window.Destroy()

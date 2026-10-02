@@ -182,3 +182,43 @@ func (c Color) CSS() string {
 	return fmt.Sprintf("rgba(%d,%d,%d,%.3f)",
 		int(math.Round(c.R*maxByte)), int(math.Round(c.G*maxByte)), int(math.Round(c.B*maxByte)), c.A)
 }
+
+// Scheme is a built-in color scheme: text and background colors with a palette.
+type Scheme struct {
+	ID         string
+	Name       string
+	Foreground string
+	Background string
+	// Palette names an entry of Palettes.
+	Palette string
+}
+
+// Schemes are GNOME Terminal's built-in color schemes, with the palettes it pairs them
+// with.
+//
+//nolint:gochecknoglobals
+var Schemes = []Scheme{
+	{ID: "tango-dark", Name: "Tango dark", Foreground: "#d3d7cf", Background: "#2e3436", Palette: "tango"},
+	{ID: "tango-light", Name: "Tango light", Foreground: "#2e3436", Background: "#eeeeec", Palette: "tango"},
+	{ID: "gnome-dark", Name: "GNOME dark", Foreground: "#d0cfcc", Background: "#171421", Palette: "gnome"},
+	{ID: "gnome-light", Name: "GNOME light", Foreground: "#171421", Background: "#ffffff", Palette: "gnome"},
+	{ID: "solarized-dark", Name: "Solarized dark", Foreground: "#839496", Background: "#002b36", Palette: "solarized"},
+	{ID: "solarized-light", Name: "Solarized light", Foreground: "#657b83", Background: "#fdf6e3",
+		Palette: "solarized"},
+	{ID: "white-on-black", Name: "White on black", Foreground: "#ffffff", Background: "#000000", Palette: "linux"},
+	{ID: "gray-on-black", Name: "Gray on black", Foreground: "#aaaaaa", Background: "#000000", Palette: "linux"},
+	{ID: "green-on-black", Name: "Green on black", Foreground: "#00ff00", Background: "#000000", Palette: "xterm"},
+	{ID: "black-on-white", Name: "Black on white", Foreground: "#000000", Background: "#ffffff", Palette: "xterm"},
+	{ID: "black-on-light-yellow", Name: "Black on light yellow", Foreground: "#000000", Background: "#ffffdd",
+		Palette: "xterm"},
+}
+
+// SchemeByID returns the built-in scheme with an ID, or nil.
+func SchemeByID(id string) *Scheme {
+	for i := range Schemes {
+		if Schemes[i].ID == id {
+			return &Schemes[i]
+		}
+	}
+	return nil
+}

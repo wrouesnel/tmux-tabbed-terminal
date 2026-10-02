@@ -29,7 +29,11 @@ or split the window to watch several sessions side by side.
   whether or not tmux's `mouse` option is on. Programs that use the mouse
   or the full screen, such as vim, less and htop, get the wheel as usual.
 * **GNOME look.** Font and colors come from GNOME Terminal's default profile if it's
-  installed, otherwise from the desktop monospace font and the GTK theme.
+  installed, otherwise from the desktop monospace font and the GTK theme. Preferences
+  (Ctrl+comma) picks another GNOME Terminal profile, the GTK theme, one of GNOME
+  Terminal's built-in schemes or custom colors, and the font. The profile in use is
+  followed live as it's edited in GNOME Terminal, and the session list's colors are
+  derived from the terminal's.
 
 Each pane runs an ordinary `tmux attach-session` client in a VTE terminal, so your tmux
 configuration, key bindings and status line all work as usual. Switching a pane to another
@@ -86,6 +90,7 @@ program is using the mouse) gives copy, paste and split.
 | Ctrl+Shift+S | Show or hide the session list |
 | Ctrl+Shift+F | Search sessions (Enter opens the first match, Escape returns to the terminal) |
 | Ctrl+Shift+N | New window |
+| Ctrl+comma | Preferences |
 | Ctrl+Shift+Q | Close window |
 | F11 | Full screen |
 

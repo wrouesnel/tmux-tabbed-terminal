@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
@@ -44,15 +45,33 @@ func hasSchema(id string) bool {
 	return source != nil && source.Lookup(id, true) != nil
 }
 
-// gnomeTerminalProfile returns the settings of GNOME Terminal's default profile, or nil.
-func gnomeTerminalProfile() *glib.Settings {
+// GnomeProfile is one GNOME Terminal profile.
+type GnomeProfile struct {
+	UUID string
+	Name string
+}
+
+// gnomeTerminalProfiles lists GNOME Terminal's profiles and returns the default one's
+// UUID. It returns nothing if GNOME Terminal isn't installed.
+func gnomeTerminalProfiles() ([]GnomeProfile, string) {
 	if !hasSchema(schemaProfilesList) || !hasSchema(schemaProfile) {
-		return nil
+		return nil, ""
 	}
-	uuid := glib.SettingsNew(schemaProfilesList).GetString("default")
-	if uuid == "" {
-		return nil
+	list := glib.SettingsNew(schemaProfilesList)
+	profiles := []GnomeProfile{}
+	for _, uuid := range list.GetStrv("list") {
+		name := gnomeTerminalProfile(uuid).GetString("visible-name")
+		if name == "" {
+			name = uuid
+		}
+		profiles = append(profiles, GnomeProfile{UUID: uuid, Name: name})
 	}
+	return profiles, list.GetString("default")
+}
+
+// gnomeTerminalProfile returns the settings of a GNOME Terminal profile. The schemas must
+// be installed.
+func gnomeTerminalProfile(uuid string) *glib.Settings {
 	return glib.SettingsNewWithPath(schemaProfile, fmt.Sprintf(profilePathFormat, uuid))
 }
 
@@ -66,9 +85,38 @@ func systemMonospaceFont() string {
 	return fallbackFont
 }
 
-// ResolveAppearance works out the terminal look from the configuration, GNOME Terminal's
-// default profile and the desktop settings, in that order of precedence.
-func ResolveAppearance(cfg AppearanceConfig, log *zap.Logger) *Appearance {
+// Color scheme sources chosen in Preferences. A scheme setting is one of these, a
+// built-in scheme's ID, or schemeProfilePrefix and a GNOME Terminal profile UUID.
+const (
+	// schemeConfigured follows the configuration file, and GNOME Terminal's default
+	// profile if use-gnome-terminal-profile is set.
+	schemeConfigured    = ""
+	schemeTheme         = "theme"
+	schemeCustom        = "custom"
+	schemeProfilePrefix = "profile:"
+)
+
+// AppearancePrefs are the appearance choices made in Preferences. They override the
+// configuration file. Empty fields leave it alone.
+type AppearancePrefs struct {
+	// Scheme picks where colors come from: see the scheme constants.
+	Scheme string `yaml:"scheme,omitempty"`
+	// Foreground, Background and Palette are the custom scheme's colors and palette name.
+	Foreground string `yaml:"foreground,omitempty"`
+	Background string `yaml:"background,omitempty"`
+	Palette    string `yaml:"palette,omitempty"`
+	// Font is a Pango font description. UseSystemFont, if set, says whether to use the
+	// desktop's monospace font instead.
+	Font          string `yaml:"font,omitempty"`
+	UseSystemFont *bool  `yaml:"use-system-font,omitempty"`
+	BoldIsBright  *bool  `yaml:"bold-is-bright,omitempty"`
+}
+
+// ResolveAppearance works out the terminal look: Preferences first, then the
+// configuration file, then GNOME Terminal's default profile and the desktop settings. It
+// also returns the GNOME Terminal profile it read, if any, so changes to it can be
+// followed.
+func ResolveAppearance(cfg AppearanceConfig, prefs AppearancePrefs, log *zap.Logger) (*Appearance, *glib.Settings) {
 	app := &Appearance{
 		Font:            systemMonospaceFont(),
 		UseThemeColors:  true,
@@ -76,12 +124,68 @@ func ResolveAppearance(cfg AppearanceConfig, log *zap.Logger) *Appearance {
 	}
 	app.Palette, _ = theme.ParsePalette(theme.Palettes[theme.DefaultPalette])
 
-	if cfg.UseGnomeTerminalProfile {
-		if profile := gnomeTerminalProfile(); profile != nil {
-			applyProfile(app, profile, log)
+	var profile *glib.Settings
+	profiles, defaultUUID := gnomeTerminalProfiles()
+	usesProfile := func(uuid string) {
+		for _, p := range profiles {
+			if p.UUID == uuid {
+				profile = gnomeTerminalProfile(uuid)
+				applyProfile(app, profile, log)
+				return
+			}
+		}
+		log.Warn("No such GNOME Terminal profile", zap.String("uuid", uuid))
+	}
+
+	switch scheme := prefs.Scheme; {
+	case scheme == schemeConfigured:
+		if cfg.UseGnomeTerminalProfile && defaultUUID != "" {
+			usesProfile(defaultUUID)
+		}
+		applyConfig(app, cfg, log)
+	case strings.HasPrefix(scheme, schemeProfilePrefix):
+		usesProfile(strings.TrimPrefix(scheme, schemeProfilePrefix))
+	case scheme == schemeTheme:
+		app.UseThemeColors = true
+	case scheme == schemeCustom:
+		fg, ferr := theme.ParseColor(prefs.Foreground)
+		bg, berr := theme.ParseColor(prefs.Background)
+		if ferr == nil && berr == nil {
+			app.UseThemeColors, app.Foreground, app.Background = false, fg, bg
+		}
+		if pal, err := theme.ParsePalette(theme.Palettes[prefs.Palette]); err == nil && len(pal) == paletteSize {
+			app.Palette = pal
+		}
+	default:
+		if s := theme.SchemeByID(scheme); s != nil {
+			app.UseThemeColors = false
+			app.Foreground = theme.MustParseColor(s.Foreground)
+			app.Background = theme.MustParseColor(s.Background)
+			app.Palette, _ = theme.ParsePalette(theme.Palettes[s.Palette])
+		} else {
+			log.Warn("Unknown color scheme", zap.String("scheme", scheme))
 		}
 	}
 
+	// Fonts and bold apply whatever the colors are.
+	if prefs.Scheme != schemeConfigured && cfg.Font != "" {
+		app.Font = cfg.Font
+	}
+	if prefs.UseSystemFont != nil {
+		if *prefs.UseSystemFont {
+			app.Font = systemMonospaceFont()
+		} else if prefs.Font != "" {
+			app.Font = prefs.Font
+		}
+	}
+	if prefs.BoldIsBright != nil {
+		app.BoldIsBright = *prefs.BoldIsBright
+	}
+	return app, profile
+}
+
+// applyConfig applies the configuration file's appearance settings.
+func applyConfig(app *Appearance, cfg AppearanceConfig, log *zap.Logger) {
 	if cfg.Font != "" {
 		app.Font = cfg.Font
 	}
@@ -105,7 +209,6 @@ func ResolveAppearance(cfg AppearanceConfig, log *zap.Logger) *Appearance {
 	if cfg.BoldIsBright != nil {
 		app.BoldIsBright = *cfg.BoldIsBright
 	}
-	return app
 }
 
 // paletteFromConfig parses a palette name or a list of colors.

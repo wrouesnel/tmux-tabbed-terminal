@@ -15,6 +15,8 @@ import (
 type uiState struct {
 	SidebarRight       *bool `yaml:"sidebar-right,omitempty"`
 	GroupByApplication *bool `yaml:"group-by-application,omitempty"`
+	// Appearance is what was chosen in Preferences.
+	Appearance AppearancePrefs `yaml:"appearance,omitempty"`
 }
 
 // stateFile is where uiState is kept.
