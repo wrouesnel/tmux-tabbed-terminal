@@ -238,42 +238,31 @@ packages in Ubuntu containers from their vendored source.
 
 One-time setup:
 
-* Create the package signing key in your personal keyring (`~/.gnupg`), with its
-  passphrase kept in the login keyring. The PPA uploads are signed with it.
-
-  ```sh
-  secret-tool store --label "tmux-tabbed-terminal package signing key passphrase" \
-      gpg-passphrase tmux-tabbed-terminal-packages
-  secret-tool lookup gpg-passphrase tmux-tabbed-terminal-packages |
-      gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
-          --quick-gen-key "tmux-tabbed-terminal packages <wrouesnel@wrouesnel.com>" rsa4096 sign 5y
-  FPR=$(gpg --with-colons --list-keys "tmux-tabbed-terminal packages" | awk -F: '/^fpr/ { print $10; exit }')
-  ```
-
-  Your keyring holds the key from then on; scripts and configuration refer to it by
-  fingerprint.
+* PPA uploads are signed with the shared Launchpad key
+  `2A12 8435 A6FE 8BD7 51AA  5787 2095 9AB8 0709 6ADB` ("Will Rouesnel (GPG key for
+  launchpad signing)"), which lives in the maintainer's personal keyring with its
+  passphrase in the login keyring. COPR signs the RPMs with its own key, so it needs none.
 * Give the release workflow the key. This is the one step where the private key leaves
-  your keyring, so it's one you run deliberately: the workflow signs the PPA uploads on
+  the keyring, so it's one you run deliberately: the workflow signs the PPA uploads on
   GitHub's runners, which can't reach your keyring. GitHub keeps secrets encrypted and
   only hands them to workflow runs of this repository.
 
   ```sh
-  gpg --armor --export-secret-keys "$FPR" | gh secret set PACKAGE_SIGNING_KEY
-  secret-tool lookup gpg-passphrase tmux-tabbed-terminal-packages |
-      gh secret set PACKAGE_SIGNING_KEY_PASSPHRASE
+  FPR=2A128435A6FE8BD751AA578720959AB807096ADB
+  secret-tool lookup service gpg-passphrase fingerprint "$FPR" |
+      gpg --batch --pinentry-mode loopback --passphrase-fd 0 --armor --export-secret-keys "$FPR" |
+      gh secret set PACKAGE_SIGNING_KEY
+  secret-tool lookup service gpg-passphrase fingerprint "$FPR" | gh secret set PACKAGE_SIGNING_KEY_PASSPHRASE
   gh variable set PACKAGE_SIGNING_KEY_FINGERPRINT --body "$FPR"
   ```
+
+  Then run the **Package signing check** workflow (Actions → Package signing check → Run
+  workflow). It imports the key as the release does, signs both source packages and checks
+  the signatures, without uploading anything.
 * On Launchpad: create the PPA `tmux-tabbed-terminal`
-  (https://launchpad.net/~w-rouesnel/+activate-ppa), and register the signing key with the
-  account (https://launchpad.net/~w-rouesnel/+editpgpkeys) after publishing its public
-  part, which Launchpad fetches from the Ubuntu keyserver:
-
-  ```sh
-  gpg --keyserver keyserver.ubuntu.com --send-keys "$FPR"
-  ```
-
-  Launchpad emails a message encrypted to the key; decrypting it confirms it. Then, in
-  the PPA's settings, add `ppa:longsleep/golang-backports` as a dependency (Edit PPA
+  (https://launchpad.net/~w-rouesnel/+activate-ppa); the shared key is registered, and must
+  be active, on the account (https://launchpad.net/~w-rouesnel/+editpgpkeys). Then, in the
+  PPA's settings, add `ppa:longsleep/golang-backports` as a dependency (Edit PPA
   dependencies), so Ubuntu 24.04 builds find Go 1.26, and enable arm64 under Change
   details. The workflow uploads to `ppa:w-rouesnel/tmux-tabbed-terminal`, or to the PPA
   named by the `PPA` repository variable.

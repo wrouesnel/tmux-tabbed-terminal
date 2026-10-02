@@ -1,0 +1,44 @@
+---
+# Checks the package signing key in the repository's secrets works: imports it as the
+# release does, signs the PPA source packages and verifies the signatures. Nothing is
+# uploaded. Run it by hand after changing the key.
+name: Package signing check
+on:
+  workflow_dispatch:
+
+jobs:
+  sign:
+    strategy:
+      matrix:
+        suite: [noble, resolute]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends debhelper devscripts
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Import signing key
+        uses: ./.github/actions/import-signing-key
+        with:
+          key: ${{ secrets.PACKAGE_SIGNING_KEY }}
+          passphrase: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
+          fingerprint: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
+
+      - name: Signed source package
+        run: DEB_SIGNING_KEY="$SIGNING_KEY" go run mage.go debSource ${{ matrix.suite }}
+
+      - name: Verify the signatures
+        run: |
+          cd release/ppa/${{ matrix.suite }}
+          for f in ./*.dsc ./*_source.changes; do
+            gpg --batch --status-fd 1 --verify "$f" 2>/dev/null | grep -E "VALIDSIG .*$SIGNING_KEY"
+          done
