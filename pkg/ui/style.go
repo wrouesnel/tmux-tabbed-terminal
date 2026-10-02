@@ -143,6 +143,37 @@ func terminalStylesheet(fg, bg theme.Color) string {
 	background-color: %[5]s;
 	color: %[4]s;
 }
+
+/* The search box is a well cut into the list: the terminal background, a touch of the
+   accent hue so it reads as an input, and an accent border that firms up on focus. The
+   accent is the theme's selection color, which also marks busy sessions and the
+   selected row, so every highlight in the list shares one hue. */
+.ttt-nav entry.ttt-search {
+	background-color: mix(@theme_selected_bg_color, %[5]s, 0.92);
+	background-image: none;
+	color: %[4]s;
+	border: 1px solid mix(@theme_selected_bg_color, %[1]s, 0.7);
+	box-shadow: none;
+}
+.ttt-nav entry.ttt-search:focus {
+	border-color: @theme_selected_bg_color;
+	box-shadow: inset 0 0 0 1px @theme_selected_bg_color;
+}
+.ttt-nav entry.ttt-search image {
+	color: mix(@theme_selected_bg_color, %[4]s, 0.4);
+}
+
+/* Toggled buttons, such as grouping, take the accent mixed into the list surface. */
+.ttt-nav button:checked {
+	background-color: mix(@theme_selected_bg_color, %[1]s, 0.65);
+	background-image: none;
+	color: %[4]s;
+	border-color: transparent;
+	box-shadow: none;
+}
+.ttt-nav button:checked:hover {
+	background-color: mix(@theme_selected_bg_color, %[1]s, 0.5);
+}
 `, surface, hover, border, fg.CSS(), bg.CSS())
 }
 
