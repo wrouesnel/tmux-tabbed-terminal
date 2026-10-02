@@ -468,14 +468,34 @@ func (a *App) commandContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(a.ctx, commandTimeout)
 }
 
-// NewWindow opens a window showing the most recently active session.
-func (a *App) NewWindow() *Window {
+// addWindow makes a window and tracks it until it closes.
+func (a *App) addWindow() *Window {
 	w := newWindow(a)
 	a.windows[w] = struct{}{}
 	w.window.Connect("destroy", func() {
 		w.destroyed()
 		delete(a.windows, w)
 	})
+	return w
+}
+
+// NewWindowFor opens a window showing one session, with the session list hidden, with its
+// top left near x, y on the screen. A session dragged out of a window opens this way.
+func (a *App) NewWindowFor(key string, x, y int) *Window {
+	w := a.addWindow()
+	w.setSidebarVisible(false)
+	w.activePane.Show(key)
+	w.refresh()
+	const grabOffset = 40                                         // so the pointer lands in the title bar
+	w.window.Move(max(x-grabOffset*4, 0), max(y-grabOffset/2, 0)) //nolint:mnd // a little left of the pointer
+	w.window.Present()
+	w.activePane.Focus()
+	return w
+}
+
+// NewWindow opens a window showing the most recently active session.
+func (a *App) NewWindow() *Window {
+	w := a.addWindow()
 
 	if id := a.pickSession(nil); id != "" {
 		w.activePane.Show(id)

@@ -185,6 +185,21 @@ func newSidebar(w *Window) *sidebar {
 		}
 		gtkx.DragSetIconName(ctx, "utilities-terminal-symbolic")
 	})
+	// A session dropped outside the window, where nothing takes it, opens in a window of
+	// its own. drag-failed comes before drag-end, which clears the dragged session.
+	sb.list.Connect("drag-failed", func(_ interface{}, _ interface{}, result interface{}) bool {
+		key := w.app.dragKey
+		if key == "" || enumValue(result) != dragResultNoTarget {
+			return false
+		}
+		x, y, ok := pointerPosition()
+		if !ok || w.contains(x, y) {
+			return false
+		}
+		glib.IdleAdd(func() { w.app.NewWindowFor(key, x, y) })
+		// Handled: no animation of the drag returning to the list.
+		return true
+	})
 	sb.list.Connect("drag-end", func() { w.app.endDrag() })
 
 	placeholder, _ := gtk.LabelNew("No sessions")

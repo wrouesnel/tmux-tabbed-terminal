@@ -30,7 +30,9 @@ or split the window to watch several sessions side by side.
   time, so it works for sessions that aren't displayed.
 * **Splits.** Split a pane right or down, then pick a session for the new pane from
   the list. Or drag a session from the list onto a pane, as in VS Code: drop it near an
-  edge to split that side, or in the middle to show it in that pane. Splits nest, and
+  edge to split that side, or in the middle to show it in that pane. Drag it out of the
+  window to open it in a window of its own, with the session list hidden (on X11; Wayland
+  doesn't tell applications where the pointer is outside their windows). Splits nest, and
   their dividers can be dragged.
 * **Scrolling.** The mouse wheel scrolls tmux's history, speeding up the faster the wheel
   spins. A scrollbar beside each terminal shows where you are in tmux's history (not

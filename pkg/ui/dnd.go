@@ -68,5 +68,55 @@ func dragTargets() []gtk.TargetEntry {
 	return []gtk.TargetEntry{*te}
 }
 
+// dragResultNoTarget is GTK_DRAG_RESULT_NO_TARGET: a drag released where nothing took it.
+const dragResultNoTarget = 1
+
+// enumValue reads an enum signal argument, which gotk3 passes as one of several integer
+// types.
+func enumValue(v interface{}) int {
+	switch n := v.(type) {
+	case int:
+		return n
+	case int32:
+		return int(n)
+	case int64:
+		return int(n)
+	case uint:
+		return int(n) //nolint:gosec // GTK enums are small
+	case uint32:
+		return int(n)
+	default:
+		return -1
+	}
+}
+
+// pointerPosition returns the pointer's position on the screen.
+func pointerPosition() (int, int, bool) {
+	display, err := gdk.DisplayGetDefault()
+	if err != nil {
+		return 0, 0, false
+	}
+	seat, err := display.GetDefaultSeat()
+	if err != nil {
+		return 0, 0, false
+	}
+	pointer, err := seat.GetPointer()
+	if err != nil {
+		return 0, 0, false
+	}
+	var x, y int
+	if err := pointer.GetPosition(nil, &x, &y); err != nil {
+		return 0, 0, false
+	}
+	return x, y, true
+}
+
+// contains reports whether a screen position is inside the window.
+func (w *Window) contains(x, y int) bool {
+	wx, wy := w.window.GetPosition()
+	width, height := w.window.GetSize()
+	return x >= wx && x < wx+width && y >= wy && y < wy+height
+}
+
 // dropAction is the drag action sessions use.
 const dropAction = gdk.ACTION_COPY
