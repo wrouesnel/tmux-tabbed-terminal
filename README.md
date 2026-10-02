@@ -73,10 +73,10 @@ An APT repository on GitHub Pages:
 ```sh
 sudo install -d -m 0755 /etc/apt/keyrings
 sudo curl -fsSLo /etc/apt/keyrings/tmux-tabbed-terminal.gpg \
-    https://wrouesnel.github.io/tmux-tabbed-terminal/key.gpg
+    https://blog.wrouesnel.com/tmux-tabbed-terminal/key.gpg
 sudo tee /etc/apt/sources.list.d/tmux-tabbed-terminal.sources <<EOF
 Types: deb
-URIs: https://wrouesnel.github.io/tmux-tabbed-terminal
+URIs: https://blog.wrouesnel.com/tmux-tabbed-terminal
 Suites: noble
 Components: main
 Signed-By: /etc/apt/keyrings/tmux-tabbed-terminal.gpg
@@ -91,7 +91,7 @@ A dnf repository on GitHub Pages. Use `el8` or `el10` to match the release:
 
 ```sh
 sudo curl -fsSLo /etc/yum.repos.d/tmux-tabbed-terminal.repo \
-    https://wrouesnel.github.io/tmux-tabbed-terminal/rpm/tmux-tabbed-terminal-el10.repo
+    https://blog.wrouesnel.com/tmux-tabbed-terminal/rpm/tmux-tabbed-terminal-el10.repo
 sudo dnf install tmux-tabbed-terminal
 ```
 

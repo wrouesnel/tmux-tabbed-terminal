@@ -226,11 +226,16 @@ jobs:
           passphrase: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
           fingerprint: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
 
+      # The site's real address, which is a custom domain if the account's Pages has one.
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
       - name: Build package repositories
         env:
           APT_POOL_DIR: .pool
           RPM_POOL_DIR: .pool
-          APT_REPO_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
+          APT_REPO_URL: ${{ steps.pages.outputs.base_url }}
         run: |
           APT_SIGNING_KEY="$SIGNING_KEY" go run mage.go aptRepo
           RPM_SIGNING_KEY="$SIGNING_KEY" go run mage.go rpmRepo

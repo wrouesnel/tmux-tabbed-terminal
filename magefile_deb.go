@@ -36,7 +36,7 @@ const (
 	// aptDefaultSuite is the distribution the packages are built on and published for.
 	aptDefaultSuite = "noble"
 	aptComponent    = "main"
-	aptDefaultURL   = "https://wrouesnel.github.io/tmux-tabbed-terminal"
+	aptDefaultURL   = "https://blog.wrouesnel.com/tmux-tabbed-terminal"
 	aptRepoDir      = ".apt-repo"
 )
 
