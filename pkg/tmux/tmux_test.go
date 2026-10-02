@@ -2,6 +2,7 @@ package tmux_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -117,10 +118,12 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 
 	history, err := c.CaptureHistory(ctx, id)
-	if err != nil {
+	switch {
+	case errors.Is(err, tmux.ErrCaptureCrashes):
+		t.Logf("not capturing on this tmux: %v", err)
+	case err != nil:
 		t.Fatalf("CaptureHistory: %v", err)
-	}
-	if !strings.Contains(history, "\n1\n2\n3\n") || !strings.Contains(history, "\n200\n") {
+	case !strings.Contains(history, "\n1\n2\n3\n") || !strings.Contains(history, "\n200\n"):
 		t.Errorf("history doesn't hold the output: %q", history)
 	}
 

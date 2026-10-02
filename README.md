@@ -96,6 +96,9 @@ sudo dnf install tmux-tabbed-terminal
 ```
 
 dnf asks to import the signing key the first time. RHEL 8's tmux is 2.7, which works.
+RHEL 10's tmux is a pre-release snapshot (it reports `next-3.4`) whose `capture-pane`
+corrupts its memory and kills the server, so Save Scrollback refuses to run against it
+rather than end every session; everything else works.
 
 ## Usage
 

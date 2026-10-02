@@ -433,10 +433,35 @@ func (c *Client) ScrollPane(ctx context.Context, pane string, lines int) (Scroll
 	return parseScroll(fields[0], fields[1], fields[2]), nil
 }
 
+// ErrCaptureCrashes is returned instead of capturing a pane on a tmux server whose
+// capture-pane corrupts its heap and aborts, taking every session with it.
+var ErrCaptureCrashes = errors.New("this tmux crashes when capturing a pane, which would end every " +
+	"session on the server: upgrade tmux to save scrollback")
+
+// captureCrashes reports whether a tmux version crashes in capture-pane. RHEL 10 ships a
+// pre-release git snapshot of tmux, which reports itself as next-3.4, that does.
+func captureCrashes(version string) bool {
+	return strings.HasPrefix(strings.TrimSpace(version), "next-3.4")
+}
+
+// ServerVersion returns the version of the tmux server, as #{version} reports it.
+func (c *Client) ServerVersion(ctx context.Context) (string, error) {
+	out, err := c.run(ctx, "display-message", "-p", "#{version}")
+	return strings.TrimSpace(out), err
+}
+
 // CaptureHistory returns all the history and visible text of a session's current pane,
 // with lines tmux wrapped joined again and trailing blanks removed. tmux before 3.0 pads
-// joined lines with spaces to the pane width.
+// joined lines with spaces to the pane width. On a tmux whose capture-pane crashes, it
+// returns ErrCaptureCrashes without trying.
 func (c *Client) CaptureHistory(ctx context.Context, session string) (string, error) {
+	version, err := c.ServerVersion(ctx)
+	if err != nil {
+		return "", err
+	}
+	if captureCrashes(version) {
+		return "", errors.Wrap(ErrCaptureCrashes, "tmux "+version)
+	}
 	out, err := c.run(ctx, "capture-pane", "-p", "-J", "-S", "-", "-E", "-", "-t", session)
 	if err != nil {
 		return "", err
