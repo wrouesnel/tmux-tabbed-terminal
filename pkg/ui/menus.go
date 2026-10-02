@@ -75,7 +75,8 @@ func terminalMenu() *glib.MenuModel {
 	return menuOf(
 		section("Copy", "win.copy", "Paste", "win.paste"),
 		section("Split Right", "win.split-right", "Split Down", "win.split-down"),
-		section("Save Scrollback", "win.save-scrollback", "Save Scrollback As…", "win.save-scrollback-as"),
+		section("Save Scrollback", "win.save-scrollback", "Save Scrollback As…", "win.save-scrollback-as",
+			"Scrollback Dir…", "win.scrollback-dir"),
 		section("New Session", "win.new-session", "Close Pane", "win.close-pane"),
 	)
 }

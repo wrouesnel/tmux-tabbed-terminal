@@ -935,6 +935,7 @@ func sessionMenu(id string, pinned bool) *glib.MenuModel {
 	save := glib.MenuNew()
 	save.AppendItem(item("Save Scrollback", "win.session-save-scrollback"))
 	save.AppendItem(item("Save Scrollback As…", "win.session-save-scrollback-as"))
+	save.AppendItem(item("Scrollback Dir…", "win.session-scrollback-dir"))
 	manage := glib.MenuNew()
 	if pinned {
 		manage.AppendItem(item("Unpin", "win.session-unpin"))

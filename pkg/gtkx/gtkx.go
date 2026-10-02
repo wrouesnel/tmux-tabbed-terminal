@@ -7,14 +7,17 @@ package gtkx
 #include <gtk/gtk.h>
 
 static GdkDragContext *to_drag_context(void *p) { return GDK_DRAG_CONTEXT(p); }
+static GtkWindow *to_window(void *p) { return GTK_WINDOW(p); }
 */
 import "C"
 
 import (
+	"errors"
 	"unsafe"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
+	"github.com/gotk3/gotk3/gtk"
 )
 
 // DragContext is a drag context as a signal handler receives it: a *gdk.DragContext, or
@@ -55,4 +58,17 @@ func DragSetIconName(ctx DragContext, name string) {
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
 	C.gtk_drag_set_icon_name(dragContext(ctx), cname, 0, 0)
+}
+
+// ShowURI opens a URI, such as a file:// folder, in the user's default application, as a
+// child of window.
+func ShowURI(window *gtk.Window, uri string) error {
+	curi := C.CString(uri)
+	defer C.free(unsafe.Pointer(curi))
+	var gerr *C.GError
+	if C.gtk_show_uri_on_window(C.to_window(unsafe.Pointer(window.GObject)), curi, C.GDK_CURRENT_TIME, &gerr) == 0 {
+		defer C.g_error_free(gerr)
+		return errors.New(C.GoString(gerr.message))
+	}
+	return nil
 }

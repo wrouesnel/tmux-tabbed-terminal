@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 	"go.uber.org/zap"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
 )
 
@@ -93,6 +95,31 @@ func (w *Window) SaveScrollback(key string, choose bool) {
 		}
 		w.flashStatus("Saved scrollback to " + path)
 	})
+}
+
+// OpenScrollbackDir opens the folder of a session's saved scrollback in the file manager,
+// or the folder of all saved scrollback if the session has none.
+func (w *Window) OpenScrollbackDir(key string) {
+	dir := scrollbackDir()
+	if h, s := w.app.lookup(key); s != nil {
+		if sessionDir := filepath.Join(dir, fileSafe(h.Name), fileSafe(s.Name)); isDir(sessionDir) {
+			dir = sessionDir
+		}
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:mnd // owner only
+		w.showError("Could not create the scrollback folder", err.Error())
+		return
+	}
+	uri := (&url.URL{Scheme: "file", Path: dir}).String()
+	if err := gtkx.ShowURI(&w.window.Window, uri); err != nil {
+		w.showError("Could not open the scrollback folder", err.Error())
+	}
+}
+
+// isDir reports whether a path is a directory.
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // flashStatus shows a message in the title bar for a few seconds.

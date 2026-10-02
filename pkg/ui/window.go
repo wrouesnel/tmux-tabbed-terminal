@@ -155,6 +155,8 @@ func (w *Window) installActions() {
 	addStr("session-save-scrollback-as", func(key string) { w.SaveScrollback(key, true) })
 	add("save-scrollback", func() { w.SaveScrollback(w.activePane.SessionKey(), false) })
 	add("save-scrollback-as", func() { w.SaveScrollback(w.activePane.SessionKey(), true) })
+	addStr("session-scrollback-dir", w.OpenScrollbackDir)
+	add("scrollback-dir", func() { w.OpenScrollbackDir(w.activePane.SessionKey()) })
 	addStr("host-new-session", func(host string) { w.NewSessionOn(w.activePane, host) })
 	addStr("session-pin", func(key string) {
 		if pin, ok := w.app.pinOf(key); ok {
