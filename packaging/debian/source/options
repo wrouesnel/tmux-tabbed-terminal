@@ -1,0 +1,4 @@
+tar-ignore = .git
+tar-ignore = bin
+tar-ignore = release
+tar-ignore = .bin

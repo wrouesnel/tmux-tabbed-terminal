@@ -29,7 +29,7 @@ const (
 	debHomepage   = "https://github.com/wrouesnel/tmux-tabbed-terminal"
 	debSection    = "x11"
 	// debExtraDepends are run-time dependencies dpkg-shlibdeps can't see.
-	debExtraDepends = "tmux (>= 3.0)"
+	debExtraDepends = "tmux (>= 2.7)"
 	appID           = "io.github.wrouesnel.TmuxTabbedTerminal"
 	packagingDir    = "packaging"
 
@@ -170,6 +170,34 @@ Description: {{.Summary}}
  show a spinner, and sessions with output you haven't seen are marked.
 `))
 
+// stageInstall copies a platform's binaries and the files every package installs into a
+// staging root, and returns the staged binaries and documentation directory.
+func stageInstall(platform Platform, stage string) ([]string, string, error) {
+	binaries := []string{}
+	for _, cmd := range goCmds {
+		dst := path.Join(stage, "usr", "bin", cmd)
+		if err := copyFile(platform.PlatformBin(cmd), dst, 0o755); err != nil {
+			return nil, "", err
+		}
+		binaries = append(binaries, dst)
+	}
+	linuxDir := path.Join(curDir, packagingDir, "linux")
+	files := map[string]string{
+		path.Join(linuxDir, appID+".desktop"):      "usr/share/applications/" + appID + ".desktop",
+		path.Join(linuxDir, appID+".svg"):          "usr/share/icons/hicolor/scalable/apps/" + appID + ".svg",
+		path.Join(linuxDir, appID+".metainfo.xml"): "usr/share/metainfo/" + appID + ".metainfo.xml",
+		path.Join(curDir, packagingDir, "config.example.yml"): path.Join("usr/share/doc", debPackage,
+			"config.example.yml"),
+		path.Join(curDir, "README.md"): path.Join("usr/share/doc", debPackage, "README.md"),
+	}
+	for src, dst := range files {
+		if err := copyFile(src, path.Join(stage, dst), 0o644); err != nil {
+			return nil, "", err
+		}
+	}
+	return binaries, path.Join(stage, "usr", "share", "doc", debPackage), nil
+}
+
 // Deb builds a Debian package of the platform's binaries into release/.
 //
 //nolint:gocritic
@@ -189,32 +217,12 @@ func Deb(OSArch string) error {
 		return err
 	}
 
-	binaries := []string{}
-	for _, cmd := range goCmds {
-		dst := path.Join(stage, "usr", "bin", cmd)
-		if err := copyFile(platform.PlatformBin(cmd), dst, 0o755); err != nil {
-			return err
-		}
-		binaries = append(binaries, dst)
-	}
-
-	linuxDir := path.Join(curDir, packagingDir, "linux")
-	files := map[string]string{
-		appID + ".desktop":      "usr/share/applications/" + appID + ".desktop",
-		appID + ".svg":          "usr/share/icons/hicolor/scalable/apps/" + appID + ".svg",
-		appID + ".metainfo.xml": "usr/share/metainfo/" + appID + ".metainfo.xml",
-	}
-	for src, dst := range files {
-		if err := copyFile(path.Join(linuxDir, src), path.Join(stage, dst), 0o644); err != nil {
-			return err
-		}
-	}
-	docDir := path.Join(stage, "usr", "share", "doc", debPackage)
-	if err := copyFile(path.Join(curDir, packagingDir, "config.example.yml"), path.Join(docDir, "config.example.yml"),
-		0o644); err != nil {
+	binaries, docDir, err := stageInstall(platform, stage)
+	if err != nil {
 		return err
 	}
-	if err := copyFile(path.Join(curDir, "README.md"), path.Join(docDir, "README.md"), 0o644); err != nil {
+	if err := copyFile(path.Join(curDir, packagingDir, "debian", "copyright"), path.Join(docDir, "copyright"),
+		0o644); err != nil {
 		return err
 	}
 	changelog := fmt.Sprintf("%s (%s) %s; urgency=medium\n\n  * Release %s.\n\n -- %s  %s\n",

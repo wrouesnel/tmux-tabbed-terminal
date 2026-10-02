@@ -70,8 +70,8 @@ github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd h1:LDQqn
 github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd/go.mod h1:aZqd9kCMsGL7AuUv/m/PvWLdg5sjJsZ4oHDEnfPPfY0=
 github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 h1:nIPpBwaJSVYIxUFsDv3M8ofmx9yWTog9BfvIu0q41lo=
 github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8/go.mod h1:HUYIGzjTL3rfEspMxjDjgmT5uz5wzYJKVo23qUhYTos=
-github.com/yuseferi/zax/v2 v2.5.0 h1:bfTbN6VeyJUDmJsiLmdngdErbaDJ0KR/JXszBnoUwxI=
-github.com/yuseferi/zax/v2 v2.5.0/go.mod h1:DO5xpTKcBOspjqU8mORm7A9NnuW3PsFoSJZZPZZFLCU=
+github.com/yuseferi/zax/v2 v2.3.6 h1:4vhO3/LNpgaiPjz/Q/Ttv0+G3mr08o9FSfhXHekquwM=
+github.com/yuseferi/zax/v2 v2.3.6/go.mod h1:Gs7nWcxRwW/uSY8qVEVoWvSGOZfMfG/XiR+05mLppXA=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=

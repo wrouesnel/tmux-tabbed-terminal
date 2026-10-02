@@ -2,6 +2,7 @@
 <component type="desktop-application">
   <id>io.github.wrouesnel.TmuxTabbedTerminal</id>
   <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
   <name>Tmux Tabbed Terminal</name>
   <summary>Switch between your tmux sessions in a GNOME Terminal style window</summary>
   <description>

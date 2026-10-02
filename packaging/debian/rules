@@ -1,0 +1,39 @@
+#!/usr/bin/make -f
+# Builds from vendor/, with the distribution's Go and no network, as Launchpad's
+# builders require.
+
+export GOFLAGS := -mod=vendor -trimpath
+export GOTOOLCHAIN := local
+export GOPROXY := off
+export GOCACHE := $(CURDIR)/debian/.gocache
+export HOME := $(CURDIR)/debian/.home
+
+# The upstream version, without the distribution suffix: 0.1.0~resolute1 is 0.1.0.
+VERSION := $(shell dpkg-parsechangelog -S Version | sed 's/~.*//')
+APP_ID := io.github.wrouesnel.TmuxTabbedTerminal
+DEST := debian/tmux-tabbed-terminal
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+
+override_dh_auto_build:
+	go build -ldflags "-s -w -X github.com/wrouesnel/tmux-tabbed-terminal/version.Version=v$(VERSION)" \
+		-o debian/build/tmux-tabbed-terminal ./cmd/tmux-tabbed-terminal
+
+# The tests need a tmux server and an X server, which package builders don't have.
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -D -m0755 debian/build/tmux-tabbed-terminal $(DEST)/usr/bin/tmux-tabbed-terminal
+	install -D -m0644 packaging/linux/$(APP_ID).desktop $(DEST)/usr/share/applications/$(APP_ID).desktop
+	install -D -m0644 packaging/linux/$(APP_ID).svg $(DEST)/usr/share/icons/hicolor/scalable/apps/$(APP_ID).svg
+	install -D -m0644 packaging/linux/$(APP_ID).metainfo.xml $(DEST)/usr/share/metainfo/$(APP_ID).metainfo.xml
+	install -D -m0644 packaging/config.example.yml $(DEST)/usr/share/doc/tmux-tabbed-terminal/config.example.yml
+
+# Go binaries have no DWARF for dwz to compress once stripped.
+override_dh_dwz:
+
+override_dh_auto_clean:
+	rm -rf debian/.gocache debian/.home debian/build

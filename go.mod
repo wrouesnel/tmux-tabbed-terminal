@@ -1,6 +1,6 @@
 module github.com/wrouesnel/tmux-tabbed-terminal
 
-go 1.27.1
+go 1.26.0
 
 require (
 	github.com/alecthomas/kong v1.16.1
@@ -37,3 +37,5 @@ require (
 )
 
 replace go.yaml.in/yaml/v4 => github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd
+
+replace github.com/yuseferi/zax/v2 => github.com/yuseferi/zax/v2 v2.3.6

@@ -718,6 +718,7 @@ func (a *App) showAbout() {
 	dlg.SetComments(version.Description)
 	dlg.SetLogoIconName(IconName)
 	dlg.SetWebsite("https://github.com/wrouesnel/tmux-tabbed-terminal")
+	dlg.SetLicenseType(gtk.LICENSE_MIT_X11)
 	if w := a.activeWindow(); w != nil {
 		dlg.SetTransientFor(w.window)
 	}

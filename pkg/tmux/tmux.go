@@ -370,6 +370,11 @@ func (c *Client) KillSession(ctx context.Context, session string) error {
 // RenameSession renames a session.
 func (c *Client) RenameSession(ctx context.Context, session string, name string) error {
 	_, err := c.run(ctx, "rename-session", "-t", session, "--", name)
+	if err != nil && strings.Contains(err.Error(), "no current client") {
+		// tmux before 3.0, as on RHEL 8, renames the session and then fails to redraw a
+		// client's status line when none is attached.
+		return nil
+	}
 	return err
 }
 
@@ -429,9 +434,18 @@ func (c *Client) ScrollPane(ctx context.Context, pane string, lines int) (Scroll
 }
 
 // CaptureHistory returns all the history and visible text of a session's current pane,
-// with lines tmux wrapped joined again.
+// with lines tmux wrapped joined again and trailing blanks removed. tmux before 3.0 pads
+// joined lines with spaces to the pane width.
 func (c *Client) CaptureHistory(ctx context.Context, session string) (string, error) {
-	return c.run(ctx, "capture-pane", "-p", "-J", "-S", "-", "-E", "-", "-t", session)
+	out, err := c.run(ctx, "capture-pane", "-p", "-J", "-S", "-", "-E", "-", "-t", session)
+	if err != nil {
+		return "", err
+	}
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		lines[i] = strings.TrimRight(line, " \t")
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 // HasSession reports whether a session exists.
