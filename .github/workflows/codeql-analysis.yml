@@ -26,19 +26,19 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # The UI links GTK3 and VTE with cgo.
       - name: Install build dependencies
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libgtk-3-dev libvte-2.91-dev
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
           # Autobuild doesn't know about mage - build with the project's own build instead.
@@ -49,4 +49,4 @@ jobs:
         run: go run mage.go binary
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4

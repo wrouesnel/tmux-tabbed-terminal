@@ -26,10 +26,10 @@ jobs:
       release-matrix: ${{ steps.generate-matrix.outputs.release-matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -49,7 +49,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Fetch tags
         run: git fetch --prune --unshallow --tags -f
@@ -58,7 +58,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $BUILD_DEPS
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -68,7 +68,7 @@ jobs:
       - name: Debian Package
         run: go run mage.go deb ${{ matrix.osarch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-${{ matrix.osarch }}
           path: release/*
@@ -99,7 +99,7 @@ jobs:
         run: dnf install -y ${{ matrix.repos }} gcc git gtk3-devel vte291-devel rpm-build tmux tar gzip
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -107,14 +107,14 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
       - name: RPM
         run: go run mage.go rpm linux-${{ matrix.arch }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: rpm-${{ matrix.el }}-${{ matrix.arch }}
           path: release/*.rpm
@@ -128,14 +128,14 @@ jobs:
       - rpm-build
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: "{release,rpm}-*"
           merge-multiple: true
           path: release
 
       - name: Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -151,7 +151,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -159,7 +159,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends debhelper devscripts dput
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -199,13 +199,13 @@ jobs:
       cancel-in-progress: false
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install repository tools
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm
 
       - name: Setup Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 
@@ -229,7 +229,7 @@ jobs:
       # The site's real address, which is a custom domain if the account's Pages has one.
       - name: Configure Pages
         id: pages
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v6
 
       - name: Build package repositories
         env:
@@ -241,10 +241,10 @@ jobs:
           RPM_SIGNING_KEY="$SIGNING_KEY" go run mage.go rpmRepo
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: .apt-repo
 
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
