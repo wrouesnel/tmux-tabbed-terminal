@@ -1,0 +1,39 @@
+---
+name: Import package signing key
+description: >
+  Imports the package signing key into gpg and caches its passphrase in gpg-agent, so
+  gpg, rpmsign and debsign can sign without prompting. Sets SIGNING_KEY to its fingerprint.
+inputs:
+  key:
+    description: The ASCII-armored private key (the PACKAGE_SIGNING_KEY secret).
+    required: true
+  passphrase:
+    description: The key's passphrase (the PACKAGE_SIGNING_KEY_PASSPHRASE secret).
+    required: true
+  fingerprint:
+    description: The key's fingerprint (the PACKAGE_SIGNING_KEY_FINGERPRINT variable).
+    required: true
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        KEY: ${{ inputs.key }}
+        PASSPHRASE: ${{ inputs.passphrase }}
+        FINGERPRINT: ${{ inputs.fingerprint }}
+      run: |
+        set -euo pipefail
+        if [ -z "$KEY" ] || [ -z "$FINGERPRINT" ]; then
+          echo "::error::The PACKAGE_SIGNING_KEY secret or PACKAGE_SIGNING_KEY_FINGERPRINT variable is not set"
+          exit 1
+        fi
+        mkdir -p -m 0700 ~/.gnupg
+        echo allow-preset-passphrase >> ~/.gnupg/gpg-agent.conf
+        gpg-connect-agent reloadagent /bye >/dev/null
+        printf '%s\n' "$KEY" | gpg --batch --import
+        preset=$(command -v gpg-preset-passphrase || echo /usr/lib/gnupg/gpg-preset-passphrase)
+        for grip in $(gpg --batch --with-colons --with-keygrip --list-secret-keys "$FINGERPRINT" |
+                      awk -F: '/^grp/ { print $10 }'); do
+          printf '%s' "$PASSPHRASE" | "$preset" --preset "$grip"
+        done
+        echo "SIGNING_KEY=$FINGERPRINT" >> "$GITHUB_ENV"

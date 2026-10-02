@@ -4,11 +4,15 @@ on:
   push:
     tags:
       - v*
-  # Rebuild the APT repository from the existing releases without making a new one.
+  # Rebuild the package repositories from the existing releases without making a new one.
   workflow_dispatch:
 
 env:
   BUILD_DEPS: libgtk-3-dev libvte-2.91-dev tmux
+  # The PPA the Ubuntu 26.04 source package is uploaded to.
+  PPA: ${{ vars.PPA || 'ppa:wrouesnel/tmux-tabbed-terminal' }}
+  # The Ubuntu suite the PPA builds for.
+  PPA_SUITE: resolute
 
 jobs:
   integration:
@@ -33,7 +37,8 @@ jobs:
         id: generate-matrix
         run: go run mage.go githubReleaseMatrix
 
-  # The UI links GTK3 and VTE with cgo, so each architecture builds on its own runner.
+  # Ubuntu 24.04 packages and archives. The UI links GTK3 and VTE with cgo, so each
+  # architecture builds on its own runner.
   release-build:
     needs:
       - integration
@@ -68,17 +73,64 @@ jobs:
           name: release-${{ matrix.osarch }}
           path: release/*
 
+  # RPMs for RHEL 8 and 10, built in a container of each, so they link its GTK and VTE.
+  rpm-build:
+    needs:
+      - integration
+    strategy:
+      matrix:
+        el: [el8, el10]
+        arch: [amd64, arm64]
+        include:
+          - el: el8
+            image: docker.io/library/rockylinux:8
+            repos: --enablerepo=powertools
+          - el: el10
+            image: docker.io/library/almalinux:10
+            repos: --enablerepo=crb
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y ${{ matrix.repos }} gcc git gtk3-devel vte291-devel rpm-build tmux tar gzip
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: RPM
+        run: go run mage.go rpm linux-${{ matrix.arch }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-${{ matrix.el }}-${{ matrix.arch }}
+          path: release/*.rpm
+
   release:
     permissions:
       contents: write
     runs-on: ubuntu-24.04
     needs:
       - release-build
+      - rpm-build
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          pattern: "{release,rpm}-*"
           merge-multiple: true
           path: release
 
@@ -90,12 +142,46 @@ jobs:
           files: |
             release/*
 
-  # Publishes an APT repository of every release's packages to GitHub Pages. The
-  # repository is rebuilt from the release assets each time, so Pages holds no state of
-  # its own. Needs Pages set to deploy from GitHub Actions, the PACKAGE_SIGNING_KEY and
-  # PACKAGE_SIGNING_KEY_PASSPHRASE secrets, and the PACKAGE_SIGNING_KEY_FINGERPRINT variable:
-  # see the README.
-  publish-apt:
+  # Uploads a signed source package for Ubuntu 26.04 to the PPA, where Launchpad builds
+  # it. Needs the PPA created on Launchpad, with the signing key registered to the
+  # account: see the README.
+  ppa:
+    needs:
+      - integration
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install packaging tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends debhelper devscripts dput
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Import signing key
+        uses: ./.github/actions/import-signing-key
+        with:
+          key: ${{ secrets.PACKAGE_SIGNING_KEY }}
+          passphrase: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
+          fingerprint: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
+
+      - name: Source package
+        run: DEB_SIGNING_KEY="$SIGNING_KEY" go run mage.go debSource "$PPA_SUITE"
+
+      - name: Upload to the PPA
+        run: dput "$PPA" release/ppa/*_source.changes
+
+  # Publishes the package repositories to GitHub Pages: APT for Ubuntu 24.04 and dnf for
+  # RHEL 8 and 10, from the packages of every release. They're rebuilt from the release
+  # assets each time, so Pages holds no state of its own. Needs Pages set to deploy from
+  # GitHub Actions, the PACKAGE_SIGNING_KEY and PACKAGE_SIGNING_KEY_PASSPHRASE secrets,
+  # and the PACKAGE_SIGNING_KEY_FINGERPRINT variable: see the README.
+  publish-pages:
     needs:
       - release
     # Run after a release, or on its own when dispatched.
@@ -115,6 +201,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install repository tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
@@ -124,30 +213,27 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p .apt-pool
+          mkdir -p .pool
           gh release list --limit 1000 --json tagName --jq '.[].tagName' | while read -r tag; do
-            gh release download "$tag" --pattern '*.deb' --dir .apt-pool --skip-existing
+            gh release download "$tag" --pattern '*.deb' --pattern '*.rpm' --dir .pool --skip-existing
           done
-          ls -l .apt-pool
+          ls -l .pool
 
       - name: Import signing key
-        env:
-          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
-          FINGERPRINT: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
-        run: |
-          if [ -z "$PACKAGE_SIGNING_KEY" ] || [ -z "$FINGERPRINT" ]; then
-            echo "::error::The PACKAGE_SIGNING_KEY secret or PACKAGE_SIGNING_KEY_FINGERPRINT variable is not set"
-            exit 1
-          fi
-          printf '%s\n' "$PACKAGE_SIGNING_KEY" | gpg --batch --import
-          echo "APT_SIGNING_KEY=$FINGERPRINT" >> "$GITHUB_ENV"
+        uses: ./.github/actions/import-signing-key
+        with:
+          key: ${{ secrets.PACKAGE_SIGNING_KEY }}
+          passphrase: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
+          fingerprint: ${{ vars.PACKAGE_SIGNING_KEY_FINGERPRINT }}
 
-      - name: Build APT repository
+      - name: Build package repositories
         env:
-          APT_SIGNING_PASSPHRASE: ${{ secrets.PACKAGE_SIGNING_KEY_PASSPHRASE }}
-          APT_POOL_DIR: .apt-pool
+          APT_POOL_DIR: .pool
+          RPM_POOL_DIR: .pool
           APT_REPO_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}
-        run: go run mage.go aptRepo
+        run: |
+          APT_SIGNING_KEY="$SIGNING_KEY" go run mage.go aptRepo
+          RPM_SIGNING_KEY="$SIGNING_KEY" go run mage.go rpmRepo
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

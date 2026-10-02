@@ -82,3 +82,62 @@ jobs:
         run: go run mage.go binary
       - name: Build Debian package
         run: go run mage.go deb linux-amd64
+
+  # RPMs build in a container of each RHEL release, so they link its GTK and VTE.
+  rpm:
+    strategy:
+      matrix:
+        include:
+          - el: el8
+            image: docker.io/library/rockylinux:8
+            repos: --enablerepo=powertools
+          - el: el10
+            image: docker.io/library/almalinux:10
+            repos: --enablerepo=crb
+    runs-on: ubuntu-24.04
+    container: ${{ matrix.image }}
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y ${{ matrix.repos }} gcc git gtk3-devel vte291-devel rpm-build tmux tar gzip
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test against the release's tmux
+        run: go test ./pkg/tmux/
+      - name: RPM
+        run: go run mage.go rpm linux-amd64
+
+  # The PPA's source package, built as Launchpad builds it: on Ubuntu 26.04 with its own Go,
+  # from the vendored modules, without fetching anything.
+  ppa-source:
+    runs-on: ubuntu-24.04
+    container: docker.io/library/ubuntu:26.04
+    steps:
+      - name: Install build dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git build-essential debhelper \
+            dpkg-dev golang-go libgtk-3-dev libvte-2.91-dev pkgconf
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Source package
+        run: go run mage.go debSource resolute
+      - name: Build it
+        run: |
+          cd release/ppa
+          dpkg-source -x ./*.dsc build
+          cd build
+          dpkg-buildpackage -b -us -uc

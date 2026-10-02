@@ -81,6 +81,11 @@ func (t *Terminal) Start(cmd *exec.Cmd) (string, error) {
 	C.vte_terminal_set_pty(t.native(), pty)
 
 	masterFd := int(C.vte_pty_get_fd(pty))
+	// VTE before 0.54, as on RHEL 8, leaves the pty locked until its own child setup,
+	// which this doesn't use: unlock it, as unlockpt does.
+	if err := unix.IoctlSetPointerInt(masterFd, unix.TIOCSPTLCK, 0); err != nil {
+		return "", errors.Wrap(err, "unlocking the pty")
+	}
 	ptyNum, err := unix.IoctlGetUint32(masterFd, unix.TIOCGPTN)
 	if err != nil {
 		return "", errors.Wrap(err, "TIOCGPTN")

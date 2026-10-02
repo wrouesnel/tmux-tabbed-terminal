@@ -1,6 +1,6 @@
 # tmux-tabbed-terminal
 
-![tmux-tabbed-terminal with three sessions side by side](docs/screenshot.png)
+![tmux-tabbed-terminal showing pinned sessions and sessions grouped by application](docs/screenshot.png)
 
 A terminal for people who live in tmux. It looks like GNOME Terminal, but instead of tabs
 it lists the tmux sessions running for you in a sidebar. Click a session to switch to it,
@@ -53,8 +53,22 @@ never kills a session.
 
 ## Install
 
-Packages for Ubuntu 24.04 (noble), amd64 and arm64, are published as an APT repository on
-GitHub Pages:
+Packages are built for Ubuntu 24.04 and 26.04 and for RHEL 8 and 10 (and rebuilds such as
+Rocky Linux and AlmaLinux), for amd64 and arm64. They're signed with the key
+`4EE9 6BF5 C3BE 937F DD2D  0109 47CC C9AA 4B3F D5DE`. Each
+[GitHub release](https://github.com/wrouesnel/tmux-tabbed-terminal/releases) also has them
+attached.
+
+### Ubuntu 26.04 (PPA)
+
+```sh
+sudo add-apt-repository ppa:wrouesnel/tmux-tabbed-terminal
+sudo apt install tmux-tabbed-terminal
+```
+
+### Ubuntu 24.04
+
+An APT repository on GitHub Pages:
 
 ```sh
 sudo install -d -m 0755 /etc/apt/keyrings
@@ -71,8 +85,17 @@ sudo apt update
 sudo apt install tmux-tabbed-terminal
 ```
 
-The `.deb` files are also attached to each
-[GitHub release](https://github.com/wrouesnel/tmux-tabbed-terminal/releases).
+### RHEL 8 and 10
+
+A dnf repository on GitHub Pages. Use `el8` or `el10` to match the release:
+
+```sh
+sudo curl -fsSLo /etc/yum.repos.d/tmux-tabbed-terminal.repo \
+    https://wrouesnel.github.io/tmux-tabbed-terminal/rpm/tmux-tabbed-terminal-el10.repo
+sudo dnf install tmux-tabbed-terminal
+```
+
+dnf asks to import the signing key the first time. RHEL 8's tmux is 2.7, which works.
 
 ## Usage
 
@@ -178,7 +201,8 @@ panes already attached to its sessions running.
 
 ## Building
 
-Building needs Go, the GTK3 and VTE development headers, and tmux for the tests. On Ubuntu:
+Building needs Go 1.26 or newer, the GTK3 and VTE development headers, and tmux for the
+tests. On Ubuntu:
 
 ```sh
 sudo apt install libgtk-3-dev libvte-2.91-dev tmux xvfb
@@ -191,24 +215,34 @@ go run mage.go binary
 | `go run mage.go binary` | Builds into `bin/` and symlinks the binary into the repository root. |
 | `go run mage.go test` | Runs the tests. The GUI test runs under `xvfb-run` and is skipped without it. |
 | `go run mage.go lint` / `style` | golangci-lint and formatting checks, as CI runs them. |
+| `go run mage.go rpm linux-amd64` | Builds `release/tmux-tabbed-terminal-<version>-1.<dist>.x86_64.rpm` on the RHEL release it's for, with `gtk3-devel`, `vte291-devel` and `rpm-build` installed. |
+| `go run mage.go debSource resolute` | Builds a source package for an Ubuntu suite, with the Go modules vendored, in `release/ppa/`; `DEB_SIGNING_KEY` signs it. |
 | `go run mage.go deb linux-amd64` | Builds `release/tmux-tabbed-terminal_<version>_amd64.deb`. Dependencies come from `dpkg-shlibdeps`, so build on the release you're packaging for. |
 | `go run mage.go aptRepo` | Builds an APT repository in `.apt-repo/` from the `.deb` files in `release/` and `$APT_POOL_DIR`, signed with the gpg key whose fingerprint is `$APT_SIGNING_KEY` (and passphrase `$APT_SIGNING_PASSPHRASE`, if it has one). |
+| `go run mage.go rpmRepo` | Adds dnf repositories for each RHEL release and architecture, and their `.repo` files, to `.apt-repo/rpm` from the `.rpm` files in `release/` and `$RPM_POOL_DIR`, signed with `$RPM_SIGNING_KEY`. Run it after `aptRepo`, which starts the site afresh. |
 
 The application uses cgo to link GTK3 and VTE, so each architecture is built on a machine
 of that architecture. Cross-compiling needs `CC` and `PKG_CONFIG_LIBDIR` set for the target.
 
-## Releases and the APT repository
+## Releases and package repositories
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`. It does the following:
 
 1. Runs the integration checks.
-2. Builds the archive and `.deb` for amd64 on `ubuntu-24.04` and arm64 on
+2. Builds the archive and Ubuntu 24.04 `.deb` for amd64 on `ubuntu-24.04` and arm64 on
    `ubuntu-24.04-arm`.
-3. Attaches them to a GitHub release.
-4. Rebuilds the APT repository from the `.deb` files of every release and deploys it to
-   GitHub Pages. Pages holds no state of its own.
+3. Builds the RHEL 8 and 10 RPMs in Rocky Linux 8 and AlmaLinux 10 containers, on both
+   architectures, with `go run mage.go rpm`. Older GTK libraries, as on RHEL 8, are
+   detected with `pkg-config` and selected in gotk3 with build tags.
+4. Attaches them all to a GitHub release.
+5. Builds a signed source package for Ubuntu 26.04 with `go run mage.go debSource
+   resolute`, Go modules vendored in, and uploads it to the PPA, where Launchpad builds
+   it. Launchpad builds offline with Ubuntu's Go, which is why `go.mod` targets Go 1.26.0;
+   CI checks the package builds that way.
+6. Rebuilds the APT and dnf repositories from the packages of every release, signs them,
+   and deploys them to GitHub Pages. Pages holds no state of its own.
 
-The repository can be rebuilt without a release by running the workflow manually.
+The repositories can be rebuilt without a release by running the workflow manually.
 
 One-time setup:
 
@@ -221,13 +255,14 @@ One-time setup:
       gpg-passphrase tmux-tabbed-terminal-packages
   secret-tool lookup gpg-passphrase tmux-tabbed-terminal-packages |
       gpg --batch --pinentry-mode loopback --passphrase-fd 0 \
-          --quick-gen-key "tmux-tabbed-terminal packages <wrouesnel@wrouesnel.com>" ed25519 sign 5y
+          --quick-gen-key "tmux-tabbed-terminal packages <wrouesnel@wrouesnel.com>" rsa4096 sign 5y
   FPR=$(gpg --with-colons --list-keys "tmux-tabbed-terminal packages" | awk -F: '/^fpr/ { print $10; exit }')
   ```
 
   Your keyring holds the key from then on; scripts and configuration refer to it by
-  fingerprint. Users trust its public part through the repository's `key.gpg`, so
-  replacing it breaks their `apt update`.
+  fingerprint. It's RSA, as RHEL 8's rpm can't check EdDSA signatures. Users trust its
+  public part through the repositories' `key.gpg` and `key.asc`, so replacing it breaks
+  their `apt update` and `dnf`.
 * Give the release workflow the key. This is the one step where the private key leaves
   your keyring, so it's one you run deliberately: the workflow signs each release's
   repository metadata on GitHub's runners, which can't reach your keyring. GitHub keeps
@@ -239,6 +274,24 @@ One-time setup:
       gh secret set PACKAGE_SIGNING_KEY_PASSPHRASE
   gh variable set PACKAGE_SIGNING_KEY_FINGERPRINT --body "$FPR"
   ```
+* For the PPA, on Launchpad: create the PPA `tmux-tabbed-terminal`
+  (https://launchpad.net/~wrouesnel/+activate-ppa), and register the signing key with the
+  account (https://launchpad.net/~wrouesnel/+editpgpkeys) after publishing its public
+  part, which Launchpad fetches from the Ubuntu keyserver:
+
+  ```sh
+  gpg --keyserver keyserver.ubuntu.com --send-keys "$FPR"
+  ```
+
+  Launchpad emails a message encrypted to the key; decrypting it confirms it. The
+  workflow uploads to `ppa:wrouesnel/tmux-tabbed-terminal`, or to the PPA named by the
+  `PPA` repository variable.
+
+## License
+
+MIT: see [LICENSE](LICENSE). The binary links
+[github.com/yuseferi/zax](https://github.com/yuseferi/zax), which is GPL-3.0, through
+`go.logutil`, so binary packages are distributed under the GPL-3.0 as well.
 
 ## Implementation
 

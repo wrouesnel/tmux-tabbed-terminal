@@ -1119,11 +1119,54 @@ func makeBuilder(cmd string, platform Platform) func() error {
 
 		fmt.Println("Building", platform.PlatformBin(cmd))
 		// GTK3 and VTE are linked with cgo, so the binary is dynamically linked.
+		args := []string{"build", "-ldflags", fmt.Sprintf("-s -w -buildid='' -X %s=%s", versionSymbol(), version),
+			"-trimpath", "-o", platform.PlatformBin(cmd)}
+		if tags := gotk3Tags(); len(tags) > 0 {
+			fmt.Println("Building for older GTK libraries with tags", strings.Join(tags, ","))
+			args = append(args, "-tags", strings.Join(tags, ","))
+		}
 		return sh.RunWith(map[string]string{"CGO_ENABLED": "1", "GOOS": platform.OS, "GOARCH": platform.Arch},
-			"go", "build", "-ldflags", fmt.Sprintf("-s -w -buildid='' -X %s=%s", versionSymbol(), version),
-			"-trimpath", "-o", platform.PlatformBin(cmd), cmdSrc)
+			"go", append(args, cmdSrc)...)
 	}
 	return f
+}
+
+// gotk3Tag returns gotk3's build tag for a library older than gotk3 builds for by default,
+// or "". gotk3 binds the newest functions unless told the library is older with tags such
+// as gtk_3_22; it has a tag for every minor version from lowest, in steps of step, up to
+// before newest.
+func gotk3Tag(module, prefix string, lowest, newest, step int) string {
+	out, err := exec.Command("pkg-config", "--modversion", module).Output()
+	if err != nil {
+		return ""
+	}
+	parts := strings.Split(strings.TrimSpace(string(out)), ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	minor, err := strconv.Atoi(parts[1])
+	if err != nil || minor >= newest {
+		return ""
+	}
+	minor -= (minor - lowest) % step
+	return fmt.Sprintf("%s_%d", prefix, max(minor, lowest))
+}
+
+// gotk3Tags returns the gotk3 build tags matching the GTK libraries installed, such as
+// glib_2_56 and gtk_3_22 on RHEL 8. Up-to-date libraries need none.
+func gotk3Tags() []string {
+	tags := []string{}
+	for _, t := range []string{
+		gotk3Tag("glib-2.0", "glib_2", 40, 68, 2),
+		gotk3Tag("gtk+-3.0", "gtk_3", 6, 24, 2),
+		gotk3Tag("pango", "pango_1", 36, 44, 2),
+		gotk3Tag("cairo", "cairo_1", 9, 16, 1),
+	} {
+		if t != "" {
+			tags = append(tags, t)
+		}
+	}
+	return tags
 }
 
 func getCurrentPlatform() *Platform {
