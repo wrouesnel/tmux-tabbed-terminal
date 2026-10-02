@@ -10,7 +10,7 @@ on:
 env:
   BUILD_DEPS: libgtk-3-dev libvte-2.91-dev tmux
   # The PPA the Ubuntu 26.04 source package is uploaded to.
-  PPA: ${{ vars.PPA || 'ppa:wrouesnel/tmux-tabbed-terminal' }}
+  PPA: ${{ vars.PPA || 'ppa:w-rouesnel/tmux-tabbed-terminal' }}
   # The Ubuntu suite the PPA builds for.
   PPA_SUITE: resolute
 

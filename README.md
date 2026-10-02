@@ -62,7 +62,7 @@ attached.
 ### Ubuntu 26.04 (PPA)
 
 ```sh
-sudo add-apt-repository ppa:wrouesnel/tmux-tabbed-terminal
+sudo add-apt-repository ppa:w-rouesnel/tmux-tabbed-terminal
 sudo apt install tmux-tabbed-terminal
 ```
 
@@ -275,8 +275,8 @@ One-time setup:
   gh variable set PACKAGE_SIGNING_KEY_FINGERPRINT --body "$FPR"
   ```
 * For the PPA, on Launchpad: create the PPA `tmux-tabbed-terminal`
-  (https://launchpad.net/~wrouesnel/+activate-ppa), and register the signing key with the
-  account (https://launchpad.net/~wrouesnel/+editpgpkeys) after publishing its public
+  (https://launchpad.net/~w-rouesnel/+activate-ppa), and register the signing key with the
+  account (https://launchpad.net/~w-rouesnel/+editpgpkeys) after publishing its public
   part, which Launchpad fetches from the Ubuntu keyserver:
 
   ```sh
@@ -284,7 +284,7 @@ One-time setup:
   ```
 
   Launchpad emails a message encrypted to the key; decrypting it confirms it. The
-  workflow uploads to `ppa:wrouesnel/tmux-tabbed-terminal`, or to the PPA named by the
+  workflow uploads to `ppa:w-rouesnel/tmux-tabbed-terminal`, or to the PPA named by the
   `PPA` repository variable.
 
 ## License
