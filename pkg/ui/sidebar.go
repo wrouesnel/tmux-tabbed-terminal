@@ -46,6 +46,8 @@ type sidebar struct {
 	list     *gtk.ListBox
 	rows     map[string]*sessionRow
 	hostRows map[string]*hostRow
+	pinRows  map[string]*sessionRow
+	pinHead  *pinHeaderRow
 	// rowKeys maps a row's native pointer to its entry key.
 	rowKeys map[uintptr]string
 	order   []listEntry
@@ -65,6 +67,43 @@ type listEntry struct {
 	host   string
 	group  string
 	isHost bool
+	// pin is a pinned session's row; target is the key of its running session, or "" if
+	// it isn't running.
+	pin    bool
+	target string
+	// pinHeader is the heading of the pinned sessions.
+	pinHeader bool
+}
+
+// isSession reports whether an entry is a session in its host's list.
+func (e *listEntry) isSession() bool { return !e.isHost && !e.pin && !e.pinHeader }
+
+// Keys of the pinned section's rows. They start with a byte host names can't.
+const (
+	pinHeaderKey = "\x1epinned"
+	pinKeyPrefix = "\x1epin" + keySep
+)
+
+// pinKey returns the list key of a pin.
+func pinKey(pin PinnedSession) string { return pinKeyPrefix + pin.Host + keySep + pin.Name }
+
+// parsePinKey returns the pin of a pin key.
+func parsePinKey(key string) (PinnedSession, bool) {
+	rest, ok := strings.CutPrefix(key, pinKeyPrefix)
+	if !ok {
+		return PinnedSession{}, false
+	}
+	host, name, ok := strings.Cut(rest, keySep)
+	return PinnedSession{Host: host, Name: name}, ok
+}
+
+// pinHeaderRow heads the pinned sessions. Clicking it folds them away.
+type pinHeaderRow struct {
+	row    *gtk.ListBoxRow
+	arrow  *gtk.Image
+	hide   *gtk.ToggleButton
+	count  *gtk.Label
+	update func()
 }
 
 // hostRow heads a host's sessions. It isn't selectable: its menu acts on the host.
@@ -79,7 +118,7 @@ type hostRow struct {
 
 func newSidebar(w *Window) *sidebar {
 	sb := &sidebar{
-		win: w, rows: map[string]*sessionRow{}, hostRows: map[string]*hostRow{},
+		win: w, rows: map[string]*sessionRow{}, hostRows: map[string]*hostRow{}, pinRows: map[string]*sessionRow{},
 		rowKeys: map[uintptr]string{},
 	}
 
@@ -117,7 +156,19 @@ func newSidebar(w *Window) *sidebar {
 	sb.list.SetFilterFunc(sb.filter)
 	sb.list.SetHeaderFunc(sb.header)
 	sb.list.Connect("row-activated", func(_ interface{}, row *gtk.ListBoxRow) {
-		if e := sb.entry(sb.rowKeys[row.Native()]); e != nil && !e.isHost {
+		e := sb.entry(sb.rowKeys[row.Native()])
+		switch {
+		case e == nil || e.isHost:
+		case e.pinHeader:
+			w.app.setPinsCollapsed(!w.app.state.PinsCollapsed)
+		case e.pin && e.target != "":
+			w.ShowSession(e.target)
+		case e.pin:
+			// The pinned session isn't running: start it again under its name.
+			if pin, ok := parsePinKey(e.key); ok && w.app.host(pin.Host) != nil {
+				w.NewNamedSession(w.activePane, pin.Host, pin.Name)
+			}
+		default:
 			w.ShowSession(e.key)
 		}
 	})
@@ -127,8 +178,10 @@ func newSidebar(w *Window) *sidebar {
 	// Sessions can be dragged onto a pane to open them there or in a new split.
 	sb.list.DragSourceSet(gdk.BUTTON1_MASK, dragTargets(), dropAction)
 	sb.list.Connect("drag-begin", func(_ interface{}, ctx interface{}) {
-		if e := sb.entry(sb.pressKey); e != nil && !e.isHost {
+		if e := sb.entry(sb.pressKey); e != nil && e.isSession() {
 			w.app.dragKey = e.key
+		} else if e != nil && e.pin {
+			w.app.dragKey = e.target
 		}
 		gtkx.DragSetIconName(ctx, "utilities-terminal-symbolic")
 	})
@@ -216,11 +269,29 @@ func (sb *sidebar) hostMatches(name string) bool {
 		return true
 	}
 	for _, e := range sb.order {
-		if !e.isHost && e.host == name && sb.matches(e.key) {
+		if e.isSession() && e.host == name && sb.matches(e.key) {
 			return true
 		}
 	}
 	return false
+}
+
+// pinMatches reports whether a pinned session is shown, by the search, host filter and
+// whether unavailable pins are hidden.
+func (sb *sidebar) pinMatches(e *listEntry) bool {
+	if e.target != "" {
+		return sb.matches(e.target)
+	}
+	pin, _ := parsePinKey(e.key)
+	if sb.win.app.state.HideUnavailablePins || (sb.hostFilter != "" && pin.Host != sb.hostFilter) {
+		return false
+	}
+	for _, word := range strings.Fields(strings.ToLower(sb.query)) {
+		if !strings.Contains(strings.ToLower(pin.Name+" "+pin.Host), word) {
+			return false
+		}
+	}
+	return true
 }
 
 // filter is the list's filter function.
@@ -231,6 +302,10 @@ func (sb *sidebar) filter(row *gtk.ListBoxRow) bool {
 		return false
 	case e.isHost:
 		return sb.hostMatches(e.host)
+	case e.pinHeader:
+		return true
+	case e.pin:
+		return sb.pinMatches(e)
 	default:
 		return sb.matches(e.key)
 	}
@@ -275,7 +350,7 @@ func (sb *sidebar) header(row *gtk.ListBoxRow, before *gtk.ListBoxRow) {
 func (sb *sidebar) visibleIDs() []string {
 	keys := []string{}
 	for _, e := range sb.order {
-		if !e.isHost && sb.matches(e.key) {
+		if e.isSession() && sb.matches(e.key) {
 			keys = append(keys, e.key)
 		}
 	}
@@ -435,6 +510,16 @@ func (r *sessionRow) update(s *tmux.Session, state activity.State, shown bool, o
 	setClass(r.row, "ttt-shown", shown)
 }
 
+// showUnavailable shows a pinned session which isn't running.
+func (r *sessionRow) showUnavailable(pin PinnedSession) {
+	r.name.SetText(pin.Name)
+	r.subtitle.SetText(pin.Host + " · not running")
+	r.row.SetTooltipText(fmt.Sprintf("%s isn't running on %s. Click to start it.", pin.Name, pin.Host))
+	r.indicator.SetVisibleChildName(indicatorNone)
+	setClass(r.row, "ttt-unseen", false)
+	setClass(r.row, "ttt-shown", false)
+}
+
 // sessionSubtitle describes what a session is running. othersAttached counts clients
 // other than this application's.
 func sessionSubtitle(s *tmux.Session, othersAttached int) string {
@@ -478,7 +563,7 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 	now := time.Now()
 	ownTTYs, ownClients := app.ownTTYs(), app.ownClients()
 
-	order := []listEntry{}
+	order := sb.pinEntries(now, shown)
 	for _, h := range app.hosts {
 		hr, ok := sb.hostRows[h.Name]
 		if !ok {
@@ -544,11 +629,14 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 				// The filtered host was removed: show every host again.
 				defer sb.setHostFilter("")
 			}
-			if !keep[e.key] {
+			if !keep[e.key] && !e.pinHeader {
 				delete(sb.rowKeys, row.Native())
-				if e.isHost {
+				switch {
+				case e.isHost:
 					delete(sb.hostRows, e.key)
-				} else {
+				case e.pin:
+					delete(sb.pinRows, e.key)
+				default:
 					delete(sb.rows, e.key)
 				}
 			}
@@ -559,10 +647,8 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 		}
 		sb.list.InvalidateHeaders()
 	}
-	// Session names and commands may have changed what the search matches.
-	if sb.query != "" {
-		sb.list.InvalidateFilter()
-	}
+	// Names, commands, pins and filter settings may have changed what's shown.
+	sb.list.InvalidateFilter()
 
 	sb.selectSession(selected)
 }
@@ -586,10 +672,116 @@ func (sb *sidebar) setHostFilter(name string) {
 
 // rowOf returns the row widget of an entry.
 func (sb *sidebar) rowOf(e listEntry) *gtk.ListBoxRow {
-	if e.isHost {
+	switch {
+	case e.isHost:
 		return sb.hostRows[e.key].row
+	case e.pinHeader:
+		return sb.pinHead.row
+	case e.pin:
+		return sb.pinRows[e.key].row
+	default:
+		return sb.rows[e.key].row
 	}
-	return sb.rows[e.key].row
+}
+
+// pinEntries makes the rows of the pinned section, updating them from the hosts' state,
+// and returns their entries: the heading, and the pins unless they're folded away.
+func (sb *sidebar) pinEntries(now time.Time, shown map[string]bool) []listEntry {
+	app := sb.win.app
+	if len(app.state.Pinned) == 0 {
+		return nil
+	}
+	if sb.pinHead == nil {
+		sb.pinHead = newPinHeaderRow(app)
+		sb.rowKeys[sb.pinHead.row.Native()] = pinHeaderKey
+	}
+	sb.pinHead.update()
+	entries := []listEntry{{key: pinHeaderKey, pinHeader: true}}
+	if app.state.PinsCollapsed {
+		return entries
+	}
+	multipleHosts := len(app.hosts) > 1
+	for _, pin := range app.state.Pinned {
+		key := pinKey(pin)
+		row, ok := sb.pinRows[key]
+		if !ok {
+			row = newSessionRow(key)
+			addClass(row.row, "ttt-pin")
+			sb.pinRows[key] = row
+			sb.rowKeys[row.row.Native()] = key
+		}
+		e := listEntry{key: key, host: pin.Host, pin: true}
+		if s := app.findSession(pin.Host, pin.Name); s != nil {
+			e.target = sessionKey(pin.Host, s.ID)
+			row.update(s, app.tracker.State(e.target, now), shown[e.target], 0)
+			if multipleHosts {
+				row.subtitle.SetText(pin.Host + " · " + row.subtitle.GetLabel())
+			}
+		} else {
+			row.showUnavailable(pin)
+		}
+		setClass(row.row, "ttt-unavailable", e.target == "")
+		entries = append(entries, e)
+	}
+	return entries
+}
+
+// newPinHeaderRow builds the heading of the pinned sessions.
+func newPinHeaderRow(app *App) *pinHeaderRow {
+	h := &pinHeaderRow{}
+	h.row, _ = gtk.ListBoxRowNew()
+	h.row.SetSelectable(false)
+	addClass(h.row, "ttt-host")
+	addClass(h.row, "ttt-pin-header")
+
+	h.arrow, _ = gtk.ImageNewFromIconName("pan-down-symbolic", gtk.ICON_SIZE_MENU)
+	label, _ := gtk.LabelNew("Pinned")
+	label.SetXAlign(0)
+	addClass(label, "ttt-host-name")
+	h.count, _ = gtk.LabelNew("")
+	addClass(h.count, "dim-label")
+	addClass(h.count, "ttt-host-status")
+
+	h.hide, _ = gtk.ToggleButtonNew()
+	hideIcon, _ := gtk.ImageNewFromIconName(firstIcon("view-conceal-symbolic", "edit-clear-symbolic"),
+		gtk.ICON_SIZE_MENU)
+	h.hide.SetImage(hideIcon)
+	h.hide.SetRelief(gtk.RELIEF_NONE)
+	h.hide.SetTooltipText("Hide Pinned Sessions Which Aren't Running")
+	settingHide := false
+	h.hide.Connect("toggled", func() {
+		if !settingHide {
+			app.setHideUnavailablePins(h.hide.GetActive())
+		}
+	})
+
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, rowSpacing)
+	box.PackStart(h.arrow, false, false, 0)
+	box.PackStart(label, true, true, 0)
+	box.PackStart(h.count, false, false, 0)
+	box.PackStart(h.hide, false, false, 0)
+	h.row.Add(box)
+	h.row.ShowAll()
+
+	h.update = func() {
+		icon := "pan-down-symbolic"
+		if app.state.PinsCollapsed {
+			icon = "pan-end-symbolic"
+		}
+		h.arrow.SetFromIconName(icon, gtk.ICON_SIZE_MENU)
+		running := 0
+		for _, pin := range app.state.Pinned {
+			if app.findSession(pin.Host, pin.Name) != nil {
+				running++
+			}
+		}
+		h.count.SetText(fmt.Sprintf("%d/%d", running, len(app.state.Pinned)))
+		h.row.SetTooltipText(fmt.Sprintf("%d of %d pinned sessions running", running, len(app.state.Pinned)))
+		settingHide = true
+		h.hide.SetActive(app.state.HideUnavailablePins)
+		settingHide = false
+	}
+	return h
 }
 
 // selectSession highlights the session in the focused pane.
@@ -618,20 +810,34 @@ func (sb *sidebar) onButtonPress(ev *gdk.EventButton) bool {
 	if e == nil {
 		return false
 	}
-	if e.isHost {
+	switch {
+	case e.isHost:
 		if ev.Button() == gdk.BUTTON_SECONDARY {
 			return sb.popup(hostMenu(e.host, e.host == LocalHost), ev)
 		}
 		return false
+	case e.pinHeader:
+		return false
+	case e.pin:
+		if ev.Button() == gdk.BUTTON_SECONDARY {
+			return sb.popup(pinMenu(e), ev)
+		}
+		if e.target == "" {
+			return false
+		}
 	}
 	id := e.key
+	if e.pin {
+		id = e.target
+	}
 
 	switch ev.Button() {
 	case gdk.BUTTON_MIDDLE:
 		sb.win.OpenInSplit(id, gtk.ORIENTATION_HORIZONTAL)
 		return true
 	case gdk.BUTTON_SECONDARY:
-		return sb.popup(sessionMenu(id), ev)
+		_, pinned := sb.pinnedSessions()[id]
+		return sb.popup(sessionMenu(id, pinned), ev)
 	case gdk.BUTTON_PRIMARY:
 		if eventHasControl(ev) {
 			sb.win.OpenInSplit(id, gtk.ORIENTATION_HORIZONTAL)
@@ -658,8 +864,31 @@ func (sb *sidebar) popup(model *glib.MenuModel, ev *gdk.EventButton) bool {
 	return true
 }
 
-// sessionMenu is the context menu of a session row. Its actions take the session ID.
-func sessionMenu(id string) *glib.MenuModel {
+// pinnedSessions returns the keys of the running sessions which are pinned.
+func (sb *sidebar) pinnedSessions() map[string]bool {
+	pinned := map[string]bool{}
+	for _, pin := range sb.win.app.state.Pinned {
+		if s := sb.win.app.findSession(pin.Host, pin.Name); s != nil {
+			pinned[sessionKey(pin.Host, s.ID)] = true
+		}
+	}
+	return pinned
+}
+
+// pinMenu is the context menu of a pinned session.
+func pinMenu(e *listEntry) *glib.MenuModel {
+	if e.target != "" {
+		return sessionMenu(e.target, true)
+	}
+	remove := glib.MenuItemNewWithLabel("Unpin")
+	remove.SetActionAndTargetValue("win.pin-remove", glib.VariantFromString(e.key))
+	menu := glib.MenuNew()
+	menu.AppendItem(remove)
+	return &menu.MenuModel
+}
+
+// sessionMenu is the context menu of a session row. Its actions take the session key.
+func sessionMenu(id string, pinned bool) *glib.MenuModel {
 	target := glib.VariantFromString(id)
 	item := func(label, action string) *glib.MenuItem {
 		mi := glib.MenuItemNewWithLabel(label)
@@ -671,6 +900,11 @@ func sessionMenu(id string) *glib.MenuModel {
 	open.AppendItem(item("Open in Split Right", "win.session-split-right"))
 	open.AppendItem(item("Open in Split Down", "win.session-split-down"))
 	manage := glib.MenuNew()
+	if pinned {
+		manage.AppendItem(item("Unpin", "win.session-unpin"))
+	} else {
+		manage.AppendItem(item("Pin", "win.session-pin"))
+	}
 	manage.AppendItem(item("Rename…", "win.session-rename"))
 	manage.AppendItem(item("Kill Session…", "win.session-kill"))
 	menu := glib.MenuNew()

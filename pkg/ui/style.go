@@ -68,6 +68,13 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-host-error .ttt-host-status {
 	color: @error_color;
 }
+.ttt-sidebar row.ttt-unavailable .ttt-session-name,
+.ttt-sidebar row.ttt-unavailable .ttt-session-subtitle {
+	opacity: 0.45;
+}
+.ttt-sidebar row.ttt-pin-header {
+	padding-bottom: 2px;
+}
 .ttt-host-separator {
 	margin: 6px 0 0 0;
 }

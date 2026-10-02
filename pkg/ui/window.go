@@ -149,6 +149,21 @@ func (w *Window) installActions() {
 	addStr("session-rename", w.RenameSession)
 	addStr("session-kill", w.KillSession)
 	addStr("host-new-session", func(host string) { w.NewSessionOn(w.activePane, host) })
+	addStr("session-pin", func(key string) {
+		if pin, ok := w.app.pinOf(key); ok {
+			w.app.setPinned(pin, true)
+		}
+	})
+	addStr("session-unpin", func(key string) {
+		if pin, ok := w.app.pinOf(key); ok {
+			w.app.setPinned(pin, false)
+		}
+	})
+	addStr("pin-remove", func(key string) {
+		if pin, ok := parsePinKey(key); ok {
+			w.app.setPinned(pin, false)
+		}
+	})
 	addStr("host-remove", w.app.RemoveHost)
 
 	add("find-session", func() {
@@ -449,13 +464,19 @@ func (w *Window) PromptNewSession(p *Pane, anchor gtk.IWidget) {
 
 // NewSessionOn creates a session on a host and shows it in a pane.
 func (w *Window) NewSessionOn(p *Pane, hostName string) {
+	w.NewNamedSession(p, hostName, "")
+}
+
+// NewNamedSession creates a session with a name on a host and shows it in a pane. An
+// empty name lets tmux choose.
+func (w *Window) NewNamedSession(p *Pane, hostName, name string) {
 	h := w.app.host(hostName)
 	if h == nil {
 		return
 	}
 	dir := w.newSessionDir(hostName)
 	runAsync(w.app, func(ctx context.Context) (string, error) {
-		return h.client.NewSession(ctx, "", dir)
+		return h.client.NewSession(ctx, name, dir)
 	}, func(id string, err error) {
 		if err != nil {
 			w.app.log.Error("Could not create tmux session", zap.String("host", hostName), zap.Error(err))

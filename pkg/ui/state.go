@@ -17,6 +17,19 @@ type uiState struct {
 	GroupByApplication *bool `yaml:"group-by-application,omitempty"`
 	// Appearance is what was chosen in Preferences.
 	Appearance AppearancePrefs `yaml:"appearance,omitempty"`
+	// Pinned are the sessions listed at the top of the session list, in order.
+	Pinned []PinnedSession `yaml:"pinned,omitempty"`
+	// PinsCollapsed hides the pinned sessions under their heading.
+	PinsCollapsed bool `yaml:"pins-collapsed,omitempty"`
+	// HideUnavailablePins hides pinned sessions which aren't running.
+	HideUnavailablePins bool `yaml:"hide-unavailable-pins,omitempty"`
+}
+
+// PinnedSession is a session pinned to the top of the list. It's pinned by name rather
+// than tmux's session ID, which changes when the tmux server restarts.
+type PinnedSession struct {
+	Host string `yaml:"host"`
+	Name string `yaml:"name"`
 }
 
 // stateFile is where uiState is kept.

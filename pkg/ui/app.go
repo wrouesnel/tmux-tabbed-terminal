@@ -246,6 +246,68 @@ func (a *App) setAppearancePrefs(prefs AppearancePrefs) {
 	a.reloadAppearance()
 }
 
+// findSession returns the session with a name on a host, or nil.
+func (a *App) findSession(hostName, name string) *tmux.Session {
+	h := a.host(hostName)
+	if h == nil {
+		return nil
+	}
+	for i := range h.snapshot.Sessions {
+		if h.snapshot.Sessions[i].Name == name {
+			return &h.snapshot.Sessions[i]
+		}
+	}
+	return nil
+}
+
+// pinIndex returns the position of a pin in the pinned list, or -1.
+func (a *App) pinIndex(pin PinnedSession) int {
+	for i, p := range a.state.Pinned {
+		if p == pin {
+			return i
+		}
+	}
+	return -1
+}
+
+// pinOf returns the pin a session would have.
+func (a *App) pinOf(key string) (PinnedSession, bool) {
+	h, s := a.lookup(key)
+	if s == nil {
+		return PinnedSession{}, false
+	}
+	return PinnedSession{Host: h.Name, Name: s.Name}, true
+}
+
+// setPinned pins or unpins a session.
+func (a *App) setPinned(pin PinnedSession, pinned bool) {
+	i := a.pinIndex(pin)
+	switch {
+	case pinned && i < 0:
+		a.state.Pinned = append(a.state.Pinned, pin)
+	case !pinned && i >= 0:
+		a.state.Pinned = append(a.state.Pinned[:i], a.state.Pinned[i+1:]...)
+	default:
+		return
+	}
+	a.saveState()
+	a.refreshAll()
+}
+
+// setPinsCollapsed folds the pinned sessions away under their heading, or shows them.
+func (a *App) setPinsCollapsed(collapsed bool) {
+	a.state.PinsCollapsed = collapsed
+	a.saveState()
+	a.refreshAll()
+}
+
+// setHideUnavailablePins hides or shows pinned sessions which aren't running.
+func (a *App) setHideUnavailablePins(hide bool) {
+	a.state.HideUnavailablePins = hide
+	a.saveState()
+	a.refreshAll()
+}
+
 // startHost adds a host to the list and starts polling it.
 func (a *App) startHost(h *Host) {
 	ctx, cancel := context.WithCancel(a.pollCtx)

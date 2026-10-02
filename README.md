@@ -12,6 +12,11 @@ or split the window to watch several sessions side by side.
 * **Other hosts.** "Add Host" under the list connects to another machine over ssh and
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones.
+* **Pinned sessions.** Right-click a session and choose Pin to list it at the top, in a
+  collapsible Pinned section, as well as in its usual place. Pins are kept by host and
+  session name, so they survive tmux restarts. A pinned session that isn't running is
+  greyed out, and clicking it starts it again under that name. The button on the Pinned
+  heading hides the ones that aren't running.
 * **Grouping and search.** Sessions are grouped by the program running in their current
   window, so all your `claude` sessions sit together (toggle it under the list). The
   search box at the top filters by session name, program or window name.
@@ -100,8 +105,8 @@ session.
 
 ## Configuration
 
-Choices made in the UI, such as which side the session list is on and whether it's
-grouped, are remembered in `~/.local/state/tmux-tabbed-terminal/state.yml`.
+Choices made in the UI, such as which side the session list is on, whether it's grouped,
+pinned sessions and Preferences, are remembered in `~/.local/state/tmux-tabbed-terminal/state.yml`.
 
 Configuration is optional. The application reads
 `~/.config/tmux-tabbed-terminal/config.yml` if it exists, or the file given with
