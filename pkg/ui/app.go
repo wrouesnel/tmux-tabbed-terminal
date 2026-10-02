@@ -183,10 +183,31 @@ func (a *App) startup() {
 	if err != nil {
 		a.log.Warn("Could not read saved hosts", zap.Error(err))
 	}
-	for _, cfg := range append(append([]HostConfig{}, a.cfg.Hosts...), saved...) {
-		if cfg.Destination != "" && a.host(cfg.Destination) == nil {
-			a.startHost(newHost(cfg.Destination, cfg, remoteClient(cfg)))
+	// A host is reached through its origin, so origins load first: keep passing over the
+	// list while hosts can still be added.
+	pending := append(append([]HostConfig{}, a.cfg.Hosts...), saved...)
+	for progress := true; progress && len(pending) > 0; {
+		progress = false
+		rest := pending[:0]
+		for _, cfg := range pending {
+			if cfg.Destination == "" {
+				continue
+			}
+			h, err := a.newRemoteHost(cfg)
+			if err != nil {
+				rest = append(rest, cfg)
+				continue
+			}
+			if a.host(h.Name) == nil {
+				a.startHost(h)
+			}
+			progress = true
 		}
+		pending = rest
+	}
+	for _, cfg := range pending {
+		a.log.Warn("Not listing host: its origin isn't listed", zap.String("host", cfg.Destination),
+			zap.String("via", cfg.Via))
 	}
 	a.updateGroups()
 }
@@ -353,17 +374,25 @@ func (a *App) sessionName(key string) string {
 
 // AddHost lists a remote host's sessions. It checks that tmux on the host can be reached
 // before adding it, and saves it for next time.
-func (a *App) AddHost(destination string, parent *Window) {
+func (a *App) AddHost(destination, via string, forwardAgent bool, parent *Window) {
 	destination = strings.TrimSpace(destination)
 	if destination == "" {
 		return
 	}
-	if a.host(destination) != nil {
-		parent.showError("Host already added", destination+" is already in the list.")
+	if via == LocalHost {
+		via = ""
+	}
+	cfg := HostConfig{Destination: destination, Via: via, ForwardAgent: forwardAgent && via != ""}
+	h, err := a.newRemoteHost(cfg)
+	if err != nil {
+		parent.showError("Could not add "+destination, err.Error())
 		return
 	}
-	cfg := HostConfig{Destination: destination}
-	h := newHost(destination, cfg, remoteClient(cfg))
+	if a.host(h.Name) != nil {
+		parent.showError("Host already added", h.Name+" is already in the list.")
+		return
+	}
+	destination = h.Name
 	parent.setStatus("Connecting to " + destination + "…")
 	runAsync(a, h.client.Snapshot, func(snap *tmux.Snapshot, err error) {
 		parent.setStatus("")
@@ -383,25 +412,38 @@ func (a *App) AddHost(destination string, parent *Window) {
 	})
 }
 
-// RemoveHost stops listing a remote host. Panes attached to it keep running.
+// RemoveHost stops listing a remote host, and the hosts reached through it. Panes
+// attached to them keep running.
 func (a *App) RemoveHost(name string) {
-	for i, h := range a.hosts {
-		if h.Name == name && !h.Local() {
-			h.cancel()
-			a.hosts = append(a.hosts[:i], a.hosts[i+1:]...)
-			a.saveHosts()
-			a.updateGroups()
-			a.refreshAll()
-			return
-		}
+	h := a.host(name)
+	if h == nil || h.Local() {
+		return
 	}
+	remove := map[string]bool{name: true}
+	for _, d := range a.dependents(name) {
+		remove[d.Name] = true
+	}
+	kept := a.hosts[:0]
+	for _, host := range a.hosts {
+		if remove[host.Name] {
+			host.cancel()
+			continue
+		}
+		kept = append(kept, host)
+	}
+	a.hosts = kept
+	a.saveHosts()
+	a.updateGroups()
+	a.refreshAll()
 }
 
 // saveHosts writes the remote hosts not already in the configuration file.
 func (a *App) saveHosts() {
 	inConfig := map[string]bool{}
 	for _, cfg := range a.cfg.Hosts {
-		inConfig[cfg.Destination] = true
+		if h, err := a.newRemoteHost(cfg); err == nil {
+			inConfig[h.Name] = true
+		}
 	}
 	saved := []HostConfig{}
 	for _, h := range a.hosts {

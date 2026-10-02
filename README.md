@@ -148,6 +148,24 @@ hosts:
     socket-name: work      # a tmux server other than the default, as with tmux -L
 ```
 
+Add Host's Origin picks where the host is reached from: this computer, or any listed host,
+typed or picked from the dropdown. A host reached through an origin runs its ssh *on the
+origin*, with the origin's `~/.ssh/config` and keys, and the dialog lists that host's
+configured hosts. Hosts can be chained to any depth (`db via bastion via vpn-gw`); each
+hop keeps its own ssh master connection on the host it runs from (in `~/.ssh/ttt-*`
+there). If the origin has no key of its own for the host, tick "Forward my ssh agent
+through the origin"; it's off by default because anyone with root on the origin can use
+a forwarded agent. Removing a host also removes the hosts reached through it, after
+listing them. A tunneled host in the configuration file names its origin with `via:`:
+
+```yaml
+hosts:
+  - destination: bastion
+  - destination: db        # an alias in bastion's ~/.ssh/config
+    via: bastion
+    forward-agent: true
+```
+
 With more than one host, New Session asks which host to start it on. The "+" beside a
 host starts one there directly, and its ⋯ menu also removes the host. Removing a host leaves
 panes already attached to its sessions running.

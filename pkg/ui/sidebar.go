@@ -381,10 +381,22 @@ func newHostRow(name string, local bool, newSession func(string)) *hostRow {
 		iconName = firstIcon("computer-symbolic", "user-home-symbolic")
 	}
 	r.icon, _ = gtk.ImageNewFromIconName(iconName, gtk.ICON_SIZE_MENU)
-	label, _ := gtk.LabelNew(name)
+	// A tunneled host shows its destination, with the route under it.
+	destination, route, tunneled := strings.Cut(name, " via ")
+	label, _ := gtk.LabelNew(destination)
 	label.SetXAlign(0)
 	label.SetEllipsize(pango.ELLIPSIZE_MIDDLE)
 	addClass(label, "ttt-host-name")
+	names, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	names.PackStart(label, false, false, 0)
+	if tunneled {
+		via, _ := gtk.LabelNew("via " + route)
+		via.SetXAlign(0)
+		via.SetEllipsize(pango.ELLIPSIZE_MIDDLE)
+		addClass(via, "dim-label")
+		addClass(via, "ttt-session-subtitle")
+		names.PackStart(via, false, false, 0)
+	}
 	r.status, _ = gtk.LabelNew("")
 	addClass(r.status, "dim-label")
 	addClass(r.status, "ttt-host-status")
@@ -398,7 +410,7 @@ func newHostRow(name string, local bool, newSession func(string)) *hostRow {
 
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, rowSpacing)
 	box.PackStart(r.icon, false, false, 0)
-	box.PackStart(label, true, true, 0)
+	box.PackStart(names, true, true, 0)
 	r.filter, _ = gtk.ToggleButtonNew()
 	filterIcon, _ := gtk.ImageNewFromIconName(iconFilter, gtk.ICON_SIZE_MENU)
 	r.filter.SetImage(filterIcon)
@@ -443,8 +455,15 @@ func hostMenu(name string, local bool) *glib.MenuModel {
 	newSession.SetActionAndTargetValue("win.host-new-session", target)
 	menu := glib.MenuNew()
 	menu.AppendItem(newSession)
+	viaLabel := "Add Host Through Here…"
+	if local {
+		viaLabel = "Add Host…"
+	}
+	addVia := glib.MenuItemNewWithLabel(viaLabel)
+	addVia.SetActionAndTargetValue("win.host-add-via", target)
+	menu.AppendItem(addVia)
 	if !local {
-		remove := glib.MenuItemNewWithLabel("Remove Host")
+		remove := glib.MenuItemNewWithLabel("Remove Host…")
 		remove.SetActionAndTargetValue("win.host-remove", target)
 		menu.AppendItem(remove)
 	}

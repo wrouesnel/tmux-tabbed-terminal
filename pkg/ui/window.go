@@ -137,7 +137,7 @@ func (w *Window) installActions() {
 	add("prev-pane", func() { w.cyclePane(-1) })
 	add("rename-session", func() { w.RenameSession(w.activePane.SessionKey()) })
 	add("kill-session", func() { w.KillSession(w.activePane.SessionKey()) })
-	add("add-host", w.AddHostDialog)
+	add("add-host", func() { w.AddHostDialog(LocalHost) })
 	add("sidebar-other-side", func() { w.app.setSidebarRight(!w.app.sidebarRight) })
 	add("fullscreen", w.toggleFullscreen)
 	add("close-window", func() { w.window.Close() })
@@ -167,7 +167,8 @@ func (w *Window) installActions() {
 			w.app.setPinned(pin, false)
 		}
 	})
-	addStr("host-remove", w.app.RemoveHost)
+	addStr("host-remove", w.confirmRemoveHost)
+	addStr("host-add-via", w.AddHostDialog)
 
 	add("find-session", func() {
 		w.setSidebarVisible(true)
@@ -688,9 +689,21 @@ func (w *Window) KillSession(key string) {
 // sshHostListHeight is the most the ssh config host list grows before it scrolls.
 const sshHostListHeight = 260
 
+// originLabel is how an origin host is shown in the Add Host dialog.
+func originLabel(name string) string {
+	if name == LocalHost {
+		return "This computer"
+	}
+	return name
+}
+
 // AddHostDialog asks for a host to list sessions from: typed in, or picked from the
-// concrete hosts of ~/.ssh/config.
-func (w *Window) AddHostDialog() {
+// concrete hosts of the origin's ~/.ssh/config. The host is reached through the origin,
+// which starts as origin: LocalHost for this machine, or any listed remote host.
+func (w *Window) AddHostDialog(origin string) {
+	if w.app.host(origin) == nil {
+		origin = LocalHost
+	}
 	dlg, err := gtk.DialogNewWithButtons("Add Host", w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT|
 		gtk.DIALOG_USE_HEADER_BAR,
 		[]interface{}{"_Cancel", gtk.RESPONSE_CANCEL},
@@ -705,36 +718,87 @@ func (w *Window) AddHostDialog() {
 	}
 
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, paneSpacing)
+
+	// The origin: a dropdown of this machine and the listed remote hosts, which can be
+	// searched by typing.
+	originBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, paneSpacing)
+	originTitle, _ := gtk.LabelNew("Origin")
+	addClass(originTitle, "dim-label")
+	originCombo, _ := gtk.ComboBoxTextNewWithEntry()
+	originCombo.SetHExpand(true)
+	byLabel := map[string]string{}
+	completions, _ := gtk.ListStoreNew(glib.TYPE_STRING)
+	for _, h := range w.app.hosts {
+		label := originLabel(h.Name)
+		originCombo.Append(h.Name, label)
+		byLabel[strings.ToLower(label)] = h.Name
+		_ = completions.SetValue(completions.Append(), 0, label)
+	}
+	originEntry, _ := originCombo.GetEntry()
+	completion, _ := gtk.EntryCompletionNew()
+	completion.SetModel(completions)
+	completion.SetTextColumn(0)
+	completion.SetInlineCompletion(true)
+	completion.SetPopupCompletion(true)
+	originEntry.SetCompletion(completion)
+	originBox.PackStart(originTitle, false, false, 0)
+	originBox.PackStart(originCombo, true, true, 0)
+	box.PackStart(originBox, false, false, 0)
+
 	entry, _ := gtk.EntryNew()
 	entry.SetPlaceholderText("user@example.com")
 	entry.SetActivatesDefault(true)
 	entry.SetWidthChars(36) //nolint:mnd // room for a typical user@host
-	hint, _ := gtk.LabelNew("An ssh destination or ~/.ssh/config alias. The host needs key or " +
-		"agent authentication, and tmux installed.")
+	hint, _ := gtk.LabelNew("An ssh destination or ~/.ssh/config alias, as the origin knows it. ssh " +
+		"runs on the origin, with its configuration and keys. The host needs key or agent " +
+		"authentication, and tmux installed.")
 	hint.SetLineWrap(true)
 	hint.SetMaxWidthChars(48) //nolint:mnd // dialog width
 	hint.SetXAlign(0)
 	addClass(hint, "dim-label")
 	box.PackStart(entry, false, false, 0)
 	box.PackStart(hint, false, false, 0)
+	forward, _ := gtk.CheckButtonNewWithLabel("Forward my ssh agent through the origin")
+	forward.SetTooltipText("Lets ssh on the origin use your keys, for when it has none of its own for " +
+		"the host. Anyone with root on the origin can use them while you're connected.")
+	box.PackStart(forward, false, false, 0)
 
-	// The hosts of ~/.ssh/config, filtered by what's typed.
-	hosts, err := sshconfig.Load(sshconfig.DefaultPath())
-	if err != nil {
-		w.app.log.Warn("Could not read the ssh configuration", zap.Error(err))
-	}
-	if len(hosts) > 0 {
-		heading, _ := gtk.LabelNew("From ~/.ssh/config")
-		heading.SetXAlign(0)
-		addClass(heading, "ttt-group-header")
-		addClass(heading, "dim-label")
+	// The origin's ssh config hosts, filtered by what's typed.
+	heading, _ := gtk.LabelNew("")
+	heading.SetXAlign(0)
+	addClass(heading, "ttt-group-header")
+	addClass(heading, "dim-label")
+	status, _ := gtk.LabelNew("")
+	status.SetLineWrap(true)
+	status.SetXAlign(0)
+	addClass(status, "dim-label")
+	holder, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	scroller, _ := gtk.ScrolledWindowNew(nil, nil)
+	scroller.SetPolicy(gtk.POLICY_NEVER, gtk.POLICY_AUTOMATIC)
+	scroller.SetShadowType(gtk.SHADOW_IN)
+	scroller.SetPropagateNaturalHeight(true)
+	scroller.SetMaxContentHeight(sshHostListHeight)
+	scroller.Add(holder)
+	box.PackStart(heading, false, false, 0)
+	box.PackStart(status, false, false, 0)
+	box.PackStart(scroller, true, true, 0)
 
-		list, _ := gtk.ListBoxNew()
+	var list *gtk.ListBox
+	filling := false
+	showHosts := func(origin string, hosts []sshconfig.Host) {
+		if list != nil {
+			holder.Remove(list)
+		}
+		list, _ = gtk.ListBoxNew()
 		list.SetSelectionMode(gtk.SELECTION_SINGLE)
 		list.SetActivateOnSingleClick(false)
 		aliases := make([]string, 0, len(hosts))
 		for _, h := range hosts {
-			list.Add(sshHostRow(h, w.app.host(h.Alias) != nil))
+			name := h.Alias
+			if origin != LocalHost {
+				name += " via " + origin
+			}
+			list.Add(sshHostRow(h, w.app.host(name) != nil))
 			aliases = append(aliases, h.Alias)
 		}
 		alias := func(row *gtk.ListBoxRow) string {
@@ -744,7 +808,6 @@ func (w *Window) AddHostDialog() {
 			return ""
 		}
 		// A click fills in the entry; a double click or Enter adds the host.
-		filling := false
 		list.Connect("row-selected", func(_ interface{}, row *gtk.ListBoxRow) {
 			if row != nil && row.Object != nil {
 				filling = true
@@ -762,31 +825,109 @@ func (w *Window) AddHostDialog() {
 			text = strings.ToLower(strings.TrimSpace(text))
 			return filling || text == "" || strings.Contains(strings.ToLower(h.Alias+" "+h.HostName+" "+h.User), text)
 		})
-		entry.Connect("changed", func() {
-			if !filling {
-				list.InvalidateFilter()
-			}
-		})
-
-		scroller, _ := gtk.ScrolledWindowNew(nil, nil)
-		scroller.SetPolicy(gtk.POLICY_NEVER, gtk.POLICY_AUTOMATIC)
-		scroller.SetShadowType(gtk.SHADOW_IN)
-		scroller.SetPropagateNaturalHeight(true)
-		scroller.SetMaxContentHeight(sshHostListHeight)
-		scroller.Add(list)
-		box.PackStart(heading, false, false, 0)
-		box.PackStart(scroller, true, true, 0)
+		holder.PackStart(list, true, true, 0)
+		list.ShowAll()
+		scroller.SetVisible(len(hosts) > 0)
+		status.SetVisible(len(hosts) == 0)
+		status.SetText("No hosts in its ~/.ssh/config.")
 	}
+	entry.Connect("changed", func() {
+		if !filling && list != nil {
+			list.InvalidateFilter()
+		}
+	})
+
+	// Loading the list: straight away for this machine, over ssh for a remote origin.
+	// generation discards a load which finishes after the origin changed again.
+	current, generation := "", 0
+	load := func(origin string) {
+		current = origin
+		generation++
+		gen := generation
+		heading.SetText("From ~/.ssh/config on " + strings.ToLower(originLabel(origin)[:1]) + originLabel(origin)[1:])
+		if origin == LocalHost {
+			hosts, err := sshconfig.Load(sshconfig.DefaultPath())
+			if err != nil {
+				w.app.log.Warn("Could not read the ssh configuration", zap.Error(err))
+			}
+			showHosts(origin, hosts)
+			return
+		}
+		h := w.app.host(origin)
+		if h == nil {
+			return
+		}
+		showHosts(origin, nil)
+		status.SetText("Reading ~/.ssh/config from " + origin + "…")
+		runAsync(w.app, func(ctx context.Context) ([]sshconfig.Host, error) {
+			return loadRemoteSSHConfig(ctx, h.client.SSH)
+		}, func(hosts []sshconfig.Host, err error) {
+			if gen != generation {
+				return
+			}
+			if err != nil {
+				showHosts(origin, nil)
+				status.SetText("Could not read ~/.ssh/config from " + origin + ": " + err.Error())
+				return
+			}
+			showHosts(origin, hosts)
+		})
+	}
+	originCombo.Connect("changed", func() {
+		id := originCombo.GetActiveID()
+		if id == "" {
+			// Typed rather than picked: accept it once it names an origin.
+			text, _ := originEntry.GetText()
+			id = byLabel[strings.ToLower(strings.TrimSpace(text))]
+		}
+		dlg.SetResponseSensitive(gtk.RESPONSE_ACCEPT, id != "")
+		forward.SetSensitive(id != "" && id != LocalHost)
+		setClass(originEntry, "error", id == "")
+		if id != "" && id != current {
+			load(id)
+		}
+	})
+	originCombo.SetActiveID(origin)
 
 	content, _ := dlg.GetContentArea()
 	content.PackStart(padded(box), true, true, 0)
 	dlg.ShowAll()
+	load(origin)
+	// Once the dialog is up: it focuses the origin otherwise, its first field.
+	glib.IdleAdd(func() { entry.GrabFocus() })
 
-	if dlg.Run() != gtk.RESPONSE_ACCEPT {
+	if dlg.Run() != gtk.RESPONSE_ACCEPT || current == "" {
 		return
 	}
 	destination, _ := entry.GetText()
-	w.app.AddHost(destination, w)
+	w.app.AddHost(destination, current, forward.GetActive(), w)
+}
+
+// confirmRemoveHost removes a host, after listing and confirming the hosts reached
+// through it, which go too.
+func (w *Window) confirmRemoveHost(name string) {
+	dependents := w.app.dependents(name)
+	if len(dependents) == 0 {
+		w.app.RemoveHost(name)
+		return
+	}
+	names := make([]string, 0, len(dependents))
+	for _, d := range dependents {
+		names = append(names, "• "+d.Name)
+	}
+	dlg := gtk.MessageDialogNew(w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
+		gtk.MESSAGE_WARNING, gtk.BUTTONS_NONE, "Remove %s and the hosts reached through it?", name)
+	dlg.FormatSecondaryText("These hosts are reached through %s, so they will be removed too:\n\n%s\n\n"+
+		"Panes showing their sessions keep running.", name, strings.Join(names, "\n"))
+	_, _ = dlg.AddButton("_Cancel", gtk.RESPONSE_CANCEL)
+	removeBtn, _ := dlg.AddButton(fmt.Sprintf("_Remove %d Hosts", len(dependents)+1), gtk.RESPONSE_ACCEPT)
+	addClass(removeBtn, "destructive-action")
+	dlg.SetDefaultResponse(gtk.RESPONSE_CANCEL)
+	response := dlg.Run()
+	dlg.Destroy()
+	if response == gtk.RESPONSE_ACCEPT {
+		w.app.RemoveHost(name)
+	}
 }
 
 // sshHostRow is a host of the ssh configuration in the Add Host list.

@@ -236,3 +236,43 @@ func TestRemoteThroughSSH(t *testing.T) {
 		t.Fatalf("attach argv: %q", argv)
 	}
 }
+
+// TestRemoteThroughHops runs tmux through three nested ssh hops, each a fake ssh which
+// runs its command through a shell, as each real hop's sshd would. The quoting has to
+// survive a shell per hop.
+func TestRemoteThroughHops(t *testing.T) {
+	ctx := context.Background()
+	local := newTestClient(t)
+	fake, err := filepath.Abs("testdata/fake-ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := &tmux.SSH{Destination: "bastion", Binary: fake, ControlDir: t.TempDir()}
+	second := &tmux.SSH{Destination: "inner", Binary: fake, Via: first}
+	third := &tmux.SSH{Destination: "db", Binary: fake, Via: second}
+	if got := third.Name(); got != "db via inner via bastion" {
+		t.Fatalf("Name: got %q", got)
+	}
+	remote := &tmux.Client{Binary: "tmux", SocketName: local.SocketName, SSH: third}
+
+	id, err := remote.NewSession(ctx, "it's 3 hops; deep", "")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	snap, err := remote.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if s := snap.Session(id); s == nil || s.Name != "it's 3 hops; deep" {
+		t.Fatalf("session through hops: %+v", snap)
+	}
+	out, err := third.Output(ctx, "echo", "a b", "$HOME")
+	if err != nil || out != "a b $HOME\n" {
+		t.Fatalf("Output: %q, %v", out, err)
+	}
+
+	argv := remote.AttachArgv(id)
+	if argv[0] != fake || argv[1] != "-t" || !strings.Contains(argv[len(argv)-1], "-t") {
+		t.Fatalf("attach through hops should be interactive at every hop: %q", argv)
+	}
+}

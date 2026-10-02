@@ -123,6 +123,10 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		msg := strings.TrimSpace(stderr.String())
+		if c.SSH != nil && !isNoServerError(msg) && !isNoSessionError(msg) {
+			// Maybe a connection on the way dropped: check the masters next time.
+			c.SSH.resetMasters()
+		}
 		if isNoSessionError(msg) {
 			return "", errors.Wrap(ErrNoSession, msg)
 		}

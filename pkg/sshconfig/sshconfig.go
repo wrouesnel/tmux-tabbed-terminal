@@ -7,10 +7,35 @@ package sshconfig
 
 import (
 	"bufio"
+	"bytes"
+	"errors"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
+
+// Source reads the files of a configuration, on this machine or another host. Paths are
+// POSIX paths on that host.
+type Source interface {
+	// ReadFile returns a file's contents, or an error satisfying os.IsNotExist if it
+	// doesn't exist.
+	ReadFile(path string) ([]byte, error)
+	// Glob returns the files matching a pattern.
+	Glob(pattern string) ([]string, error)
+	// Home is the user's home directory.
+	Home() string
+}
+
+// localSource reads this machine's files.
+type localSource struct{}
+
+func (localSource) ReadFile(p string) ([]byte, error)     { return os.ReadFile(p) }
+func (localSource) Glob(pattern string) ([]string, error) { return filepath.Glob(pattern) }
+func (localSource) Home() string {
+	home, _ := os.UserHomeDir()
+	return home
+}
 
 // maxIncludeDepth bounds nested Include, as ssh does, so a loop can't recurse forever.
 const maxIncludeDepth = 16
@@ -41,6 +66,7 @@ func isPattern(s string) bool {
 
 // parser accumulates hosts across a file and its includes.
 type parser struct {
+	src    Source
 	sshDir string
 	hosts  []Host
 	index  map[string]int
@@ -53,28 +79,32 @@ type parser struct {
 // has no hosts. Relative Include paths are under the directory of path, as ssh resolves
 // them under ~/.ssh for the user configuration.
 func Load(path string) ([]Host, error) {
-	p := &parser{sshDir: filepath.Dir(path), index: map[string]int{}, seen: map[string]bool{}}
-	if err := p.file(path, 0); err != nil {
+	return LoadFrom(localSource{}, path)
+}
+
+// LoadFrom reads the hosts of the configuration at path from a source, as Load does.
+func LoadFrom(src Source, configPath string) ([]Host, error) {
+	p := &parser{src: src, sshDir: path.Dir(configPath), index: map[string]int{}, seen: map[string]bool{}}
+	if err := p.file(configPath, 0); err != nil {
 		return nil, err
 	}
 	return p.hosts, nil
 }
 
-func (p *parser) file(path string, depth int) error {
-	if depth > maxIncludeDepth || p.seen[path] {
+func (p *parser) file(filePath string, depth int) error {
+	if depth > maxIncludeDepth || p.seen[filePath] {
 		return nil
 	}
-	p.seen[path] = true
-	f, err := os.Open(path)
-	if os.IsNotExist(err) {
+	p.seen[filePath] = true
+	data, err := p.src.ReadFile(filePath)
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
+	scanner := bufio.NewScanner(bytes.NewReader(data))
 	for scanner.Scan() {
 		keyword, args := splitLine(scanner.Text())
 		switch strings.ToLower(keyword) {
@@ -129,14 +159,14 @@ func (p *parser) set(args []string, set func(*Host, string), get func(*Host) str
 // include reads the files an Include argument names.
 func (p *parser) include(arg string, depth int) error {
 	if strings.HasPrefix(arg, "~/") {
-		if home, err := os.UserHomeDir(); err == nil {
-			arg = filepath.Join(home, arg[2:])
+		if home := p.src.Home(); home != "" {
+			arg = path.Join(home, arg[2:])
 		}
 	}
-	if !filepath.IsAbs(arg) {
-		arg = filepath.Join(p.sshDir, arg)
+	if !path.IsAbs(arg) {
+		arg = path.Join(p.sshDir, arg)
 	}
-	matches, err := filepath.Glob(arg)
+	matches, err := p.src.Glob(arg)
 	if err != nil {
 		return nil //nolint:nilerr // a bad pattern includes nothing, rather than failing the list
 	}

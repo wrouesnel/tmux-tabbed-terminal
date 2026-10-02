@@ -42,6 +42,12 @@ type HostConfig struct {
 	SSHOptions []string `yaml:"ssh-options,omitempty"`
 	// SocketName selects a tmux server on the host other than the default, as with -L.
 	SocketName string `yaml:"socket-name,omitempty"`
+	// Via is the listed host this one is reached through, by name: ssh runs there, with
+	// that host's ssh configuration and keys. Empty means this machine.
+	Via string `yaml:"via,omitempty"`
+	// ForwardAgent forwards this machine's ssh agent through the origin, for when the
+	// origin has no key of its own for the host.
+	ForwardAgent bool `yaml:"forward-agent,omitempty"`
 }
 
 // Host is one tmux server, on this machine or reached over ssh, and its latest state.
@@ -81,12 +87,41 @@ func (h *Host) requestPoll() {
 	}
 }
 
-// remoteClient returns a tmux client for a remote host's default server.
-func remoteClient(cfg HostConfig) *tmux.Client {
+// errNoOrigin is returned for a host whose origin host isn't listed.
+var errNoOrigin = errors.New("origin host is not listed")
+
+// newRemoteHost makes a remote host from its configuration. Its origin, if any, must
+// already be listed: the host's ssh runs there.
+func (a *App) newRemoteHost(cfg HostConfig) (*Host, error) {
+	ssh := &tmux.SSH{Destination: cfg.Destination, Options: cfg.SSHOptions, ForwardAgent: cfg.ForwardAgent}
+	if cfg.Via != "" && cfg.Via != LocalHost {
+		via := a.host(cfg.Via)
+		if via == nil {
+			return nil, errors.Wrap(errNoOrigin, cfg.Via)
+		}
+		if !via.Local() {
+			ssh.Via = via.client.SSH
+		}
+	}
 	client := tmux.NewClient()
 	client.SocketName = cfg.SocketName
-	client.SSH = &tmux.SSH{Destination: cfg.Destination, Options: cfg.SSHOptions}
-	return client
+	client.SSH = ssh
+	return newHost(ssh.Name(), cfg, client), nil
+}
+
+// dependents returns the hosts reached through a host, directly or through others, in
+// list order.
+func (a *App) dependents(name string) []*Host {
+	through := map[string]bool{name: true}
+	result := []*Host{}
+	// Hosts are listed after their origins, so one pass in order finds every depth.
+	for _, h := range a.hosts {
+		if h.Config.Via != "" && through[h.Config.Via] {
+			through[h.Name] = true
+			result = append(result, h)
+		}
+	}
+	return result
 }
 
 // hostsFile is where hosts added in the UI are saved.
