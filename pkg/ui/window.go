@@ -64,8 +64,8 @@ func newWindow(app *App) *Window {
 	return w
 }
 
-// buildHeaderBar builds the title bar: sidebar toggle and new session on the left, the
-// menu on the right, as GNOME Terminal lays it out.
+// buildHeaderBar builds the title bar: the sidebar toggle on the left, split and the
+// menu on the right. New sessions are made from the session list.
 func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 	hb, _ := gtk.HeaderBarNew()
 	hb.SetShowCloseButton(true)
@@ -78,11 +78,6 @@ func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 	sidebarBtn.SetActionName("win.show-sidebar")
 	sidebarBtn.SetTooltipText("Show Sessions (F9)")
 	hb.PackStart(sidebarBtn)
-
-	newBtn, _ := gtk.ButtonNewFromIconName("tab-new-symbolic", gtk.ICON_SIZE_BUTTON)
-	newBtn.SetActionName("win.new-session")
-	newBtn.SetTooltipText("New Session (Ctrl+Shift+T)")
-	hb.PackStart(newBtn)
 
 	menuBtn, _ := gtk.MenuButtonNew()
 	menuIcon, _ := gtk.ImageNewFromIconName("open-menu-symbolic", gtk.ICON_SIZE_BUTTON)

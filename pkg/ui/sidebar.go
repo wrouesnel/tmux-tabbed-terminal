@@ -70,7 +70,7 @@ func newSidebar(w *Window) *sidebar {
 	scroller.SetVExpand(true)
 
 	newBtn, _ := gtk.ButtonNewFromIconName("list-add-symbolic", gtk.ICON_SIZE_BUTTON)
-	newBtn.SetTooltipText("New Session")
+	newBtn.SetTooltipText("New Session (Ctrl+Shift+T)")
 	newBtn.SetActionName("win.new-session")
 	newBtn.SetRelief(gtk.RELIEF_NONE)
 	toolbar, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
