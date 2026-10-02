@@ -3,8 +3,9 @@ Use README.md files to understand program intent and structure.
 Binary outputs must build via `go run mage.go binary`.
 
 Build without CGO, with one exception: this application links GTK3 and VTE through
-cgo (gotk3 and `pkg/vte`), so `CGO_ENABLED=1` and binaries are dynamically linked. Keep
-cgo confined to `pkg/vte`; use gotk3 for everything else in GTK.
+cgo (gotk3, `pkg/vte` and `pkg/gtkx`), so `CGO_ENABLED=1` and binaries are dynamically linked.
+Keep cgo confined to `pkg/vte` (VTE) and `pkg/gtkx` (GTK functions gotk3 lacks); use gotk3
+for everything else in GTK.
 
 GTK may only be used from the main thread. `pkg/ui` locks it in `init`. Work on other
 goroutines (tmux polling, waiting for child processes) hands results back with

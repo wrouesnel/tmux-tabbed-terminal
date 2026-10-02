@@ -59,9 +59,7 @@ func newWindow(app *App) *Window {
 	w.activePane = first
 
 	w.outer, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
-	w.outer.Pack1(w.sidebar.root, false, false)
-	w.outer.Pack2(w.layout.area, true, false)
-	w.outer.SetPosition(app.cfg.Appearance.SidebarWidth)
+	w.placeSidebar()
 	w.window.Add(w.outer)
 
 	w.installActions()
@@ -137,6 +135,7 @@ func (w *Window) installActions() {
 	add("rename-session", func() { w.RenameSession(w.activePane.SessionKey()) })
 	add("kill-session", func() { w.KillSession(w.activePane.SessionKey()) })
 	add("add-host", w.AddHostDialog)
+	add("sidebar-other-side", func() { w.app.setSidebarRight(!w.app.sidebarRight) })
 	add("fullscreen", w.toggleFullscreen)
 	add("close-window", func() { w.window.Close() })
 	for i := 1; i <= sessionShortcuts; i++ {
@@ -229,9 +228,50 @@ func (w *Window) SplitActive(orientation gtk.Orientation) {
 
 func (w *Window) split(orientation gtk.Orientation) *Pane {
 	p := newPane(w)
-	w.layout.Split(w.activePane, p, orientation)
+	w.layout.Split(w.activePane, p, orientation, false)
 	w.refresh()
 	return p
+}
+
+// dropSession handles a session dropped on a pane: the center shows it there, and an
+// edge splits the pane and shows it on that side.
+func (w *Window) dropSession(target *Pane, key string, zone dropZone) {
+	if zone == zoneCenter {
+		target.Show(key)
+		target.Focus()
+		return
+	}
+	orientation, before := zone.split()
+	p := newPane(w)
+	w.layout.Split(target, p, orientation, before)
+	p.Show(key)
+	p.Focus()
+	w.refresh()
+}
+
+// placeSidebar puts the session list on the side the application says, keeping its width.
+func (w *Window) placeSidebar() {
+	width := w.sidebar.root.GetAllocatedWidth()
+	if width <= 1 {
+		width = w.app.cfg.Appearance.SidebarWidth
+	}
+	total := w.outer.GetAllocatedWidth()
+	if total <= 1 {
+		total, _ = w.window.GetSize()
+	}
+	if parent, err := w.sidebar.root.GetParent(); err == nil && parent != nil {
+		w.outer.Remove(w.sidebar.root)
+		w.outer.Remove(w.layout.area)
+	}
+	if w.app.sidebarRight {
+		w.outer.Pack1(w.layout.area, true, false)
+		w.outer.Pack2(w.sidebar.root, false, false)
+		w.outer.SetPosition(total - width)
+	} else {
+		w.outer.Pack1(w.sidebar.root, false, false)
+		w.outer.Pack2(w.layout.area, true, false)
+		w.outer.SetPosition(width)
+	}
 }
 
 // ClosePane closes a pane. Its session keeps running. Closing the last pane closes the

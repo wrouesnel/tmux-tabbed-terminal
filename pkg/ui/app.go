@@ -64,6 +64,12 @@ type App struct {
 	groups map[string]string
 	// grouped is whether session lists are grouped by application.
 	grouped bool
+	// sidebarRight puts session lists on the right of windows.
+	sidebarRight bool
+	// state is what the UI remembers between runs.
+	state uiState
+	// dragKey is the session being dragged from a session list, or "".
+	dragKey string
 
 	// hosts are the tmux servers listed, the local one first.
 	hosts []*Host
@@ -108,6 +114,19 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		grouped: cfg.Sidebar.GroupByApplication,
 		pollCtx: pollCtx,
 		windows: map[*Window]struct{}{},
+
+		sidebarRight: cfg.Sidebar.Position == "right",
+	}
+	if st, err := loadState(stateFile()); err != nil {
+		app.log.Warn("Could not read UI state", zap.Error(err))
+	} else {
+		app.state = st
+		if st.SidebarRight != nil {
+			app.sidebarRight = *st.SidebarRight
+		}
+		if st.GroupByApplication != nil {
+			app.grouped = *st.GroupByApplication
+		}
 	}
 
 	gtkApp.Connect("startup", app.startup)
@@ -435,9 +454,38 @@ func (a *App) updateGroups() {
 // setGrouped turns grouping by application on or off in every window.
 func (a *App) setGrouped(grouped bool) {
 	a.grouped = grouped
+	a.state.GroupByApplication = &grouped
+	a.saveState()
 	for w := range a.windows {
 		w.syncGroupAction()
 		w.refresh()
+	}
+}
+
+// setSidebarRight moves the session list of every window to the right or left.
+func (a *App) setSidebarRight(right bool) {
+	a.sidebarRight = right
+	a.state.SidebarRight = &right
+	a.saveState()
+	for w := range a.windows {
+		w.placeSidebar()
+	}
+}
+
+// saveState writes the UI state.
+func (a *App) saveState() {
+	if err := saveState(stateFile(), a.state); err != nil {
+		a.log.Warn("Could not save UI state", zap.Error(err))
+	}
+}
+
+// endDrag clears a finished session drag and its drop highlights.
+func (a *App) endDrag() {
+	a.dragKey = ""
+	for w := range a.windows {
+		for _, p := range w.panes() {
+			p.hideDropZone()
+		}
 	}
 }
 

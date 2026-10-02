@@ -41,6 +41,9 @@ sidebar:
   # How long a session must run a new program before it moves to that program's group,
   # so short commands don't move it.
   group-hold: 3s
+  # The side of the window the list is on: left or right. The button under the list
+  # changes it, and that choice is remembered.
+  position: left
 
 behaviour:
   # Create a session when a window opens and there are none.

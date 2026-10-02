@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
@@ -13,6 +14,7 @@ import (
 	"github.com/gotk3/gotk3/pango"
 	"go.uber.org/zap"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/vte"
 )
@@ -45,6 +47,8 @@ type Pane struct {
 	headerDot   *gtk.Label
 	stack       *gtk.Stack
 	term        *vte.Terminal
+	// dropZone highlights where a dragged session would land.
+	dropZone *gtk.Box
 
 	emptyTitle    *gtk.Label
 	emptyHint     *gtk.Label
@@ -61,6 +65,14 @@ type Pane struct {
 	// is ignored.
 	generation int
 	closed     bool
+
+	// Mouse wheel state: lines waiting to be scrolled, whether a scroll command is
+	// running, and the streak of quick wheel events which speeds scrolling up.
+	scrollPending float64
+	scrolling     bool
+	scrollStreak  int
+	lastScroll    time.Time
+	lastScrollUp  time.Time
 }
 
 func (p *Pane) widget() gtk.IWidget { return p.root }
@@ -131,12 +143,47 @@ func newPane(w *Window) *Pane {
 		return p.onButtonPress(gdk.EventButtonNewFromEvent(ev))
 	})
 
+	p.term.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
+		return p.onScroll(gdk.EventScrollNewFromEvent(ev))
+	})
+
 	p.stack, _ = gtk.StackNew()
 	p.stack.AddNamed(p.term, pageTerminal)
 	p.stack.AddNamed(p.buildEmptyPage(), pageEmpty)
 
+	// Sessions dragged from the list drop on the pane, over the terminal.
+	overlay, _ := gtk.OverlayNew()
+	overlay.Add(p.stack)
+	p.dropZone, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	addClass(p.dropZone, "ttt-drop-zone")
+	p.dropZone.SetNoShowAll(true)
+	overlay.AddOverlay(p.dropZone)
+	overlay.SetOverlayPassThrough(p.dropZone, true)
+	overlay.DragDestSet(0, dragTargets(), dropAction)
+	overlay.Connect("drag-motion", func(_ interface{}, ctx interface{}, x, y int, time uint) bool {
+		if w.app.dragKey == "" {
+			gtkx.DragStatus(ctx, 0, time)
+			return false
+		}
+		p.showDropZone(zoneAt(x, y, overlay.GetAllocatedWidth(), overlay.GetAllocatedHeight()))
+		gtkx.DragStatus(ctx, dropAction, time)
+		return true
+	})
+	overlay.Connect("drag-leave", func() { p.hideDropZone() })
+	overlay.Connect("drag-drop", func(_ interface{}, ctx interface{}, x, y int, time uint) bool {
+		key := w.app.dragKey
+		zone := zoneAt(x, y, overlay.GetAllocatedWidth(), overlay.GetAllocatedHeight())
+		gtkx.DragFinish(ctx, key != "", time)
+		w.app.endDrag()
+		if key != "" {
+			// After the drag finishes, so the layout doesn't change under it.
+			glib.IdleAdd(func() { w.dropSession(p, key, zone) })
+		}
+		return true
+	})
+
 	p.root.PackStart(headerEvents, false, false, 0)
-	p.root.PackStart(p.stack, true, true, 0)
+	p.root.PackStart(overlay, true, true, 0)
 	p.root.ShowAll()
 	p.showEmpty("No session", "Choose a session from the list, or start a new one.", false)
 	return p
@@ -357,6 +404,127 @@ func (p *Pane) onButtonPress(ev *gdk.EventButton) bool {
 	popover.SetPosition(gtk.POS_BOTTOM)
 	popover.Popup()
 	return true
+}
+
+// showDropZone highlights the part of the pane a session would drop into.
+func (p *Pane) showDropZone(zone dropZone) {
+	w, h := p.stack.GetAllocatedWidth(), p.stack.GetAllocatedHeight()
+	halign, valign := gtk.ALIGN_FILL, gtk.ALIGN_FILL
+	width, height := -1, -1
+	switch zone {
+	case zoneLeft:
+		halign, width = gtk.ALIGN_START, w/2 //nolint:mnd // half
+	case zoneRight:
+		halign, width = gtk.ALIGN_END, w/2 //nolint:mnd
+	case zoneTop:
+		valign, height = gtk.ALIGN_START, h/2 //nolint:mnd
+	case zoneBottom:
+		valign, height = gtk.ALIGN_END, h/2 //nolint:mnd
+	case zoneCenter:
+	}
+	p.dropZone.SetHAlign(halign)
+	p.dropZone.SetVAlign(valign)
+	p.dropZone.SetSizeRequest(width, height)
+	p.dropZone.Show()
+}
+
+// hideDropZone removes the drop highlight.
+func (p *Pane) hideDropZone() {
+	p.dropZone.Hide()
+}
+
+// Mouse wheel scrolling of tmux history.
+const (
+	// scrollLines is how many lines one wheel step scrolls, before acceleration.
+	scrollLines = 3
+	// Wheel events closer together than scrollStreakGap speed up scrolling; a pause of
+	// scrollStreakReset, or a change of direction, starts again at normal speed.
+	scrollStreakGap   = 90 * time.Millisecond
+	scrollStreakReset = 300 * time.Millisecond
+	// scrollAcceleration is the extra speed of each quick event in a streak, up to
+	// scrollMaxSpeed times normal.
+	scrollAcceleration = 0.35
+	scrollMaxSpeed     = 15.0
+	// scrollDownWindow is how long after scrolling up a scroll down can still be in
+	// copy mode, when the last poll hasn't seen copy mode yet.
+	scrollDownWindow = 2 * time.Second
+)
+
+// onScroll scrolls tmux's history with the mouse wheel, faster as the wheel spins faster.
+// It scrolls tmux itself, entering copy mode, so it works whether or not tmux's mouse
+// option is on. Programs using the mouse or the alternate screen, such as vim and less,
+// get the wheel instead, as with tmux's own wheel binding.
+func (p *Pane) onScroll(ev *gdk.EventScroll) bool {
+	if !p.running || ev.State()&gdk.CONTROL_MASK != 0 {
+		return false
+	}
+	h, s := p.win.app.lookup(p.SessionKey())
+	if s == nil {
+		return false
+	}
+	aw := s.ActiveWindow()
+	if aw == nil || aw.PaneID == "" || aw.AlternateScreen || aw.MouseReporting {
+		return false
+	}
+
+	var steps float64
+	switch ev.Direction() {
+	case gdk.SCROLL_UP:
+		steps = -1
+	case gdk.SCROLL_DOWN:
+		steps = 1
+	case gdk.SCROLL_SMOOTH:
+		steps = ev.DeltaY()
+	case gdk.SCROLL_LEFT, gdk.SCROLL_RIGHT:
+		return false
+	}
+	if steps == 0 {
+		return true
+	}
+
+	now := time.Now()
+	gap := now.Sub(p.lastScroll)
+	reversed := p.scrollPending != 0 && (steps < 0) != (p.scrollPending < 0)
+	switch {
+	case gap > scrollStreakReset || reversed:
+		p.scrollStreak = 0
+		p.scrollPending = 0
+	case gap < scrollStreakGap:
+		p.scrollStreak++
+	}
+	p.lastScroll = now
+	if steps < 0 {
+		p.lastScrollUp = now
+	} else if !aw.InMode && now.Sub(p.lastScrollUp) > scrollDownWindow {
+		// Already at the bottom: there's nothing to scroll down to.
+		return true
+	}
+
+	speed := min(1+float64(p.scrollStreak)*scrollAcceleration, scrollMaxSpeed)
+	p.scrollPending += steps * scrollLines * speed
+	p.flushScroll(h, aw.PaneID)
+	return true
+}
+
+// flushScroll sends the pending scroll to tmux, one command at a time, so a fast wheel
+// becomes a few large scrolls rather than a queue of small ones.
+func (p *Pane) flushScroll(h *Host, pane string) {
+	lines := int(p.scrollPending)
+	if p.scrolling || lines == 0 {
+		return
+	}
+	p.scrollPending -= float64(lines)
+	p.scrolling = true
+	runAsync(p.win.app, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, h.client.ScrollPane(ctx, pane, lines)
+	}, func(_ struct{}, err error) {
+		p.scrolling = false
+		if err != nil {
+			// Scrolling down outside copy mode fails, which is fine.
+			p.win.app.log.Debug("Scroll failed", zap.Error(err))
+		}
+		p.flushScroll(h, pane)
+	})
 }
 
 // Zoom changes the font scale by steps, or resets it when steps is 0.

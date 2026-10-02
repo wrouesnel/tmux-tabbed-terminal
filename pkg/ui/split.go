@@ -79,8 +79,9 @@ func (l *layout) replace(old node, parent *split, n node) {
 	l.area.PackStart(n.widget(), true, true, 0)
 }
 
-// Split puts added next to target. Horizontal places it to the right, vertical below.
-func (l *layout) Split(target *Pane, added *Pane, orientation gtk.Orientation) {
+// Split puts added next to target: to the right for horizontal, below for vertical, or to
+// the left or above if before is set.
+func (l *layout) Split(target *Pane, added *Pane, orientation gtk.Orientation, before bool) {
 	size := target.root.GetAllocatedWidth()
 	if orientation == gtk.ORIENTATION_VERTICAL {
 		size = target.root.GetAllocatedHeight()
@@ -92,8 +93,11 @@ func (l *layout) Split(target *Pane, added *Pane, orientation gtk.Orientation) {
 	paned, _ := gtk.PanedNew(orientation)
 	paned.SetWideHandle(true)
 	s := &split{paned: paned, first: target, second: added}
-	paned.Pack1(target.widget(), true, false)
-	paned.Pack2(added.widget(), true, false)
+	if before {
+		s.first, s.second = added, target
+	}
+	paned.Pack1(s.first.widget(), true, false)
+	paned.Pack2(s.second.widget(), true, false)
 	target.setParent(s)
 	added.setParent(s)
 	if size > 1 {

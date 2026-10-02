@@ -75,6 +75,9 @@ type SidebarConfig struct {
 	GroupByApplication bool `yaml:"group-by-application"`
 	// GroupHold is how long a session must run a new program before it changes group.
 	GroupHold time.Duration `yaml:"group-hold"`
+	// Position is the side of the window the list is on: left or right. The button under
+	// the list changes it, and that choice is remembered.
+	Position string `yaml:"position"`
 }
 
 // BehaviourConfig sets what the application does on its own.
@@ -115,6 +118,7 @@ func DefaultConfig() Config {
 		Sidebar: SidebarConfig{
 			GroupByApplication: true,
 			GroupHold:          defaultGroupHold,
+			Position:           "left",
 		},
 		Behaviour: BehaviourConfig{
 			CreateSessionOnStart: true,

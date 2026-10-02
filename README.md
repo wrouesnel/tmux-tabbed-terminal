@@ -20,7 +20,12 @@ or split the window to watch several sessions side by side.
   with a dot until you look at it. Activity comes from tmux's own `window_activity`
   time, so it works for sessions that aren't displayed.
 * **Splits.** Split a pane right or down, then pick a session for the new pane from
-  the list. Splits nest, and their dividers can be dragged.
+  the list. Or drag a session from the list onto a pane, as in VS Code: drop it near an
+  edge to split that side, or in the middle to show it in that pane. Splits nest, and
+  their dividers can be dragged.
+* **Scrolling.** The mouse wheel scrolls tmux's history, speeding up the faster the wheel
+  spins. It works whether or not tmux's `mouse` option is on. Programs that use the mouse
+  or the full screen, such as vim, less and htop, get the wheel as usual.
 * **GNOME look.** Font and colors come from GNOME Terminal's default profile if it's
   installed, otherwise from the desktop monospace font and the GTK theme.
 
@@ -58,7 +63,8 @@ Start it from the desktop menu ("Tmux Tabbed Terminal") or run `tmux-tabbed-term
 Running it again opens another window in the same instance. `--separate` starts an
 independent instance instead.
 
-In the session list, click a session to show it in the focused pane. Middle-click or
+In the session list, click a session to show it in the focused pane, or drag it onto a
+pane. Middle-click or
 Ctrl+click opens it in a new pane to the right. Right-click gives Open in Split Right,
 Open in Split Down, Rename and Kill. In a terminal, right-click (Shift+right-click if the
 program is using the mouse) gives copy, paste and split.
@@ -86,6 +92,9 @@ ends, the pane closes, or, if it's the only pane, moves on to the most recently 
 session.
 
 ## Configuration
+
+Choices made in the UI, such as which side the session list is on and whether it's
+grouped, are remembered in `~/.local/state/tmux-tabbed-terminal/state.yml`.
 
 Configuration is optional. The application reads
 `~/.config/tmux-tabbed-terminal/config.yml` if it exists, or the file given with
@@ -186,6 +195,7 @@ One-time setup:
 | `pkg/ui` | The GTK3 interface: application, windows, sidebar, pane split tree, terminal panes, appearance and menus. |
 | `pkg/vte` | cgo bindings for the parts of VTE the UI uses. |
 | `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
+| `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop). |
 | `pkg/sessionlist` | Groups sessions by application, orders and filters the session list. |
 | `pkg/activity` | Decides which sessions are busy or have unseen output, from successive snapshots. |
 | `pkg/theme` | Color parsing and GNOME Terminal's built-in palettes. |

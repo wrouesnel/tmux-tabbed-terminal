@@ -156,6 +156,15 @@ type Window struct {
 	Command string
 	// Path is the working directory of the window's active pane.
 	Path string
+	// PaneID is the ID of the window's active pane, such as %3.
+	PaneID string
+	// AlternateScreen is set when the active pane's program uses the alternate screen,
+	// as full-screen programs such as vim and less do.
+	AlternateScreen bool
+	// MouseReporting is set when the active pane's program has asked for mouse events.
+	MouseReporting bool
+	// InMode is set when the active pane is in a mode, such as copy mode.
+	InMode bool
 	// Title is the title of the window's active pane.
 	Title string
 }
@@ -234,7 +243,7 @@ var (
 	windowFormat = strings.Join([]string{
 		"W", "#{session_id}", "#{window_id}", "#{window_index}", "#{window_active}",
 		"#{window_activity}", "#{pane_current_command}", "#{window_name}", "#{pane_current_path}",
-		"#{pane_title}",
+		"#{pane_id}", "#{alternate_on}", "#{mouse_any_flag}", "#{pane_in_mode}", "#{pane_title}",
 	}, fieldSep)
 	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}"}, fieldSep)
 )
@@ -288,7 +297,7 @@ func ParseSnapshot(out string) *Snapshot {
 				Attached: attached,
 			})
 		case "W":
-			if len(fields) < 10 {
+			if len(fields) < 14 {
 				continue
 			}
 			idx, _ := strconv.Atoi(fields[3])
@@ -300,8 +309,13 @@ func ParseSnapshot(out string) *Snapshot {
 				Command:  fields[6],
 				Name:     fields[7],
 				Path:     fields[8],
+				PaneID:   fields[9],
+				// tmux prints 1 for set flags.
+				AlternateScreen: fields[10] == "1",
+				MouseReporting:  fields[11] == "1",
+				InMode:          fields[12] == "1",
 				// The title may contain the separator: keep the rest of the line.
-				Title: strings.Join(fields[9:], fieldSep),
+				Title: strings.Join(fields[13:], fieldSep),
 			})
 		case "C":
 			if len(fields) < 3 {
@@ -355,6 +369,23 @@ func (c *Client) RenameSession(ctx context.Context, session string, name string)
 func (c *Client) SwitchClient(ctx context.Context, tty string, session string) error {
 	_, err := c.run(ctx, "switch-client", "-c", tty, "-t", session)
 	return err
+}
+
+// ScrollPane scrolls a pane's history by lines: up for negative, down for positive.
+// Scrolling up enters copy mode, which leaves again on scrolling back to the bottom, as
+// tmux's own mouse wheel binding does.
+func (c *Client) ScrollPane(ctx context.Context, pane string, lines int) error {
+	switch {
+	case lines < 0:
+		_, err := c.run(ctx, "copy-mode", "-e", "-t", pane, ";",
+			"send-keys", "-X", "-N", strconv.Itoa(-lines), "-t", pane, "scroll-up")
+		return err
+	case lines > 0:
+		_, err := c.run(ctx, "send-keys", "-X", "-N", strconv.Itoa(lines), "-t", pane, "scroll-down")
+		return err
+	default:
+		return nil
+	}
 }
 
 // HasSession reports whether a session exists.

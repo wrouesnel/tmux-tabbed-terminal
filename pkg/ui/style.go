@@ -51,6 +51,11 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-search {
 	margin: 6px;
 }
+.ttt-drop-zone {
+	background-color: alpha(@theme_selected_bg_color, 0.25);
+	border: 2px solid alpha(@theme_selected_bg_color, 0.8);
+	border-radius: 4px;
+}
 .ttt-sidebar row.ttt-host {
 	padding: 8px 4px 4px 8px;
 }

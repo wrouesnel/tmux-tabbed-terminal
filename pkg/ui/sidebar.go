@@ -11,6 +11,7 @@ import (
 	"github.com/gotk3/gotk3/pango"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
@@ -49,6 +50,8 @@ type sidebar struct {
 	rowKeys map[uintptr]string
 	order   []listEntry
 	query   string
+	// pressKey is the entry under the last button press, which a drag starts from.
+	pressKey string
 }
 
 // listEntry is one row of the list: a host, or a session of the host above it.
@@ -115,6 +118,15 @@ func newSidebar(w *Window) *sidebar {
 	sb.list.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
 		return sb.onButtonPress(gdk.EventButtonNewFromEvent(ev))
 	})
+	// Sessions can be dragged onto a pane to open them there or in a new split.
+	sb.list.DragSourceSet(gdk.BUTTON1_MASK, dragTargets(), dropAction)
+	sb.list.Connect("drag-begin", func(_ interface{}, ctx interface{}) {
+		if e := sb.entry(sb.pressKey); e != nil && !e.isHost {
+			w.app.dragKey = e.key
+		}
+		gtkx.DragSetIconName(ctx, "utilities-terminal-symbolic")
+	})
+	sb.list.Connect("drag-end", func() { w.app.endDrag() })
 
 	placeholder, _ := gtk.LabelNew("No sessions")
 	addClass(placeholder, "dim-label")
@@ -147,9 +159,15 @@ func newSidebar(w *Window) *sidebar {
 	hostBtn.SetTooltipText("List the tmux sessions of another host, over ssh")
 	hostBtn.SetActionName("win.add-host")
 	hostBtn.SetRelief(gtk.RELIEF_NONE)
+	sideBtn, _ := gtk.ButtonNewFromIconName(firstIcon("object-flip-horizontal-symbolic", "view-dual-symbolic"),
+		gtk.ICON_SIZE_BUTTON)
+	sideBtn.SetTooltipText("Move List to Other Side")
+	sideBtn.SetActionName("win.sidebar-other-side")
+	sideBtn.SetRelief(gtk.RELIEF_NONE)
 	toolbar.PackStart(newBtn, false, false, 0)
 	toolbar.PackStart(hostBtn, false, false, 0)
 	toolbar.PackEnd(groupBtn, false, false, 0)
+	toolbar.PackEnd(sideBtn, false, false, 0)
 
 	sb.root, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	addClass(sb.root, "sidebar")
@@ -525,9 +543,11 @@ func (sb *sidebar) onButtonPress(ev *gdk.EventButton) bool {
 	}
 	row := sb.list.GetRowAtY(int(ev.Y()))
 	if row == nil {
+		sb.pressKey = ""
 		return false
 	}
-	e := sb.entry(sb.rowKeys[row.Native()])
+	sb.pressKey = sb.rowKeys[row.Native()]
+	e := sb.entry(sb.pressKey)
 	if e == nil {
 		return false
 	}
