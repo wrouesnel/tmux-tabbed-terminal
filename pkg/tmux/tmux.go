@@ -165,6 +165,8 @@ type Window struct {
 	MouseReporting bool
 	// InMode is set when the active pane is in a mode, such as copy mode.
 	InMode bool
+	// Scroll is the active pane's history and scroll position.
+	Scroll ScrollState
 	// Title is the title of the window's active pane.
 	Title string
 }
@@ -243,7 +245,8 @@ var (
 	windowFormat = strings.Join([]string{
 		"W", "#{session_id}", "#{window_id}", "#{window_index}", "#{window_active}",
 		"#{window_activity}", "#{pane_current_command}", "#{window_name}", "#{pane_current_path}",
-		"#{pane_id}", "#{alternate_on}", "#{mouse_any_flag}", "#{pane_in_mode}", "#{pane_title}",
+		"#{pane_id}", "#{alternate_on}", "#{mouse_any_flag}", "#{pane_in_mode}",
+		"#{history_size}", "#{pane_height}", "#{scroll_position}", "#{pane_title}",
 	}, fieldSep)
 	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}"}, fieldSep)
 )
@@ -297,7 +300,7 @@ func ParseSnapshot(out string) *Snapshot {
 				Attached: attached,
 			})
 		case "W":
-			if len(fields) < 14 {
+			if len(fields) < 17 {
 				continue
 			}
 			idx, _ := strconv.Atoi(fields[3])
@@ -314,8 +317,9 @@ func ParseSnapshot(out string) *Snapshot {
 				AlternateScreen: fields[10] == "1",
 				MouseReporting:  fields[11] == "1",
 				InMode:          fields[12] == "1",
+				Scroll:          parseScroll(fields[13], fields[14], fields[15]),
 				// The title may contain the separator: keep the rest of the line.
-				Title: strings.Join(fields[13:], fieldSep),
+				Title: strings.Join(fields[16:], fieldSep),
 			})
 		case "C":
 			if len(fields) < 3 {
@@ -371,21 +375,53 @@ func (c *Client) SwitchClient(ctx context.Context, tty string, session string) e
 	return err
 }
 
-// ScrollPane scrolls a pane's history by lines: up for negative, down for positive.
-// Scrolling up enters copy mode, which leaves again on scrolling back to the bottom, as
-// tmux's own mouse wheel binding does.
-func (c *Client) ScrollPane(ctx context.Context, pane string, lines int) error {
+// ScrollState is where a pane's view is in its history.
+type ScrollState struct {
+	// History is the number of lines scrolled off the top of the pane.
+	History int
+	// Height is the pane's height in lines.
+	Height int
+	// Position is how many lines up from the bottom the view is: 0 unless in copy mode.
+	Position int
+}
+
+// parseScroll parses the scroll formats. tmux prints an empty scroll_position outside copy
+// mode.
+func parseScroll(history, height, position string) ScrollState {
+	var st ScrollState
+	st.History, _ = strconv.Atoi(history)
+	st.Height, _ = strconv.Atoi(height)
+	st.Position, _ = strconv.Atoi(position)
+	return st
+}
+
+// scrollStateFormat prints a ScrollState.
+//
+//nolint:gochecknoglobals
+var scrollStateFormat = strings.Join([]string{"#{history_size}", "#{pane_height}", "#{scroll_position}"}, fieldSep)
+
+// ScrollPane scrolls a pane's history by lines: up for negative, down for positive. It
+// returns where the view ended up. Scrolling up enters copy mode, which leaves again on
+// scrolling back to the bottom, as tmux's own mouse wheel binding does.
+func (c *Client) ScrollPane(ctx context.Context, pane string, lines int) (ScrollState, error) {
+	args := []string{}
 	switch {
 	case lines < 0:
-		_, err := c.run(ctx, "copy-mode", "-e", "-t", pane, ";",
-			"send-keys", "-X", "-N", strconv.Itoa(-lines), "-t", pane, "scroll-up")
-		return err
+		args = append(args, "copy-mode", "-e", "-t", pane, ";",
+			"send-keys", "-X", "-N", strconv.Itoa(-lines), "-t", pane, "scroll-up", ";")
 	case lines > 0:
-		_, err := c.run(ctx, "send-keys", "-X", "-N", strconv.Itoa(lines), "-t", pane, "scroll-down")
-		return err
-	default:
-		return nil
+		args = append(args, "send-keys", "-X", "-N", strconv.Itoa(lines), "-t", pane, "scroll-down", ";")
 	}
+	args = append(args, "display-message", "-p", "-t", pane, scrollStateFormat)
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return ScrollState{}, err
+	}
+	fields := strings.Split(strings.TrimSpace(out), fieldSep)
+	if len(fields) != 3 { //nolint:mnd // the fields of scrollStateFormat
+		return ScrollState{}, errors.Errorf("unexpected scroll state %q", out)
+	}
+	return parseScroll(fields[0], fields[1], fields[2]), nil
 }
 
 // HasSession reports whether a session exists.

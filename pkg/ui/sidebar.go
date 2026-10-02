@@ -140,7 +140,7 @@ func newSidebar(w *Window) *sidebar {
 
 	newBtn, _ := gtk.ButtonNewFromIconName("list-add-symbolic", gtk.ICON_SIZE_BUTTON)
 	newBtn.SetTooltipText("New Session (Ctrl+Shift+T)")
-	newBtn.SetActionName("win.new-session")
+	newBtn.Connect("clicked", func() { w.PromptNewSession(w.activePane, newBtn) })
 	newBtn.SetRelief(gtk.RELIEF_NONE)
 	groupBtn, _ := gtk.ToggleButtonNew()
 	groupIcon, _ := gtk.ImageNewFromIconName(firstIcon("view-list-bullet-symbolic", "view-list-symbolic"),
@@ -273,7 +273,7 @@ func (sb *sidebar) FocusSearch() {
 	sb.search.GrabFocus()
 }
 
-func newHostRow(name string, local bool) *hostRow {
+func newHostRow(name string, local bool, newSession func(string)) *hostRow {
 	r := &hostRow{name: name}
 	r.row, _ = gtk.ListBoxRowNew()
 	r.row.SetSelectable(false)
@@ -303,7 +303,13 @@ func newHostRow(name string, local bool) *hostRow {
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, rowSpacing)
 	box.PackStart(r.icon, false, false, 0)
 	box.PackStart(label, true, true, 0)
+	addBtn, _ := gtk.ButtonNewFromIconName("list-add-symbolic", gtk.ICON_SIZE_MENU)
+	addBtn.SetRelief(gtk.RELIEF_NONE)
+	addBtn.SetTooltipText("New Session on " + name)
+	addBtn.Connect("clicked", func() { newSession(name) })
+
 	box.PackStart(r.status, false, false, 0)
+	box.PackStart(addBtn, false, false, 0)
 	box.PackStart(menuBtn, false, false, 0)
 	r.row.Add(box)
 	r.row.ShowAll()
@@ -447,7 +453,7 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 	for _, h := range app.hosts {
 		hr, ok := sb.hostRows[h.Name]
 		if !ok {
-			hr = newHostRow(h.Name, h.Local())
+			hr = newHostRow(h.Name, h.Local(), func(name string) { sb.win.NewSessionOn(sb.win.activePane, name) })
 			sb.hostRows[h.Name] = hr
 			sb.rowKeys[hr.row.Native()] = h.Name
 		}

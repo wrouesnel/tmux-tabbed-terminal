@@ -89,18 +89,26 @@ func TestSessionLifecycle(t *testing.T) {
 	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil { //nolint:gosec // test
 		t.Fatalf("send-keys: %v: %s", err, out)
 	}
-	time.Sleep(300 * time.Millisecond)
-	snap, _ = c.Snapshot(ctx)
+	// Wait for the shell to print enough to scroll.
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if snap, _ = c.Snapshot(ctx); snap.Session(id).ActiveWindow().Scroll.History > 20 {
+			break
+		}
+	}
 	pane := snap.Session(id).ActiveWindow().PaneID
-	if err := c.ScrollPane(ctx, pane, -10); err != nil {
+	st, err := c.ScrollPane(ctx, pane, -10)
+	if err != nil {
 		t.Fatalf("ScrollPane up: %v", err)
+	}
+	if st.Position != 10 || st.History == 0 || st.Height == 0 {
+		t.Fatalf("scroll state after scrolling up: %+v", st)
 	}
 	snap, _ = c.Snapshot(ctx)
 	if !snap.Session(id).ActiveWindow().InMode {
 		t.Fatal("scrolling up didn't enter copy mode")
 	}
-	if err := c.ScrollPane(ctx, pane, 20); err != nil {
-		t.Fatalf("ScrollPane down: %v", err)
+	if st, err = c.ScrollPane(ctx, pane, 20); err != nil || st.Position != 0 {
+		t.Fatalf("ScrollPane down: %+v, %v", st, err)
 	}
 	snap, _ = c.Snapshot(ctx)
 	if snap.Session(id).ActiveWindow().InMode {
@@ -121,9 +129,9 @@ func TestSessionLifecycle(t *testing.T) {
 func TestParseSnapshot(t *testing.T) {
 	out := strings.ReplaceAll("S\t$1\tmain\t100\t1\n"+
 		"S\t$2\tother\t200\t0\n"+
-		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\t%5\t1\t0\t1\ttitle\twith sep\n"+
-		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t%4\t0\t0\t0\t\n"+
-		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t%9\t0\t0\t0\t\n"+
+		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\t%5\t1\t0\t1\t500\t40\t12\ttitle\twith sep\n"+
+		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t%4\t0\t0\t0\t0\t40\t\t\n"+
+		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t%9\t0\t0\t0\t0\t40\t\t\n"+
 		"C\t/dev/pts/4\t$1\n"+
 		"garbage\n", "\t", "^|^")
 	snap := tmux.ParseSnapshot(out)
@@ -139,6 +147,9 @@ func TestParseSnapshot(t *testing.T) {
 	}
 	if got := main.ActiveWindow().Path; got != "/src" {
 		t.Errorf("path: got %q, want /src", got)
+	}
+	if got := main.ActiveWindow().Scroll; got != (tmux.ScrollState{History: 500, Height: 40, Position: 12}) {
+		t.Errorf("scroll: got %+v", got)
 	}
 	if aw := main.ActiveWindow(); aw.PaneID != "%5" || !aw.AlternateScreen || aw.MouseReporting || !aw.InMode {
 		t.Errorf("pane fields: got %+v", aw)

@@ -161,6 +161,24 @@ func terminalStylesheet(fg, bg theme.Color) string {
 .ttt-pane-header button {
 	color: %[4]s;
 }
+/* The scrollbar sits on the terminal: its trough is the terminal background, its slider
+   the text color, faint until used. */
+.ttt-pane scrollbar {
+	background-color: %[5]s;
+	background-image: none;
+	border: none;
+}
+.ttt-pane scrollbar slider {
+	background-color: alpha(%[4]s, 0.3);
+	min-width: 6px;
+	border: none;
+}
+.ttt-pane scrollbar slider:hover {
+	background-color: alpha(%[4]s, 0.5);
+}
+.ttt-pane scrollbar slider:active {
+	background-color: @theme_selected_bg_color;
+}
 .ttt-empty {
 	background-color: %[5]s;
 	color: %[4]s;

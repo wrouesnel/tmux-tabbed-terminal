@@ -49,6 +49,9 @@ type Pane struct {
 	term        *vte.Terminal
 	// dropZone highlights where a dragged session would land.
 	dropZone *gtk.Box
+	// scrollbar shows where the view is in tmux's history, and scrolls it when dragged.
+	scrollbar *gtk.Scrollbar
+	scrollAdj *gtk.Adjustment
 
 	emptyTitle    *gtk.Label
 	emptyHint     *gtk.Label
@@ -73,6 +76,16 @@ type Pane struct {
 	scrollStreak  int
 	lastScroll    time.Time
 	lastScrollUp  time.Time
+	// scrollState is the latest known position in tmux's history.
+	scrollState tmux.ScrollState
+	// scrollTarget is the position, in lines up from the bottom, the scrollbar was
+	// dragged to and not yet scrolled to; hasTarget says if there is one.
+	scrollTarget int
+	hasTarget    bool
+	// barHeld is set while the scrollbar is being dragged, so updates don't move it
+	// under the pointer; settingBar while it's moved from tmux's state.
+	barHeld    bool
+	settingBar bool
 }
 
 func (p *Pane) widget() gtk.IWidget { return p.root }
@@ -182,8 +195,33 @@ func newPane(w *Window) *Pane {
 		return true
 	})
 
+	// The scrollbar follows tmux's history rather than the terminal's, which tmux
+	// redraws in place.
+	p.scrollAdj, _ = gtk.AdjustmentNew(0, 0, 1, 1, 1, 1)
+	p.scrollbar, _ = gtk.ScrollbarNew(gtk.ORIENTATION_VERTICAL, p.scrollAdj)
+	p.scrollbar.SetNoShowAll(true)
+	p.scrollAdj.Connect("value-changed", func() {
+		if p.settingBar {
+			return
+		}
+		p.scrollTarget = p.scrollState.History - int(p.scrollAdj.GetValue()+0.5) //nolint:mnd // round
+		p.hasTarget = true
+		p.flushScroll()
+	})
+	p.scrollbar.Connect("button-press-event", func() bool {
+		p.barHeld = true
+		return false
+	})
+	p.scrollbar.Connect("button-release-event", func() bool {
+		p.barHeld = false
+		return false
+	})
+	body, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
+	body.PackStart(overlay, true, true, 0)
+	body.PackStart(p.scrollbar, false, false, 0)
+
 	p.root.PackStart(headerEvents, false, false, 0)
-	p.root.PackStart(overlay, true, true, 0)
+	p.root.PackStart(body, true, true, 0)
 	p.root.ShowAll()
 	p.showEmpty("No session", "Choose a session from the list, or start a new one.", false)
 	return p
@@ -215,7 +253,7 @@ func (p *Pane) buildEmptyPage() gtk.IWidget {
 	})
 	p.newSessionBtn, _ = gtk.ButtonNewWithLabel("New Session")
 	addClass(p.newSessionBtn, "suggested-action")
-	p.newSessionBtn.Connect("clicked", func() { p.win.NewSession(p) })
+	p.newSessionBtn.Connect("clicked", func() { p.win.PromptNewSession(p, p.newSessionBtn) })
 	p.newSessionBtn.Connect("focus-in-event", func() bool {
 		p.win.setActivePane(p)
 		return false
@@ -458,7 +496,7 @@ func (p *Pane) onScroll(ev *gdk.EventScroll) bool {
 	if !p.running || ev.State()&gdk.CONTROL_MASK != 0 {
 		return false
 	}
-	h, s := p.win.app.lookup(p.SessionKey())
+	_, s := p.win.app.lookup(p.SessionKey())
 	if s == nil {
 		return false
 	}
@@ -495,36 +533,90 @@ func (p *Pane) onScroll(ev *gdk.EventScroll) bool {
 	p.lastScroll = now
 	if steps < 0 {
 		p.lastScrollUp = now
-	} else if !aw.InMode && now.Sub(p.lastScrollUp) > scrollDownWindow {
+	} else if !aw.InMode && p.scrollState.Position == 0 && now.Sub(p.lastScrollUp) > scrollDownWindow {
 		// Already at the bottom: there's nothing to scroll down to.
 		return true
 	}
 
 	speed := min(1+float64(p.scrollStreak)*scrollAcceleration, scrollMaxSpeed)
 	p.scrollPending += steps * scrollLines * speed
-	p.flushScroll(h, aw.PaneID)
+	p.flushScroll()
 	return true
 }
 
-// flushScroll sends the pending scroll to tmux, one command at a time, so a fast wheel
-// becomes a few large scrolls rather than a queue of small ones.
-func (p *Pane) flushScroll(h *Host, pane string) {
-	lines := int(p.scrollPending)
-	if p.scrolling || lines == 0 {
+// flushScroll sends the pending scroll to tmux, one command at a time, so a fast wheel or
+// a scrollbar drag becomes a few large scrolls rather than a queue of small ones. A
+// scrollbar position wins over wheel movement.
+func (p *Pane) flushScroll() {
+	if p.scrolling || !p.running {
 		return
 	}
-	p.scrollPending -= float64(lines)
+	h, s := p.win.app.lookup(p.SessionKey())
+	if s == nil {
+		return
+	}
+	aw := s.ActiveWindow()
+	if aw == nil || aw.PaneID == "" {
+		return
+	}
+
+	var lines int
+	if p.hasTarget {
+		// Lines down to go from the current position to the target.
+		lines = p.scrollState.Position - p.scrollTarget
+		p.hasTarget = false
+		p.scrollPending = 0
+	} else {
+		lines = int(p.scrollPending)
+		p.scrollPending -= float64(lines)
+	}
+	if lines == 0 {
+		return
+	}
+	pane := aw.PaneID
 	p.scrolling = true
-	runAsync(p.win.app, func(ctx context.Context) (struct{}, error) {
-		return struct{}{}, h.client.ScrollPane(ctx, pane, lines)
-	}, func(_ struct{}, err error) {
+	runAsync(p.win.app, func(ctx context.Context) (tmux.ScrollState, error) {
+		return h.client.ScrollPane(ctx, pane, lines)
+	}, func(st tmux.ScrollState, err error) {
 		p.scrolling = false
 		if err != nil {
 			// Scrolling down outside copy mode fails, which is fine.
 			p.win.app.log.Debug("Scroll failed", zap.Error(err))
+		} else {
+			p.scrollState = st
+			p.showScroll(st)
 		}
-		p.flushScroll(h, pane)
+		p.flushScroll()
 	})
+}
+
+// updateScrollbar shows the scrollbar for the latest snapshot. It's hidden when there's
+// no history, or the program is on the alternate screen, where tmux keeps none.
+func (p *Pane) updateScrollbar() {
+	visible := false
+	if _, s := p.win.app.lookup(p.SessionKey()); p.running && s != nil {
+		if aw := s.ActiveWindow(); aw != nil && !aw.AlternateScreen && aw.Scroll.History > 0 {
+			visible = true
+			// A scroll in flight will report a newer position than the snapshot.
+			if !p.scrolling && !p.hasTarget {
+				p.scrollState = aw.Scroll
+				p.showScroll(aw.Scroll)
+			}
+		}
+	}
+	p.scrollbar.SetVisible(visible)
+}
+
+// showScroll moves the scrollbar to a scroll state, unless it's being dragged.
+func (p *Pane) showScroll(st tmux.ScrollState) {
+	if p.barHeld {
+		return
+	}
+	total := float64(st.History + st.Height)
+	page := float64(max(st.Height, 1))
+	p.settingBar = true
+	p.scrollAdj.Configure(float64(st.History-st.Position), 0, total, 1, page, page)
+	p.settingBar = false
 }
 
 // Zoom changes the font scale by steps, or resets it when steps is 0.

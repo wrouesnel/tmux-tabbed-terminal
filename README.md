@@ -24,7 +24,9 @@ or split the window to watch several sessions side by side.
   edge to split that side, or in the middle to show it in that pane. Splits nest, and
   their dividers can be dragged.
 * **Scrolling.** The mouse wheel scrolls tmux's history, speeding up the faster the wheel
-  spins. It works whether or not tmux's `mouse` option is on. Programs that use the mouse
+  spins. A scrollbar beside each terminal shows where you are in tmux's history (not
+  the terminal's, which tmux redraws in place) and scrolls it when dragged. Both work
+  whether or not tmux's `mouse` option is on. Programs that use the mouse
   or the full screen, such as vim, less and htop, get the wheel as usual.
 * **GNOME look.** Font and colors come from GNOME Terminal's default profile if it's
   installed, otherwise from the desktop monospace font and the GTK theme.
@@ -134,7 +136,8 @@ hosts:
     socket-name: work      # a tmux server other than the default, as with tmux -L
 ```
 
-The host's ⋯ menu creates a session there or removes the host. Removing a host leaves
+With more than one host, New Session asks which host to start it on. The "+" beside a
+host starts one there directly, and its ⋯ menu also removes the host. Removing a host leaves
 panes already attached to its sessions running.
 
 ## Building

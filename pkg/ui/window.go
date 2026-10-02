@@ -119,7 +119,7 @@ func (w *Window) installActions() {
 		w.actions[name] = addStringAction(m, name, fn)
 	}
 
-	add("new-session", func() { w.NewSession(w.activePane) })
+	add("new-session", func() { w.PromptNewSession(w.activePane, nil) })
 	add("split-right", func() { w.SplitActive(gtk.ORIENTATION_HORIZONTAL) })
 	add("split-down", func() { w.SplitActive(gtk.ORIENTATION_VERTICAL) })
 	add("close-pane", func() { w.ClosePane(w.activePane) })
@@ -363,6 +363,90 @@ func (w *Window) NewSession(p *Pane) {
 	w.NewSessionOn(p, hostName)
 }
 
+// hostChooserHeight is the most the host chooser grows before it scrolls.
+const hostChooserHeight = 320
+
+// PromptNewSession creates a session for a pane. With one host it goes straight there;
+// with several, a menu by anchor asks which, starting at the pane's host. A nil anchor
+// points the menu at the pane.
+func (w *Window) PromptNewSession(p *Pane, anchor gtk.IWidget) {
+	if len(w.app.hosts) <= 1 {
+		w.NewSession(p)
+		return
+	}
+	if anchor == nil {
+		anchor = p.root
+	}
+	popover, err := gtk.PopoverNew(anchor)
+	if err != nil {
+		return
+	}
+	addClass(popover, "ttt-host-chooser")
+
+	title, _ := gtk.LabelNew("New Session On")
+	title.SetXAlign(0)
+	addClass(title, "ttt-group-header")
+	addClass(title, "dim-label")
+
+	list, _ := gtk.ListBoxNew()
+	list.SetSelectionMode(gtk.SELECTION_BROWSE)
+	list.SetActivateOnSingleClick(true)
+	names := []string{}
+	for _, h := range w.app.hosts {
+		row, _ := gtk.ListBoxRowNew()
+		box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, rowSpacing)
+		iconName := firstIcon("network-server-symbolic", "computer-symbolic")
+		if h.Local() {
+			iconName = firstIcon("computer-symbolic", "user-home-symbolic")
+		}
+		icon, _ := gtk.ImageNewFromIconName(iconName, gtk.ICON_SIZE_MENU)
+		label, _ := gtk.LabelNew(h.Name)
+		label.SetXAlign(0)
+		box.PackStart(icon, false, false, 0)
+		box.PackStart(label, true, true, 0)
+		if h.err != nil {
+			status, _ := gtk.LabelNew("unreachable")
+			addClass(status, "dim-label")
+			box.PackStart(status, false, false, 0)
+			row.SetSensitive(false)
+		}
+		box.SetMarginStart(6)  //nolint:mnd // row padding
+		box.SetMarginEnd(6)    //nolint:mnd
+		box.SetMarginTop(4)    //nolint:mnd
+		box.SetMarginBottom(4) //nolint:mnd
+		row.Add(box)
+		list.Add(row)
+		names = append(names, h.Name)
+		if h.Name == p.hostName || (p.hostName == "" && h.Local()) {
+			list.SelectRow(row)
+		}
+	}
+	list.Connect("row-activated", func(_ interface{}, row *gtk.ListBoxRow) {
+		popover.Popdown()
+		if i := row.GetIndex(); i >= 0 && i < len(names) {
+			w.NewSessionOn(p, names[i])
+		}
+	})
+
+	scroller, _ := gtk.ScrolledWindowNew(nil, nil)
+	scroller.SetPolicy(gtk.POLICY_NEVER, gtk.POLICY_AUTOMATIC)
+	scroller.SetPropagateNaturalHeight(true)
+	scroller.SetMaxContentHeight(hostChooserHeight)
+	scroller.Add(list)
+
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	box.PackStart(title, false, false, 0)
+	box.PackStart(scroller, true, true, 0)
+	box.SetMarginBottom(4) //nolint:mnd // popover padding
+	popover.Add(box)
+	popover.Connect("closed", func() { popover.Destroy() })
+	box.ShowAll()
+	popover.Popup()
+	if row := list.GetSelectedRow(); row != nil {
+		row.GrabFocus()
+	}
+}
+
 // NewSessionOn creates a session on a host and shows it in a pane.
 func (w *Window) NewSessionOn(p *Pane, hostName string) {
 	h := w.app.host(hostName)
@@ -459,6 +543,7 @@ func (w *Window) refresh() {
 			busy = w.app.tracker.State(p.SessionKey(), now).Active
 		}
 		p.updateHeader(name, busy, split)
+		p.updateScrollbar()
 	}
 
 	title, subtitle := version.Name, ""
