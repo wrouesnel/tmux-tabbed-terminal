@@ -2,6 +2,8 @@
 package theme
 
 import (
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -135,3 +137,48 @@ var Palettes = map[string][]string{
 
 // DefaultPalette is the palette used when nothing else is configured.
 const DefaultPalette = "gnome"
+
+// Luminance returns the relative luminance of a color, from 0 for black to 1 for white,
+// as defined by WCAG.
+func (c Color) Luminance() float64 {
+	lin := func(v float64) float64 {
+		if v <= 0.04045 { //nolint:mnd // sRGB transfer function
+			return v / 12.92 //nolint:mnd
+		}
+		return math.Pow((v+0.055)/1.055, 2.4) //nolint:mnd
+	}
+	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B) //nolint:mnd
+}
+
+// IsDark reports whether a background color is dark, so text on it should be light.
+func (c Color) IsDark() bool {
+	return c.Luminance() < darkThreshold
+}
+
+// darkThreshold is the luminance at which black and white text have equal contrast.
+const darkThreshold = 0.179
+
+// Mix returns c moved towards other by amount, from 0 (c) to 1 (other). Alpha is kept.
+func (c Color) Mix(other Color, amount float64) Color {
+	return Color{
+		R: c.R + (other.R-c.R)*amount,
+		G: c.G + (other.G-c.G)*amount,
+		B: c.B + (other.B-c.B)*amount,
+		A: c.A,
+	}
+}
+
+// Offset returns c a few shades away from itself: lighter if it's dark, darker if it's
+// light. It keeps a surface distinct from a neighbor of color c while matching it.
+func (c Color) Offset(amount float64) Color {
+	if c.IsDark() {
+		return c.Mix(Color{R: 1, G: 1, B: 1, A: 1}, amount)
+	}
+	return c.Mix(Color{R: 0, G: 0, B: 0, A: 1}, amount)
+}
+
+// CSS returns the color as a CSS rgba() value.
+func (c Color) CSS() string {
+	return fmt.Sprintf("rgba(%d,%d,%d,%.3f)",
+		int(math.Round(c.R*maxByte)), int(math.Round(c.G*maxByte)), int(math.Round(c.B*maxByte)), c.A)
+}

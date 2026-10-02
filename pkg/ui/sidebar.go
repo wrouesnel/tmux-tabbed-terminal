@@ -49,7 +49,6 @@ func newSidebar(w *Window) *sidebar {
 	sb.list, _ = gtk.ListBoxNew()
 	sb.list.SetSelectionMode(gtk.SELECTION_SINGLE)
 	sb.list.SetActivateOnSingleClick(true)
-	addClass(sb.list, "navigation-sidebar")
 	addClass(sb.list, "ttt-sidebar")
 	sb.list.Connect("row-activated", func(_ interface{}, row *gtk.ListBoxRow) {
 		if id := sb.idAt(row.GetIndex()); id != "" {
@@ -80,6 +79,7 @@ func newSidebar(w *Window) *sidebar {
 
 	sb.root, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	addClass(sb.root, "sidebar")
+	addClass(sb.root, "ttt-nav")
 	sb.root.SetSizeRequest(sidebarMinWidth, -1)
 	sb.root.PackStart(scroller, true, true, 0)
 	sep, _ := gtk.SeparatorNew(gtk.ORIENTATION_HORIZONTAL)

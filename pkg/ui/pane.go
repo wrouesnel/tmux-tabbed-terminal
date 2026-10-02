@@ -138,7 +138,6 @@ func (p *Pane) buildEmptyPage() gtk.IWidget {
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, paneSpacing)
 	box.SetHAlign(gtk.ALIGN_CENTER)
 	box.SetVAlign(gtk.ALIGN_CENTER)
-	addClass(box, "ttt-empty")
 
 	icon, _ := gtk.ImageNewFromIconName("utilities-terminal-symbolic", gtk.ICON_SIZE_DIALOG)
 	icon.SetPixelSize(emptyIconSize)
@@ -176,6 +175,7 @@ func (p *Pane) buildEmptyPage() gtk.IWidget {
 
 	// Clicking the page focuses the pane.
 	events, _ := gtk.EventBoxNew()
+	addClass(events, "ttt-empty")
 	events.Add(box)
 	events.Connect("button-press-event", func() bool {
 		p.Focus()

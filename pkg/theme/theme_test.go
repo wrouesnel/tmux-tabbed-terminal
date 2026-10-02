@@ -48,3 +48,20 @@ func TestPalettesParse(t *testing.T) {
 		t.Error("default palette is missing")
 	}
 }
+
+func TestOffset(t *testing.T) {
+	dark := theme.MustParseColor("#2e3436")
+	light := theme.MustParseColor("#ffffff")
+	if !dark.IsDark() || light.IsDark() {
+		t.Fatalf("IsDark: dark=%v light=%v", dark.IsDark(), light.IsDark())
+	}
+	if got := dark.Offset(0.1); got.Luminance() <= dark.Luminance() {
+		t.Errorf("dark offset %+v is not lighter than %+v", got, dark)
+	}
+	if got := light.Offset(0.1); got.Luminance() >= light.Luminance() {
+		t.Errorf("light offset %+v is not darker than %+v", got, light)
+	}
+	if got := light.Offset(0.1).CSS(); got != "rgba(230,230,230,1.000)" {
+		t.Errorf("CSS: got %s", got)
+	}
+}

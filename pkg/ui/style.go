@@ -1,11 +1,14 @@
 package ui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/gtk"
 	"go.uber.org/zap"
+
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/theme"
 )
 
 // stylesheet uses the theme's named colors, so it follows light and dark themes.
@@ -70,6 +73,88 @@ func installCSS(log *zap.Logger) {
 		return
 	}
 	gtk.AddProviderForScreen(screen, provider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+}
+
+// Offsets of the surfaces around the terminals from the terminal background: a few shades
+// lighter on a dark terminal, darker on a light one.
+const (
+	surfaceOffset = 0.07
+	hoverOffset   = 0.13
+	borderOffset  = 0.18
+)
+
+// terminalStylesheet styles the session list, pane headers, split dividers and empty panes
+// from the terminal colors, so they sit with the terminals rather than the GTK theme.
+func terminalStylesheet(fg, bg theme.Color) string {
+	fg.A, bg.A = 1, 1
+	surface := bg.Offset(surfaceOffset).CSS()
+	hover := bg.Offset(hoverOffset).CSS()
+	border := bg.Offset(borderOffset).CSS()
+	return fmt.Sprintf(`
+.ttt-nav, .ttt-nav list, .ttt-nav scrolledwindow, .ttt-nav viewport, .ttt-nav .ttt-sidebar-toolbar {
+	background-color: %[1]s;
+	color: %[4]s;
+}
+.ttt-nav row.ttt-session:hover:not(:selected) {
+	background-color: %[2]s;
+}
+.ttt-nav separator {
+	background-color: %[3]s;
+}
+.ttt-nav button {
+	color: %[4]s;
+}
+.ttt-nav button:hover {
+	background-color: %[2]s;
+}
+.ttt-window paned > separator {
+	background-color: %[3]s;
+	background-image: none;
+	border-color: %[3]s;
+}
+.ttt-pane-header {
+	background-color: %[1]s;
+	color: %[4]s;
+	border-bottom-color: %[3]s;
+}
+.ttt-pane-header button {
+	color: %[4]s;
+}
+.ttt-empty {
+	background-color: %[5]s;
+	color: %[4]s;
+}
+`, surface, hover, border, fg.CSS(), bg.CSS())
+}
+
+// installTerminalCSS adds or replaces the stylesheet derived from the terminal colors.
+func (a *App) installTerminalCSS() {
+	fg, bg := a.appearance.Foreground, a.appearance.Background
+	if a.appearance.UseThemeColors {
+		probe, err := gtk.LabelNew("")
+		if err != nil {
+			return
+		}
+		fg, bg = themeColors(&probe.Widget)
+	}
+	if a.terminalCSS == nil {
+		provider, err := gtk.CssProviderNew()
+		if err != nil {
+			a.log.Warn("Could not create CSS provider", zap.Error(err))
+			return
+		}
+		screen, err := gdk.ScreenGetDefault()
+		if err != nil {
+			a.log.Warn("No default screen for the stylesheet", zap.Error(err))
+			return
+		}
+		// Above the application stylesheet, so these colors win.
+		gtk.AddProviderForScreen(screen, provider, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION+1)
+		a.terminalCSS = provider
+	}
+	if err := a.terminalCSS.LoadFromData(terminalStylesheet(fg, bg)); err != nil {
+		a.log.Warn("Could not load terminal stylesheet", zap.Error(err))
+	}
 }
 
 // styled is any widget with a style context.

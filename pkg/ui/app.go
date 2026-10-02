@@ -59,9 +59,10 @@ type App struct {
 	gtkApp  *gtk.Application
 	tracker *activity.Tracker
 
-	appearance *Appearance
-	snapshot   *tmux.Snapshot
-	windows    map[*Window]struct{}
+	appearance  *Appearance
+	terminalCSS *gtk.CssProvider
+	snapshot    *tmux.Snapshot
+	windows     map[*Window]struct{}
 
 	kick chan struct{}
 }
@@ -125,6 +126,13 @@ func (a *App) startup() {
 	gtk.WindowSetDefaultIconName(IconName)
 	a.appearance = ResolveAppearance(a.cfg.Appearance, a.log)
 	installCSS(a.log)
+	a.installTerminalCSS()
+	// Theme colors change with the GTK theme.
+	if settings, err := gtk.SettingsGetDefault(); err == nil {
+		for _, prop := range []string{"notify::gtk-theme-name", "notify::gtk-application-prefer-dark-theme"} {
+			settings.Connect(prop, func() { glib.IdleAdd(a.installTerminalCSS) })
+		}
+	}
 	a.installActions()
 
 	// Fill the session list before the first window opens.
