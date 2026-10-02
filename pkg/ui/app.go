@@ -156,6 +156,7 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 func (a *App) startup() {
 	glib.SetApplicationName(version.Name)
 	gtk.WindowSetDefaultIconName(IconName)
+	installIcons(a.log)
 	installCSS(a.log)
 	a.reloadAppearance()
 	// Theme colors change with the GTK theme.

@@ -127,7 +127,9 @@ activity:
 ## Remote hosts
 
 "Add Host" takes an ssh destination: `user@host`, or an alias from `~/.ssh/config`, which
-is the place for ports, jump hosts and keys. The host needs tmux installed, and key or
+is the place for ports, jump hosts and keys. The dialog lists the concrete hosts of
+`~/.ssh/config` and the files it includes (wildcard patterns are left out); typing
+filters the list, a click fills in the host and a double click adds it. The host needs tmux installed, and key or
 agent authentication: the session list is polled in the background with ssh's
 `BatchMode`, so it can't prompt for a password. If ssh has never seen the host's key,
 connect to it once by hand to accept it.
@@ -209,6 +211,7 @@ One-time setup:
 | `pkg/vte` | cgo bindings for the parts of VTE the UI uses. |
 | `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
 | `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop). |
+| `pkg/sshconfig` | Lists the concrete hosts of an OpenSSH client configuration, following `Include`. |
 | `pkg/sessionlist` | Groups sessions by application, orders and filters the session list. |
 | `pkg/activity` | Decides which sessions are busy or have unseen output, from successive snapshots. |
 | `pkg/theme` | Color parsing and GNOME Terminal's built-in palettes. |

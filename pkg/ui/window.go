@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
+	"github.com/gotk3/gotk3/pango"
 	"go.uber.org/zap"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sshconfig"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
 )
@@ -682,7 +685,11 @@ func (w *Window) KillSession(key string) {
 	})
 }
 
-// AddHostDialog asks for a host to list sessions from.
+// sshHostListHeight is the most the ssh config host list grows before it scrolls.
+const sshHostListHeight = 260
+
+// AddHostDialog asks for a host to list sessions from: typed in, or picked from the
+// concrete hosts of ~/.ssh/config.
 func (w *Window) AddHostDialog() {
 	dlg, err := gtk.DialogNewWithButtons("Add Host", w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT|
 		gtk.DIALOG_USE_HEADER_BAR,
@@ -710,6 +717,67 @@ func (w *Window) AddHostDialog() {
 	addClass(hint, "dim-label")
 	box.PackStart(entry, false, false, 0)
 	box.PackStart(hint, false, false, 0)
+
+	// The hosts of ~/.ssh/config, filtered by what's typed.
+	hosts, err := sshconfig.Load(sshconfig.DefaultPath())
+	if err != nil {
+		w.app.log.Warn("Could not read the ssh configuration", zap.Error(err))
+	}
+	if len(hosts) > 0 {
+		heading, _ := gtk.LabelNew("From ~/.ssh/config")
+		heading.SetXAlign(0)
+		addClass(heading, "ttt-group-header")
+		addClass(heading, "dim-label")
+
+		list, _ := gtk.ListBoxNew()
+		list.SetSelectionMode(gtk.SELECTION_SINGLE)
+		list.SetActivateOnSingleClick(false)
+		aliases := make([]string, 0, len(hosts))
+		for _, h := range hosts {
+			list.Add(sshHostRow(h, w.app.host(h.Alias) != nil))
+			aliases = append(aliases, h.Alias)
+		}
+		alias := func(row *gtk.ListBoxRow) string {
+			if i := row.GetIndex(); i >= 0 && i < len(aliases) {
+				return aliases[i]
+			}
+			return ""
+		}
+		// A click fills in the entry; a double click or Enter adds the host.
+		filling := false
+		list.Connect("row-selected", func(_ interface{}, row *gtk.ListBoxRow) {
+			if row != nil && row.Object != nil {
+				filling = true
+				entry.SetText(alias(row))
+				filling = false
+			}
+		})
+		list.Connect("row-activated", func(_ interface{}, row *gtk.ListBoxRow) {
+			entry.SetText(alias(row))
+			dlg.Response(gtk.RESPONSE_ACCEPT)
+		})
+		list.SetFilterFunc(func(row *gtk.ListBoxRow) bool {
+			text, _ := entry.GetText()
+			h := hosts[row.GetIndex()]
+			text = strings.ToLower(strings.TrimSpace(text))
+			return filling || text == "" || strings.Contains(strings.ToLower(h.Alias+" "+h.HostName+" "+h.User), text)
+		})
+		entry.Connect("changed", func() {
+			if !filling {
+				list.InvalidateFilter()
+			}
+		})
+
+		scroller, _ := gtk.ScrolledWindowNew(nil, nil)
+		scroller.SetPolicy(gtk.POLICY_NEVER, gtk.POLICY_AUTOMATIC)
+		scroller.SetShadowType(gtk.SHADOW_IN)
+		scroller.SetPropagateNaturalHeight(true)
+		scroller.SetMaxContentHeight(sshHostListHeight)
+		scroller.Add(list)
+		box.PackStart(heading, false, false, 0)
+		box.PackStart(scroller, true, true, 0)
+	}
+
 	content, _ := dlg.GetContentArea()
 	content.PackStart(padded(box), true, true, 0)
 	dlg.ShowAll()
@@ -719,6 +787,45 @@ func (w *Window) AddHostDialog() {
 	}
 	destination, _ := entry.GetText()
 	w.app.AddHost(destination, w)
+}
+
+// sshHostRow is a host of the ssh configuration in the Add Host list.
+func sshHostRow(h sshconfig.Host, added bool) *gtk.ListBoxRow {
+	row, _ := gtk.ListBoxRowNew()
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, rowSpacing)
+	box.SetMarginStart(8)  //nolint:mnd // row padding
+	box.SetMarginEnd(8)    //nolint:mnd
+	box.SetMarginTop(4)    //nolint:mnd
+	box.SetMarginBottom(4) //nolint:mnd
+
+	text, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	name, _ := gtk.LabelNew(h.Alias)
+	name.SetXAlign(0)
+	text.PackStart(name, false, false, 0)
+	detail := h.HostName
+	if h.User != "" {
+		detail = h.User + "@" + detail
+		if h.HostName == "" {
+			detail = h.User + "@" + h.Alias
+		}
+	}
+	if detail != "" {
+		sub, _ := gtk.LabelNew(detail)
+		sub.SetXAlign(0)
+		sub.SetEllipsize(pango.ELLIPSIZE_END)
+		addClass(sub, "dim-label")
+		addClass(sub, "ttt-session-subtitle")
+		text.PackStart(sub, false, false, 0)
+	}
+	box.PackStart(text, true, true, 0)
+	if added {
+		mark, _ := gtk.LabelNew("added")
+		addClass(mark, "dim-label")
+		box.PackStart(mark, false, false, 0)
+		row.SetSensitive(false)
+	}
+	row.Add(box)
+	return row
 }
 
 // dialogPadding is the margin around dialog content.

@@ -400,8 +400,7 @@ func newHostRow(name string, local bool, newSession func(string)) *hostRow {
 	box.PackStart(r.icon, false, false, 0)
 	box.PackStart(label, true, true, 0)
 	r.filter, _ = gtk.ToggleButtonNew()
-	filterIcon, _ := gtk.ImageNewFromIconName(firstIcon("funnel-symbolic", "view-filter-symbolic",
-		"edit-find-symbolic"), gtk.ICON_SIZE_MENU)
+	filterIcon, _ := gtk.ImageNewFromIconName(iconFilter, gtk.ICON_SIZE_MENU)
 	r.filter.SetImage(filterIcon)
 	r.filter.SetRelief(gtk.RELIEF_NONE)
 	r.filter.SetTooltipText("Show Only " + name)
