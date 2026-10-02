@@ -32,7 +32,7 @@ haven't seen are marked.
 %autosetup
 
 %build
-export GOFLAGS="-mod=vendor -trimpath" GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=1
+export GOFLAGS="-mod=vendor -trimpath -buildvcs=false" GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=1
 export GOCACHE="$PWD/.gocache" GOPATH="$PWD/.gopath"
 go build -tags "$(sh packaging/gotk3-tags.sh)" \
     -ldflags "-s -w -B gobuildid -X github.com/wrouesnel/tmux-tabbed-terminal/version.Version=v%{version}" \

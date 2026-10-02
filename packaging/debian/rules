@@ -4,7 +4,7 @@
 # ppa:longsleep/golang-backports dependency of the PPA for Ubuntu 24.04.
 
 export PATH := /usr/lib/go-1.26/bin:$(PATH)
-export GOFLAGS := -mod=vendor -trimpath
+export GOFLAGS := -mod=vendor -trimpath -buildvcs=false
 export GOTOOLCHAIN := local
 export GOPROXY := off
 export GOCACHE := $(CURDIR)/debian/.gocache
