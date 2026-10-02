@@ -1,0 +1,44 @@
+# Example configuration for tmux-tabbed-terminal.
+#
+# Copy to ~/.config/tmux-tabbed-terminal/config.yml. Every key is optional: missing keys
+# keep the defaults shown here.
+
+tmux:
+  # The tmux executable.
+  binary: tmux
+  # Select a tmux server other than the default one, as with tmux -L or tmux -S.
+  socket-name: ""
+  socket-path: ""
+
+appearance:
+  # Take font and colors from GNOME Terminal's default profile, if it's installed.
+  use-gnome-terminal-profile: true
+  # A Pango font description. Empty uses the profile's font, or the desktop's
+  # monospace font.
+  font: ""
+  # Set both to override the colors. Empty uses the profile's colors or the GTK theme.
+  foreground: ""
+  background: ""
+  # A built-in palette name (gnome, tango, linux, xterm, solarized) or 16 colors.
+  palette: []
+  # Show bold text in bright colors. Unset uses the profile's setting.
+  # bold-is-bright: false
+  # The terminal's own scrollback. tmux keeps the real history.
+  scrollback-lines: 1000
+  # Initial width of the session list in pixels.
+  sidebar-width: 220
+
+activity:
+  # How often tmux is asked for the state of every session.
+  poll-interval: 1s
+  # How long a session shows as busy after its last output.
+  timeout: 2s
+
+behaviour:
+  # Create a session when a window opens and there are none.
+  create-session-on-start: true
+  # Where new sessions start when the current session's directory isn't known.
+  # Empty means the home directory.
+  new-session-directory: ""
+  # Ask before killing a session.
+  confirm-kill: true

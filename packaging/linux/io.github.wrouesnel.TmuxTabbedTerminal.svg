@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="frame" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5e5c64"/>
+      <stop offset="1" stop-color="#3d3846"/>
+    </linearGradient>
+  </defs>
+  <!-- Window -->
+  <rect x="8" y="14" width="112" height="100" rx="10" fill="url(#frame)"/>
+  <rect x="8" y="14" width="112" height="16" rx="10" fill="#77767b"/>
+  <rect x="8" y="22" width="112" height="8" fill="#77767b"/>
+  <!-- Session list -->
+  <rect x="14" y="36" width="30" height="72" rx="4" fill="#deddda"/>
+  <rect x="17" y="40" width="24" height="10" rx="2" fill="#3584e4"/>
+  <rect x="17" y="54" width="24" height="10" rx="2" fill="#c0bfbc"/>
+  <rect x="17" y="68" width="24" height="10" rx="2" fill="#c0bfbc"/>
+  <circle cx="37" cy="59" r="2.5" fill="#3584e4"/>
+  <!-- Terminal -->
+  <rect x="48" y="36" width="66" height="72" rx="4" fill="#241f31"/>
+  <path d="M56 50 l10 8 l-10 8" fill="none" stroke="#ffffff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="70" y="63" width="20" height="5" rx="2" fill="#ffffff"/>
+  <rect x="48" y="100" width="66" height="8" fill="#26a269"/>
+  <rect x="48" y="100" width="66" height="8" rx="4" fill="#26a269"/>
+</svg>

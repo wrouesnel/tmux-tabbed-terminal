@@ -1,0 +1,84 @@
+---
+name: Build and Test
+"on":
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+  # Tag builds run this via release.yml.
+  workflow_call:
+
+# Packages are built for Ubuntu noble, so CI runs on it too. Every job that compiles Go
+# needs the GTK3 and VTE headers, because the UI links them with cgo.
+env:
+  BUILD_DEPS: libgtk-3-dev libvte-2.91-dev tmux
+
+jobs:
+  style:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $BUILD_DEPS
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check style
+        run: go run mage.go style
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $BUILD_DEPS
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Lint
+        run: go run mage.go lint
+
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $BUILD_DEPS xvfb
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Test
+        run: go run mage.go test
+      - name: Merge Coverage Files
+        run: go run mage.go coverage
+      - name: Coveralls
+        uses: shogo82148/actions-goveralls@v1
+        with:
+          path-to-profile: .cover.out
+
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Tags let `git describe` stamp the package version.
+          fetch-depth: 0
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $BUILD_DEPS
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: go run mage.go binary
+      - name: Build Debian package
+        run: go run mage.go deb linux-amd64

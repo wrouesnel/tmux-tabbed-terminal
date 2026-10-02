@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.wrouesnel.TmuxTabbedTerminal</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>Tmux Tabbed Terminal</name>
+  <summary>Switch between your tmux sessions in a GNOME Terminal style window</summary>
+  <description>
+    <p>
+      Tmux Tabbed Terminal lists the tmux sessions running for you in a sidebar and shows
+      them in a terminal that looks like GNOME Terminal. Click a session to switch to it,
+      or split the window to see several sessions side by side.
+    </p>
+    <p>
+      Sessions that are producing output show a spinner, and sessions which produced output
+      while you weren't looking are marked until you open them.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.wrouesnel.TmuxTabbedTerminal.desktop</launchable>
+  <url type="homepage">https://github.com/wrouesnel/tmux-tabbed-terminal</url>
+  <developer id="io.github.wrouesnel">
+    <name>Will Rouesnel</name>
+  </developer>
+  <provides>
+    <binary>tmux-tabbed-terminal</binary>
+  </provides>
+  <categories>
+    <category>System</category>
+    <category>TerminalEmulator</category>
+  </categories>
+</component>
