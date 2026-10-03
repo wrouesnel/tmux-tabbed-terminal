@@ -104,8 +104,7 @@ jobs:
             release/binaries/*
 
   # Uploads signed source packages to the PPA, where Launchpad builds them. Needs the PPA
-  # on Launchpad with the signing key registered to the account, and, for Ubuntu 24.04, a
-  # dependency on ppa:longsleep/golang-backports for Go 1.26: see the README.
+  # on Launchpad with the signing key registered to the account: see the README.
   ppa:
     needs:
       - integration

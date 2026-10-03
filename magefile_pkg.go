@@ -27,7 +27,17 @@ const (
 	pkgMaintainer = "Will Rouesnel <wrouesnel@wrouesnel.com>"
 	packagingDir  = "packaging"
 	rpmSpecIn     = "packaging/rpm/tmux-tabbed-terminal.spec.in"
+	// debGoPackage is the Go build dependency of Ubuntu suites whose default Go is new
+	// enough for go.mod.
+	debGoPackage = "golang-go (>= 2:1.24~)"
 )
+
+// debGoPackages are the Go build dependencies of Ubuntu suites whose default Go is too
+// old: there, a newer Go is packaged beside it. Launchpad only uses the first alternative
+// of a build dependency, so each suite names its own.
+var debGoPackages = map[string]string{
+	"noble": "golang-1.24-go",
+}
 
 // pkgVersion converts a git describe version to a package version: v1.2.3-4-gabc-dirty
 // becomes 1.2.3+4.gabc.dirty, which sorts after 1.2.3 and before 1.2.4 in both Debian and
@@ -181,6 +191,18 @@ func DebSource(suite string) error {
 	changelog := fmt.Sprintf("%s (%s) %s; urgency=medium\n\n  * Release %s.\n\n -- %s  %s\n",
 		pkgName, ver, suite, version, pkgMaintainer, sourceDateEpoch().Format("Mon, 02 Jan 2006 15:04:05 -0700"))
 	if err := os.WriteFile(path.Join(debianDir, "changelog"), []byte(changelog), 0o644); err != nil {
+		return err
+	}
+	goPackage, ok := debGoPackages[suite]
+	if !ok {
+		goPackage = debGoPackage
+	}
+	control, err := os.ReadFile(path.Join(debianDir, "control"))
+	if err != nil {
+		return err
+	}
+	control = []byte(strings.ReplaceAll(string(control), "@GO_PACKAGE@", goPackage))
+	if err := os.WriteFile(path.Join(debianDir, "control"), control, 0o644); err != nil {
 		return err
 	}
 

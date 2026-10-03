@@ -14,7 +14,7 @@ License:        MIT AND GPL-3.0-only
 URL:            https://github.com/wrouesnel/tmux-tabbed-terminal
 Source0:        %{name}-%{version}.tar.gz
 
-BuildRequires:  golang >= 1.26
+BuildRequires:  golang >= 1.24
 BuildRequires:  gcc
 BuildRequires:  pkgconfig(gtk+-3.0)
 BuildRequires:  pkgconfig(vte-2.91)

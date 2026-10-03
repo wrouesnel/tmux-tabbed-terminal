@@ -191,7 +191,7 @@ panes already attached to its sessions running.
 
 ## Building
 
-Building needs Go 1.26 or newer, the GTK3 and VTE development headers, and tmux for the
+Building needs Go 1.24.1 or newer, the GTK3 and VTE development headers, and tmux for the
 tests. On Ubuntu:
 
 ```sh
@@ -227,9 +227,10 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`. It does the following:
    signs and publishes the RHEL 8 and 10 packages.
 
 Both build services build without network access, so the source packages carry the Go
-modules vendored, and use Go 1.26: Ubuntu 26.04's own, Ubuntu 24.04's from
-[golang-backports](https://launchpad.net/~longsleep/+archive/ubuntu/golang-backports), and
-RHEL's. That's why `go.mod` targets Go 1.26.0. Older GTK libraries, as on RHEL 8, are
+modules vendored, and use each release's packaged Go: Ubuntu 24.04's `golang-1.24-go`
+(from noble-updates), and the default Go of Ubuntu 26.04 and RHEL 8 and 10, which are
+newer. That's why `go.mod` targets Go 1.24.1 and dependencies are held to versions that
+build with it. Older GTK libraries, as on RHEL 8, are
 detected by `packaging/gotk3-tags.sh` and selected in gotk3 with build tags.
 
 CI checks every package builds that way on each push and pull request: the source RPM is
@@ -262,10 +263,9 @@ One-time setup:
 * On Launchpad: create the PPA `tmux-tabbed-terminal`
   (https://launchpad.net/~w-rouesnel/+activate-ppa); the shared key is registered, and must
   be active, on the account (https://launchpad.net/~w-rouesnel/+editpgpkeys). Then, in the
-  PPA's settings, add `ppa:longsleep/golang-backports` as a dependency (Edit PPA
-  dependencies), so Ubuntu 24.04 builds find Go 1.26, and enable arm64 under Change
-  details. The workflow uploads to `ppa:w-rouesnel/tmux-tabbed-terminal`, or to the PPA
-  named by the `PPA` repository variable.
+  PPA's settings, enable arm64 under Change details. The workflow uploads to
+  `ppa:w-rouesnel/tmux-tabbed-terminal`, or to the PPA named by the `PPA` repository
+  variable.
 * On COPR: create the project `tmux-tabbed-terminal`
   (https://copr.fedorainfracloud.org/coprs/add/) with the chroots `epel-8-x86_64`,
   `epel-8-aarch64`, `epel-10-x86_64` and `epel-10-aarch64`. Then give the workflow an API

@@ -1,9 +1,10 @@
 #!/usr/bin/make -f
-# Builds from vendor/, with Go 1.26 and no network, as Launchpad's builders require. Go
-# 1.26 is golang-1.26-go: in the archive from Ubuntu 26.04, and from the
-# ppa:longsleep/golang-backports dependency of the PPA for Ubuntu 24.04.
+# Builds from vendor/, with Go 1.24 or newer and no network, as Launchpad's builders
+# require. Ubuntu 24.04's is golang-1.24-go, from noble-updates, installed beside the
+# default Go 1.22; later releases' default Go is new enough. `go run mage.go debSource`
+# picks the package for the suite.
 
-export PATH := /usr/lib/go-1.26/bin:$(PATH)
+export PATH := /usr/lib/go-1.24/bin:$(PATH)
 export GOFLAGS := -mod=vendor -trimpath -buildvcs=false
 export GOTOOLCHAIN := local
 export GOPROXY := off

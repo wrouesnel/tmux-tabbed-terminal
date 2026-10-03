@@ -115,8 +115,8 @@ jobs:
         run: rpmbuild --rebuild release/srpm/*.src.rpm
 
   # The PPA's source packages, built as Launchpad builds them: from the vendored modules,
-  # with golang-1.26-go, without fetching anything. Ubuntu 24.04 gets golang-1.26-go from
-  # the PPA's golang-backports dependency.
+  # with the suite's packaged Go, without fetching anything. Ubuntu 24.04's Go 1.24 is
+  # golang-1.24-go; later releases' default Go is new enough.
   ppa-source:
     strategy:
       matrix:
@@ -130,9 +130,9 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates git build-essential debhelper \
-            dpkg-dev libgtk-3-dev libvte-2.91-dev pkgconf software-properties-common gpg-agent
-          if [ "${{ matrix.suite }}" = noble ]; then add-apt-repository -y ppa:longsleep/golang-backports; fi
-          apt-get install -y --no-install-recommends golang-1.26-go
+            dpkg-dev libgtk-3-dev libvte-2.91-dev pkgconf
+          if [ "${{ matrix.suite }}" = noble ]; then go=golang-1.24-go; else go=golang-go; fi
+          apt-get install -y --no-install-recommends "$go"
       - name: Checkout
         uses: actions/checkout@v7
         with:
@@ -140,7 +140,7 @@ jobs:
       - name: Trust the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Source package
-        run: PATH=/usr/lib/go-1.26/bin:$PATH go run mage.go debSource ${{ matrix.suite }}
+        run: PATH=/usr/lib/go-1.24/bin:$PATH go run mage.go debSource ${{ matrix.suite }}
       - name: Build it
         run: |
           cd release/ppa/${{ matrix.suite }}
