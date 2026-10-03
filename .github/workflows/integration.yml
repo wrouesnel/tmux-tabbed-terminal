@@ -46,6 +46,9 @@ jobs:
         with:
           go-version: stable
       - name: Lint
+        # Loading the packages compiles gotk3's cgo, which takes minutes from a cold cache.
+        env:
+          LINTER_DEADLINE: 10m
         run: go run mage.go lint
 
   test:
