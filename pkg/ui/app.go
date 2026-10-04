@@ -159,6 +159,7 @@ func (a *App) startup() {
 	installIcons(a.log)
 	installCSS(a.log)
 	a.reloadAppearance()
+	a.log.Debug("Terminal features", zap.Bool("sixel", vte.SixelSupported()))
 	// Theme colors change with the GTK theme.
 	if settings, err := gtk.SettingsGetDefault(); err == nil {
 		for _, prop := range []string{"notify::gtk-theme-name", "notify::gtk-application-prefer-dark-theme"} {
@@ -750,6 +751,10 @@ func eventHasControl(ev *gdk.EventButton) bool {
 // newTerminal creates a terminal widget with the application's appearance.
 func (a *App) newTerminal() *vte.Terminal {
 	term := vte.New()
+	// SIXEL images show wherever this VTE was built with them; elsewhere it's off.
+	if vte.SixelSupported() {
+		term.SetEnableSixel(true)
+	}
 	a.appearance.Apply(term)
 	term.Connect("style-updated", func() {
 		if a.appearance.UseThemeColors {

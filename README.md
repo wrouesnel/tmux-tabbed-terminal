@@ -39,6 +39,10 @@ or split the window to watch several sessions side by side.
   the terminal's, which tmux redraws in place) and scrolls it when dragged. Both work
   whether or not tmux's `mouse` option is on. Programs that use the mouse
   or the full screen, such as vim, less and htop, get the wheel as usual.
+* **SIXEL images** show when the system's VTE was built with SIXEL support, and tmux
+  passes them through (tmux 3.4 or newer, built with it). VTE's SIXEL support is a build
+  option which Ubuntu 24.04 and 26.04 and RHEL 8 and 10 leave off, so on those it's
+  unavailable.
 * **GNOME look.** Font and colors come from GNOME Terminal's default profile if it's
   installed, otherwise from the desktop monospace font and the GTK theme. Preferences
   (Ctrl+comma) picks another GNOME Terminal profile, the GTK theme, one of GNOME

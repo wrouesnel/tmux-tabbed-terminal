@@ -11,6 +11,22 @@ package vte
 #include <vte/vte.h>
 
 static VteTerminal *to_terminal(void *p) { return VTE_TERMINAL(p); }
+
+// SIXEL support is a build option of VTE, and its API appeared in VTE 0.62. Older VTE, as
+// on RHEL 8, has neither, so these report it as missing there.
+static gboolean ttt_sixel_supported(void) {
+#if VTE_CHECK_VERSION(0, 62, 0)
+	return (vte_get_feature_flags() & VTE_FEATURE_FLAG_SIXEL) != 0;
+#else
+	return FALSE;
+#endif
+}
+
+static void ttt_set_enable_sixel(VteTerminal *terminal, gboolean enable) {
+#if VTE_CHECK_VERSION(0, 62, 0)
+	vte_terminal_set_enable_sixel(terminal, enable);
+#endif
+}
 */
 import "C"
 
@@ -145,6 +161,19 @@ func (t *Terminal) SetCursorColors(cursor, cursorFg *Color) {
 		c := cursorFg.native()
 		C.vte_terminal_set_color_cursor_foreground(t.native(), &c)
 	}
+}
+
+// SixelSupported reports whether this VTE was built with SIXEL image support. It's a
+// build option most distributions leave off, so terminals can only show SIXEL images where
+// it's on.
+func SixelSupported() bool {
+	return C.ttt_sixel_supported() != 0
+}
+
+// SetEnableSixel turns SIXEL image support on or off. It does nothing where VTE wasn't
+// built with it: check SixelSupported.
+func (t *Terminal) SetEnableSixel(enable bool) {
+	C.ttt_set_enable_sixel(t.native(), gbool(enable))
 }
 
 // SetBoldIsBright sets whether bold text uses the bright palette colors.
