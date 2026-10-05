@@ -98,6 +98,12 @@ func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 	menuBtn.SetImage(menuIcon)
 	menuBtn.SetMenuModel(mainMenu())
 	menuBtn.SetTooltipText("Menu")
+	// Copy and Paste in the menu follow the focused pane as it opens.
+	menuBtn.Connect("toggled", func() {
+		if menuBtn.GetActive() {
+			w.updateActionState()
+		}
+	})
 	hb.PackEnd(menuBtn)
 
 	splitBtn, _ := gtk.ButtonNewFromIconName(firstIcon("view-dual-symbolic", "view-paged-symbolic"),

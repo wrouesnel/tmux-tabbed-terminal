@@ -150,9 +150,9 @@ func newPane(w *Window) *Pane {
 		return false
 	})
 	p.term.Connect("contents-changed", func() { w.app.requestPoll(p.hostName) })
-	// After VTE's own handler, so a program using the mouse gets the click unless Shift
-	// is held, as in GNOME Terminal.
-	p.term.ConnectAfter("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+	// Before VTE's own handler, which would otherwise give the click to tmux whenever its
+	// mouse option is on, and tmux's menu can't paste the clipboard.
+	p.term.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
 		return p.onButtonPress(gdk.EventButtonNewFromEvent(ev))
 	})
 
@@ -421,9 +421,15 @@ func (p *Pane) updateHeader(name string, busy bool, showHeader bool) {
 	setClass(p.root, "ttt-active", p.win.activePane == p)
 }
 
-// onButtonPress shows the context menu on a right click.
+// onButtonPress shows the context menu on a right click. A program in the pane that has
+// asked for mouse events, such as vim or htop, gets the click instead, unless Shift is
+// held, as in GNOME Terminal. tmux itself doesn't count: with its mouse option on, the
+// menu still shows.
 func (p *Pane) onButtonPress(ev *gdk.EventButton) bool {
 	if ev.Type() != gdk.EVENT_BUTTON_PRESS || ev.Button() != gdk.BUTTON_SECONDARY {
+		return false
+	}
+	if ev.State()&uint(gdk.SHIFT_MASK) == 0 && p.programWantsMouse() {
 		return false
 	}
 	p.Focus()
@@ -442,6 +448,20 @@ func (p *Pane) onButtonPress(ev *gdk.EventButton) bool {
 	popover.SetPosition(gtk.POS_BOTTOM)
 	popover.Popup()
 	return true
+}
+
+// programWantsMouse reports whether the program in the pane's active tmux pane has asked
+// for mouse events.
+func (p *Pane) programWantsMouse() bool {
+	if !p.running {
+		return false
+	}
+	if _, s := p.win.app.lookup(p.SessionKey()); s != nil {
+		if aw := s.ActiveWindow(); aw != nil {
+			return aw.MouseReporting
+		}
+	}
+	return false
 }
 
 // showDropZone highlights the part of the pane a session would drop into.

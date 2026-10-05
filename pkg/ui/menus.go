@@ -61,6 +61,7 @@ func menuOf(sections ...*glib.MenuModel) *glib.MenuModel {
 func mainMenu() *glib.MenuModel {
 	return menuOf(
 		section("New Window", "app.new-window", "New Session", "win.new-session"),
+		section("Copy", "win.copy", "Paste", "win.paste"),
 		section("Split Right", "win.split-right", "Split Down", "win.split-down", "Close Pane", "win.close-pane"),
 		section("Rename Session…", "win.rename-session", "Kill Session…", "win.kill-session"),
 		section("Zoom In", "win.zoom-in", "Zoom Out", "win.zoom-out", "Normal Size", "win.zoom-normal"),
