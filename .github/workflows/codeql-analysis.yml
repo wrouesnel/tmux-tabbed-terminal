@@ -36,17 +36,20 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          # A restored build cache means nothing is compiled, and CodeQL extracts only what
+          # it sees compiled.
+          cache: false
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          # Autobuild doesn't know about mage - build with the project's own build instead.
+          # Autobuild doesn't know about the cgo dependencies: build the packages directly.
           build-mode: manual
           # queries: security-extended,security-and-quality
 
       - name: Build
-        run: go run mage.go binary
+        run: go build ./...
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
