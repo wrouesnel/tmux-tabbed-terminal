@@ -31,14 +31,18 @@ type Window struct {
 	window *gtk.ApplicationWindow
 	header *gtk.HeaderBar
 
-	outer      *gtk.Paned
-	sidebar    *sidebar
+	outer   *gtk.Paned
+	sidebar *sidebar
+	// content is the terminal side of the window: the tab bar over the panes.
+	content    *gtk.Box
+	tabs       *tabBar
 	layout     *layout
 	activePane *Pane
 
 	actions       map[string]*glib.SimpleAction
 	sidebarAction *glib.SimpleAction
 	groupAction   *glib.SimpleAction
+	tabsAction    *glib.SimpleAction
 	fullscreen    bool
 	// status replaces the title bar subtitle while something is in progress.
 	status string
@@ -60,6 +64,10 @@ func newWindow(app *App) *Window {
 	first := newPane(w)
 	w.layout = newLayout(first)
 	w.activePane = first
+	w.tabs = newTabBar(w)
+	w.content, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	w.content.PackStart(w.tabs.root, false, false, 0)
+	w.content.PackStart(w.layout.area, true, true, 0)
 
 	w.outer, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
 	w.placeSidebar()
@@ -186,6 +194,11 @@ func (w *Window) installActions() {
 	m.AddAction(group)
 	w.groupAction = group
 
+	showTabs := glib.SimpleActionNewStateful("show-tabs", nil, glib.VariantFromBoolean(w.app.showTabs))
+	showTabs.Connect("activate", func() { w.app.setShowTabs(!w.app.showTabs) })
+	m.AddAction(showTabs)
+	w.tabsAction = showTabs
+
 	showSidebar := glib.SimpleActionNewStateful("show-sidebar", nil, glib.VariantFromBoolean(true))
 	showSidebar.Connect("activate", func() {
 		w.setSidebarVisible(!showSidebar.GetState().GetBoolean())
@@ -203,6 +216,12 @@ func (w *Window) setSidebarVisible(visible bool) {
 // syncGroupAction shows the application's grouping setting on the window's toggle.
 func (w *Window) syncGroupAction() {
 	w.groupAction.SetState(glib.VariantFromBoolean(w.app.grouped))
+}
+
+// syncTabsAction shows the application's tab bar setting on the window's toggle and bar.
+func (w *Window) syncTabsAction() {
+	w.tabsAction.SetState(glib.VariantFromBoolean(w.app.showTabs))
+	w.tabs.syncVisible()
 }
 
 // updateActionState enables the actions which make sense for the active pane.
@@ -288,15 +307,15 @@ func (w *Window) placeSidebar() {
 	}
 	if parent, err := w.sidebar.root.GetParent(); err == nil && parent != nil {
 		w.outer.Remove(w.sidebar.root)
-		w.outer.Remove(w.layout.area)
+		w.outer.Remove(w.content)
 	}
 	if w.app.sidebarRight {
-		w.outer.Pack1(w.layout.area, true, false)
+		w.outer.Pack1(w.content, true, false)
 		w.outer.Pack2(w.sidebar.root, false, false)
 		w.outer.SetPosition(total - width)
 	} else {
 		w.outer.Pack1(w.sidebar.root, false, false)
-		w.outer.Pack2(w.layout.area, true, false)
+		w.outer.Pack2(w.content, true, false)
 		w.outer.SetPosition(width)
 	}
 }
@@ -555,17 +574,9 @@ func (w *Window) refresh() {
 	panes := w.panes()
 	split := len(panes) > 1
 
-	shown := map[string]bool{}
-	for _, p := range panes {
-		if p.running {
-			shown[p.SessionKey()] = true
-		}
-	}
-	selected := ""
-	if w.activePane.running {
-		selected = w.activePane.SessionKey()
-	}
+	shown, selected := w.shownSessions()
 	w.sidebar.update(shown, selected)
+	w.tabs.update(w.sidebar.visibleIDs(), shown, selected)
 
 	now := timeNow()
 	for _, p := range panes {
@@ -596,6 +607,29 @@ func (w *Window) refresh() {
 	w.header.SetSubtitle(subtitle)
 	w.window.SetTitle(title)
 	w.updateActionState()
+}
+
+// shownSessions returns the sessions shown in the window's panes, and the one in the
+// focused pane, or "".
+func (w *Window) shownSessions() (map[string]bool, string) {
+	shown := map[string]bool{}
+	for _, p := range w.panes() {
+		if p.running {
+			shown[p.SessionKey()] = true
+		}
+	}
+	selected := ""
+	if w.activePane.running {
+		selected = w.activePane.SessionKey()
+	}
+	return shown, selected
+}
+
+// updateTabs shows the sessions in the session list's current view as tabs, after the
+// view changes.
+func (w *Window) updateTabs() {
+	shown, selected := w.shownSessions()
+	w.tabs.update(w.sidebar.visibleIDs(), shown, selected)
 }
 
 // setStatus shows a message in the title bar until it's cleared with "".

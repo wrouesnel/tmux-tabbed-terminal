@@ -101,6 +101,25 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 	min-width: 16px;
 	padding: 0;
 }
+.ttt-tab {
+	padding: 3px 12px 3px 8px;
+	min-height: 0;
+	border: none;
+	border-radius: 0;
+	box-shadow: none;
+}
+.ttt-tab.ttt-unseen .ttt-session-name {
+	font-weight: bold;
+}
+.ttt-tab.ttt-shown {
+	box-shadow: inset 0 -2px alpha(@theme_selected_bg_color, 0.45);
+}
+.ttt-tab.ttt-selected {
+	box-shadow: inset 0 -2px @theme_selected_bg_color;
+}
+.ttt-tab-host {
+	font-size: smaller;
+}
 .ttt-empty-title {
 	font-size: larger;
 	font-weight: bold;
@@ -162,6 +181,16 @@ func terminalStylesheet(fg, bg theme.Color) string {
 	background-color: %[3]s;
 	background-image: none;
 	border-color: %[3]s;
+}
+/* The tab bar is the list's surface; the selected tab opens onto the terminal below. */
+.ttt-tabbar {
+	border-bottom: 1px solid %[3]s;
+}
+.ttt-nav button.ttt-tab {
+	border-right: 1px solid %[3]s;
+}
+.ttt-nav button.ttt-tab.ttt-selected {
+	background-color: %[5]s;
 }
 .ttt-pane-header {
 	background-color: %[1]s;

@@ -66,6 +66,8 @@ type App struct {
 	grouped bool
 	// sidebarRight puts session lists on the right of windows.
 	sidebarRight bool
+	// showTabs shows the tab bar above windows' panes.
+	showTabs bool
 	// state is what the UI remembers between runs.
 	state uiState
 	// dragKey is the session being dragged from a session list, or "".
@@ -123,6 +125,7 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		windows: map[*Window]struct{}{},
 
 		sidebarRight: cfg.Sidebar.Position == "right",
+		showTabs:     true,
 	}
 	if st, err := loadState(stateFile()); err != nil {
 		app.log.Warn("Could not read UI state", zap.Error(err))
@@ -134,6 +137,7 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		if st.GroupByApplication != nil {
 			app.grouped = *st.GroupByApplication
 		}
+		app.showTabs = !st.HideTabBar
 	}
 
 	gtkApp.Connect("startup", app.startup)
@@ -647,6 +651,16 @@ func (a *App) setGrouped(grouped bool) {
 	for w := range a.windows {
 		w.syncGroupAction()
 		w.refresh()
+	}
+}
+
+// setShowTabs shows or hides the tab bar of every window.
+func (a *App) setShowTabs(show bool) {
+	a.showTabs = show
+	a.state.HideTabBar = !show
+	a.saveState()
+	for w := range a.windows {
+		w.syncTabsAction()
 	}
 }
 

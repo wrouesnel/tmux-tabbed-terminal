@@ -11,7 +11,6 @@ import (
 	"github.com/gotk3/gotk3/pango"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
-	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
@@ -130,6 +129,7 @@ func newSidebar(w *Window) *sidebar {
 		sb.query, _ = sb.search.GetText()
 		sb.list.InvalidateFilter()
 		sb.list.InvalidateHeaders()
+		w.updateTabs()
 	})
 	// Enter opens the first match. Escape clears the search and returns to the terminal.
 	sb.search.Connect("activate", func() {
@@ -176,31 +176,14 @@ func newSidebar(w *Window) *sidebar {
 		return sb.onButtonPress(gdk.EventButtonNewFromEvent(ev))
 	})
 	// Sessions can be dragged onto a pane to open them there or in a new split.
-	sb.list.DragSourceSet(gdk.BUTTON1_MASK, dragTargets(), dropAction)
-	sb.list.Connect("drag-begin", func(_ interface{}, ctx interface{}) {
+	w.dragSessions(&sb.list.Widget, func() string {
 		if e := sb.entry(sb.pressKey); e != nil && e.isSession() {
-			w.app.dragKey = e.key
+			return e.key
 		} else if e != nil && e.pin {
-			w.app.dragKey = e.target
+			return e.target
 		}
-		gtkx.DragSetIconName(ctx, "utilities-terminal-symbolic")
+		return ""
 	})
-	// A session dropped outside the window, where nothing takes it, opens in a window of
-	// its own. drag-failed comes before drag-end, which clears the dragged session.
-	sb.list.Connect("drag-failed", func(_ interface{}, _ interface{}, result interface{}) bool {
-		key := w.app.dragKey
-		if key == "" || enumValue(result) != dragResultNoTarget {
-			return false
-		}
-		x, y, ok := pointerPosition()
-		if !ok || w.contains(x, y) {
-			return false
-		}
-		glib.IdleAdd(func() { w.app.NewWindowFor(key, x, y) })
-		// Handled: no animation of the drag returning to the list.
-		return true
-	})
-	sb.list.Connect("drag-end", func() { w.app.endDrag() })
 
 	placeholder, _ := gtk.LabelNew("No sessions")
 	addClass(placeholder, "dim-label")
@@ -701,6 +684,9 @@ func (sb *sidebar) setHostFilter(name string) {
 	}
 	sb.list.InvalidateFilter()
 	sb.list.InvalidateHeaders()
+	if sb.win.tabs != nil {
+		sb.win.updateTabs()
+	}
 }
 
 // rowOf returns the row widget of an entry.

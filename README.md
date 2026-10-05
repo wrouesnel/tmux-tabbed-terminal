@@ -9,6 +9,13 @@ or split the window to watch several sessions side by side.
 * **Session list.** Every session on your tmux server, in tmux's order, with what its
   current window is running. Sessions made or killed outside the app show up within a
   second.
+* **Tab bar.** A strip of tabs above the terminals holds the sessions in the list's
+  current view, in the same order, so you can click between them with the list hidden.
+  Searching or filtering the list narrows the tabs too. The tab underlined in the accent
+  color is the focused pane's session, and fainter underlines mark sessions shown in
+  other panes. Tabs show the same activity dots as the list, scroll sideways with the
+  wheel when they don't fit, and can be dragged onto panes like list entries. Hide it with
+  Show Tab Bar in the menu; the choice is remembered.
 * **Other hosts.** "Add Host" under the list connects to another machine over ssh and
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones.
@@ -97,9 +104,8 @@ Start it from the desktop menu ("Tmux Tabbed Terminal") or run `tmux-tabbed-term
 Running it again opens another window in the same instance. `--separate` starts an
 independent instance instead.
 
-In the session list, click a session to show it in the focused pane, or drag it onto a
-pane. Middle-click or
-Ctrl+click opens it in a new pane to the right. Right-click gives Open in Split Right,
+In the session list or the tab bar, click a session to show it in the focused pane, or
+drag it onto a pane. Middle-click or Ctrl+click opens it in a new pane to the right. Right-click gives Open in Split Right,
 Open in Split Down, Rename and Kill. In a terminal, right-click (Shift+right-click if the
 program is using the mouse) gives copy, paste and split.
 

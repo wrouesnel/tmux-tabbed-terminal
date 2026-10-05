@@ -2,7 +2,10 @@ package ui
 
 import (
 	"github.com/gotk3/gotk3/gdk"
+	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
+
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 )
 
 // dragTarget is the drag type of a session dragged from the list. Drops only come from
@@ -120,3 +123,30 @@ func (w *Window) contains(x, y int) bool {
 
 // dropAction is the drag action sessions use.
 const dropAction = gdk.ACTION_COPY
+
+// dragSessions lets sessions be dragged from a widget onto a pane, to open them there or
+// in a new split, or out of the window, to open them in a window of their own. key
+// returns the session under the press the drag started from, or "" for none.
+func (w *Window) dragSessions(widget *gtk.Widget, key func() string) {
+	widget.DragSourceSet(gdk.BUTTON1_MASK, dragTargets(), dropAction)
+	widget.Connect("drag-begin", func(_ interface{}, ctx interface{}) {
+		w.app.dragKey = key()
+		gtkx.DragSetIconName(ctx, "utilities-terminal-symbolic")
+	})
+	// A session dropped where nothing takes it, outside the window, opens in a window of
+	// its own. drag-failed comes before drag-end, which clears the dragged session.
+	widget.Connect("drag-failed", func(_ interface{}, _ interface{}, result interface{}) bool {
+		dragged := w.app.dragKey
+		if dragged == "" || enumValue(result) != dragResultNoTarget {
+			return false
+		}
+		x, y, ok := pointerPosition()
+		if !ok || w.contains(x, y) {
+			return false
+		}
+		glib.IdleAdd(func() { w.app.NewWindowFor(dragged, x, y) })
+		// Handled: no animation of the drag returning to where it started.
+		return true
+	})
+	widget.Connect("drag-end", func() { w.app.endDrag() })
+}
