@@ -164,6 +164,7 @@ func (w *Window) installActions() {
 	addStr("session-split-right", func(id string) { w.OpenInSplit(id, gtk.ORIENTATION_HORIZONTAL) })
 	addStr("session-split-down", func(id string) { w.OpenInSplit(id, gtk.ORIENTATION_VERTICAL) })
 	addStr("session-rename", w.RenameSession)
+	addStr("window-rename", w.RenameWindow)
 	addStr("session-kill", w.KillSession)
 	addStr("session-save-scrollback", func(key string) { w.SaveScrollback(key, false) })
 	addStr("session-save-scrollback-as", func(key string) { w.SaveScrollback(key, true) })
@@ -652,31 +653,8 @@ func (w *Window) RenameSession(key string) {
 		return
 	}
 	id := sess.ID
-	dlg, err := gtk.DialogNewWithButtons("Rename Session", w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT|
-		gtk.DIALOG_USE_HEADER_BAR,
-		[]interface{}{"_Cancel", gtk.RESPONSE_CANCEL},
-		[]interface{}{"_Rename", gtk.RESPONSE_ACCEPT})
-	if err != nil {
-		return
-	}
-	defer dlg.Destroy()
-	dlg.SetDefaultResponse(gtk.RESPONSE_ACCEPT)
-	if btn, err := dlg.GetWidgetForResponse(gtk.RESPONSE_ACCEPT); err == nil {
-		addClass(btn.ToWidget(), "suggested-action")
-	}
-
-	entry, _ := gtk.EntryNew()
-	entry.SetText(sess.Name)
-	entry.SetActivatesDefault(true)
-	content, _ := dlg.GetContentArea()
-	content.PackStart(padded(entry), true, true, 0)
-	dlg.ShowAll()
-
-	if dlg.Run() != gtk.RESPONSE_ACCEPT {
-		return
-	}
-	name, _ := entry.GetText()
-	if name == "" {
+	name, ok := w.askName("Rename Session", sess.Name)
+	if !ok {
 		return
 	}
 	runAsync(w.app, func(ctx context.Context) (struct{}, error) {
@@ -687,6 +665,58 @@ func (w *Window) RenameSession(key string) {
 		}
 		h.requestPoll()
 	})
+}
+
+// RenameWindow renames a tmux window, by the key of its host and window ID, after asking
+// for the name.
+func (w *Window) RenameWindow(key string) {
+	h, win := w.app.lookupWindow(key)
+	if win == nil {
+		return
+	}
+	id := win.ID
+	name, ok := w.askName("Rename Window", win.Name)
+	if !ok {
+		return
+	}
+	runAsync(w.app, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, h.client.RenameWindow(ctx, id, name)
+	}, func(_ struct{}, err error) {
+		if err != nil {
+			w.showError("Could not rename the window", err.Error())
+		}
+		h.requestPoll()
+	})
+}
+
+// askName asks for a new name in a dialog titled title, starting from current. It
+// returns false if the dialog is cancelled or the name left empty.
+func (w *Window) askName(title, current string) (string, bool) {
+	dlg, err := gtk.DialogNewWithButtons(title, w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT|
+		gtk.DIALOG_USE_HEADER_BAR,
+		[]interface{}{"_Cancel", gtk.RESPONSE_CANCEL},
+		[]interface{}{"_Rename", gtk.RESPONSE_ACCEPT})
+	if err != nil {
+		return "", false
+	}
+	defer dlg.Destroy()
+	dlg.SetDefaultResponse(gtk.RESPONSE_ACCEPT)
+	if btn, err := dlg.GetWidgetForResponse(gtk.RESPONSE_ACCEPT); err == nil {
+		addClass(btn.ToWidget(), "suggested-action")
+	}
+
+	entry, _ := gtk.EntryNew()
+	entry.SetText(current)
+	entry.SetActivatesDefault(true)
+	content, _ := dlg.GetContentArea()
+	content.PackStart(padded(entry), true, true, 0)
+	dlg.ShowAll()
+
+	if dlg.Run() != gtk.RESPONSE_ACCEPT {
+		return "", false
+	}
+	name, _ := entry.GetText()
+	return name, name != ""
 }
 
 // KillSession destroys a session, by key, after confirming if configured to.

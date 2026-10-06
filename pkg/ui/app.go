@@ -363,6 +363,24 @@ func (a *App) lookup(key string) (*Host, *tmux.Session) {
 	return h, h.snapshot.Session(id)
 }
 
+// lookupWindow returns the host and window of a window key, or nils if either is gone.
+func (a *App) lookupWindow(key string) (*Host, *tmux.Window) {
+	name, id := splitKey(key)
+	h := a.host(name)
+	if h == nil {
+		return nil, nil
+	}
+	for i := range h.snapshot.Sessions {
+		ws := h.snapshot.Sessions[i].Windows
+		for j := range ws {
+			if ws[j].ID == id {
+				return h, &ws[j]
+			}
+		}
+	}
+	return nil, nil
+}
+
 // sessionName returns a session's name, with its host if it's remote.
 func (a *App) sessionName(key string) string {
 	h, s := a.lookup(key)

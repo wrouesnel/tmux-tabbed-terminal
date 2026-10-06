@@ -23,11 +23,14 @@ const tabMaxChars = 24
 
 // tabBar is the strip of tabs above the panes: one per tmux window of the session in the
 // focused pane, in tmux's order, like tmux's own status line. Clicking a tab makes it the
-// session's current window. It scrolls sideways when the tabs don't fit.
+// session's current window, right-clicking it gives its menu, and the + at the left makes
+// a new window. The tabs scroll sideways when they don't fit.
 type tabBar struct {
 	win  *Window
-	root *gtk.ScrolledWindow
-	box  *gtk.Box
+	root *gtk.Box
+	// scroller holds the tabs, beside the + button.
+	scroller *gtk.ScrolledWindow
+	box      *gtk.Box
 	// session is the key of the session whose windows the tabs are.
 	session string
 	tabs    map[string]*tab
@@ -53,22 +56,35 @@ func windowKey(host, windowID string) string {
 
 func newTabBar(w *Window) *tabBar {
 	tb := &tabBar{win: w, tabs: map[string]*tab{}}
-	tb.root, _ = gtk.ScrolledWindowNew(nil, nil)
-	// No scrollbar: the wheel scrolls the strip sideways, and the selected tab is kept in
-	// view.
-	tb.root.SetPolicy(gtk.POLICY_EXTERNAL, gtk.POLICY_NEVER)
+	tb.root, _ = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
 	tb.root.SetNoShowAll(true)
 	addClass(tb.root, "ttt-tabbar")
 	addClass(tb.root, "ttt-nav")
 
+	// The + stays at the left, outside the scrolling strip, so it's always in reach.
+	newBtn, _ := gtk.ButtonNewFromIconName("list-add-symbolic", gtk.ICON_SIZE_MENU)
+	newBtn.SetRelief(gtk.RELIEF_NONE)
+	newBtn.SetCanFocus(false)
+	newBtn.SetTooltipText("New Window")
+	addClass(newBtn, "ttt-tab-new")
+	newBtn.Connect("clicked", func() { tb.newWindow() })
+	tb.root.PackStart(newBtn, false, false, 0)
+	newBtn.Show()
+
+	tb.scroller, _ = gtk.ScrolledWindowNew(nil, nil)
+	// No scrollbar: the wheel scrolls the strip sideways, and the selected tab is kept in
+	// view.
+	tb.scroller.SetPolicy(gtk.POLICY_EXTERNAL, gtk.POLICY_NEVER)
 	// GTK scrolls a strip sideways only for a sideways scroll: turn the wheel's up and
 	// down into left and right too.
-	tb.root.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
+	tb.scroller.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
 		return tb.onScroll(gdk.EventScrollNewFromEvent(ev))
 	})
+	tb.root.PackStart(tb.scroller, true, true, 0)
+	tb.scroller.Show()
 
 	tb.box, _ = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
-	tb.root.Add(tb.box)
+	tb.scroller.Add(tb.box)
 	tb.box.Show()
 	return tb
 }
@@ -109,7 +125,58 @@ func newTab(tb *tabBar, id string) *tab {
 	t.indicator.SetVisibleChildName(indicatorNone)
 
 	t.button.Connect("clicked", func() { tb.selectWindow(id) })
+	t.button.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		return tb.onButtonPress(t, gdk.EventButtonNewFromEvent(ev))
+	})
 	return t
+}
+
+// onButtonPress opens a window's menu on right click.
+func (tb *tabBar) onButtonPress(t *tab, ev *gdk.EventButton) bool {
+	if ev.Type() != gdk.EVENT_BUTTON_PRESS || ev.Button() != gdk.BUTTON_SECONDARY {
+		return false
+	}
+	hostName, _ := splitKey(tb.session)
+	popover, err := gtk.PopoverNewFromModel(t.button, windowMenu(windowKey(hostName, t.id)))
+	if err != nil {
+		return false
+	}
+	popover.SetPosition(gtk.POS_BOTTOM)
+	popover.Popup()
+	return true
+}
+
+// windowMenu is the context menu of a tab, for the window with key.
+func windowMenu(key string) *glib.MenuModel {
+	menu := glib.MenuNew()
+	rename := glib.MenuItemNewWithLabel("Rename…")
+	rename.SetActionAndTargetValue("win.window-rename", glib.VariantFromString(key))
+	menu.AppendItem(rename)
+	return &menu.MenuModel
+}
+
+// newWindow makes a new tmux window at the end of the session, in the directory of the
+// session's current window. tmux makes it the current window, and the tabs follow at the
+// next snapshot, which is asked for straight away.
+func (tb *tabBar) newWindow() {
+	app := tb.win.app
+	h, s := app.lookup(tb.session)
+	if s == nil {
+		return
+	}
+	id, dir := s.ID, ""
+	if aw := s.ActiveWindow(); aw != nil {
+		dir = aw.Path
+	}
+	runAsync(app, func(ctx context.Context) (string, error) {
+		return h.client.NewWindow(ctx, id, dir)
+	}, func(_ string, err error) {
+		if err != nil {
+			app.log.Error("Could not create tmux window", zap.String("host", h.Name), zap.Error(err))
+			tb.win.showError("Could not create a tmux window in "+s.Name, err.Error())
+		}
+		h.requestPoll()
+	})
 }
 
 // selectWindow makes a window its session's current window. The tabs follow at the
@@ -164,7 +231,7 @@ func (tb *tabBar) onScroll(ev *gdk.EventScroll) bool {
 		}
 		delta = dy * tabScrollStep
 	}
-	adj := tb.root.GetHAdjustment()
+	adj := tb.scroller.GetHAdjustment()
 	adj.SetValue(min(max(adj.GetValue()+delta, adj.GetLower()), adj.GetUpper()-adj.GetPageSize()))
 	return true
 }
@@ -283,7 +350,7 @@ func (tb *tabBar) scrollTo(t *tab) {
 	if _, ok := tb.tabs[t.id]; !ok {
 		return
 	}
-	adj := tb.root.GetHAdjustment()
+	adj := tb.scroller.GetHAdjustment()
 	alloc := t.button.GetAllocation()
 	left, right := float64(alloc.GetX()), float64(alloc.GetX()+alloc.GetWidth())
 	value, page := adj.GetValue(), adj.GetPageSize()

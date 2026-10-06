@@ -384,6 +384,33 @@ func (c *Client) SwitchClient(ctx context.Context, tty string, session string) e
 	return err
 }
 
+// NewWindow creates a window at the end of a session, makes it the session's current
+// window and returns its ID. An empty dir starts it in the session's directory.
+func (c *Client) NewWindow(ctx context.Context, session string, dir string) (string, error) {
+	// session: is the next free index in the session.
+	args := []string{"new-window", "-t", session + ":", "-P", "-F", "#{window_id}"}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	out, err := c.run(ctx, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// RenameWindow renames a window, given by its ID. tmux stops renaming it automatically
+// after the program running in it.
+func (c *Client) RenameWindow(ctx context.Context, window string, name string) error {
+	_, err := c.run(ctx, "rename-window", "-t", window, "--", name)
+	if err != nil && strings.Contains(err.Error(), "no current client") {
+		// As for RenameSession: tmux before 3.0 renames it, then fails to redraw a
+		// client's status line when none is attached.
+		return nil
+	}
+	return err
+}
+
 // SelectWindow makes a window, given by its ID such as @3, its session's current
 // window. Every client showing the session follows it.
 func (c *Client) SelectWindow(ctx context.Context, window string) error {

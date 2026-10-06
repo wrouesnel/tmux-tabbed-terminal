@@ -12,10 +12,12 @@ or split the window to watch several sessions side by side.
 * **Tab bar.** A strip of tabs above the terminals holds the tmux windows of the session
   in the focused pane, in tmux's order, like tmux's status line. The tab underlined in the
   accent color is the session's current window; click another to switch to it, and every
-  client on the session follows, as with tmux's own window commands. Windows made, closed
-  or switched inside tmux show up within a second. Tabs show activity dots for their
-  windows, and scroll sideways with the wheel when they don't fit. Hide the bar with Show
-  Tab Bar in the menu; the choice is remembered.
+  client on the session follows, as with tmux's own window commands. The + at the left
+  makes a new window in the session, in the current window's directory, and right-clicking
+  a tab renames its window. Windows made, closed or switched inside tmux show up within a
+  second. Tabs show activity dots for their windows, and scroll sideways with the wheel
+  when they don't fit. Hide the bar with Show Tab Bar in the menu; the choice is
+  remembered.
 * **Other hosts.** "Add Host" under the list connects to another machine over ssh and
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones.

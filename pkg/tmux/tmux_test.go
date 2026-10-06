@@ -169,6 +169,48 @@ func TestSelectWindow(t *testing.T) {
 	}
 }
 
+func TestNewAndRenameWindow(t *testing.T) {
+	ctx := context.Background()
+	c := newTestClient(t)
+
+	id, err := c.NewSession(ctx, "windows", t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	dir := t.TempDir()
+	win, err := c.NewWindow(ctx, id, dir)
+	if err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	if win == "" || win[0] != '@' {
+		t.Fatalf("window ID %q doesn't look like a tmux window ID", win)
+	}
+
+	if err := c.RenameWindow(ctx, win, "logs -- tail"); err != nil {
+		t.Fatalf("RenameWindow: %v", err)
+	}
+	// The shell may take a moment to report its directory.
+	var snap *tmux.Snapshot
+	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if snap, _ = c.Snapshot(ctx); snap.Session(id).ActiveWindow().Path == dir {
+			break
+		}
+	}
+	ws := snap.Session(id).Windows
+	if len(ws) != 2 || ws[1].ID != win {
+		t.Fatalf("windows: got %+v, want the new window %s last", ws, win)
+	}
+	if !ws[1].Active {
+		t.Error("the new window isn't the session's current window")
+	}
+	if ws[1].Name != "logs -- tail" {
+		t.Errorf("name: got %q, want %q", ws[1].Name, "logs -- tail")
+	}
+	if ws[1].Path != dir {
+		t.Errorf("directory: got %q, want %q", ws[1].Path, dir)
+	}
+}
+
 func TestParseSnapshot(t *testing.T) {
 	out := strings.ReplaceAll("S\t$1\tmain\t100\t1\n"+
 		"S\t$2\tother\t200\t0\n"+
