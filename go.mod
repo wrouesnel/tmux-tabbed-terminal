@@ -37,3 +37,8 @@ require (
 )
 
 replace go.yaml.in/yaml/v4 => github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd
+
+// gotk3 passes callback IDs to C as pointers, which crashes the runtime with "invalid
+// pointer found on stack" when a stack is copied mid-call. Drop this once the fix in
+// branch fix-callback-id-pointers is merged upstream.
+replace github.com/gotk3/gotk3 => github.com/wrouesnel/gotk3 v0.0.0-20261006015250-723b6184112f

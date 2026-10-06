@@ -20,8 +20,6 @@ github.com/golang/snappy v1.0.0 h1:Oy607GVXHs7RtbggtPBnr2RmDArIsAefDwvrdWvRhGs=
 github.com/golang/snappy v1.0.0/go.mod h1:/XxbfmMg8lxefKM7IXC3fBNl/7bRcc72aCRzEWrmP2Q=
 github.com/google/go-cmp v0.5.9 h1:O2Tfq5qg4qc4AmwVlvv0oLiVAGB7enBSJ2x2DqQFi38=
 github.com/google/go-cmp v0.5.9/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
-github.com/gotk3/gotk3 v0.6.5-0.20251124190141-e7a9e823ca35 h1:BelWQzAzJfSMA1qbuzoV9Tp57+NCvYouEA5cWVpYcSk=
-github.com/gotk3/gotk3 v0.6.5-0.20251124190141-e7a9e823ca35/go.mod h1:/hqFpkNa9T3JgNAE2fLvCdov7c5bw//FHNZrZ3Uv9/Q=
 github.com/hexops/gotextdiff v1.0.3 h1:gitA9+qJrrTCsiCl7+kh75nPqQt1cx4ZkudSTLoUqJM=
 github.com/hexops/gotextdiff v1.0.3/go.mod h1:pSWU5MAI3yDq+fZBTazCSJysOMbxWL1BSow5/V2vxeg=
 github.com/integralist/go-findroot v0.0.0-20160518114804-ac90681525dc h1:4IZpk3M4m6ypx0IlRoEyEyY1gAdicWLMQ0NcG/gBnnA=
@@ -64,6 +62,8 @@ github.com/wrouesnel/ctxstdio v0.0.0-20260925000958-306c83092f60 h1:X3Kli/meI5xR
 github.com/wrouesnel/ctxstdio v0.0.0-20260925000958-306c83092f60/go.mod h1:OMZ+l1BGZLWO2U/ZMMQEKpMLsGJm7zSMCftWOc0+4w0=
 github.com/wrouesnel/go.logutil v0.0.0-20260831004131-2c91cc3e879a h1:1Nx2LDe4WUIaZI0YQklyUWuJCdm/Iy9H5vtqNGTonJk=
 github.com/wrouesnel/go.logutil v0.0.0-20260831004131-2c91cc3e879a/go.mod h1:JZK1fnM0HWZ17AIp5/nuVdKqbnXoaiQIRvG9aKpkCVc=
+github.com/wrouesnel/gotk3 v0.0.0-20261006015250-723b6184112f h1:KqNMwwvfpCA7nB/Q2RlxG62O4tMMjNMoJ1unVJ7g3GY=
+github.com/wrouesnel/gotk3 v0.0.0-20261006015250-723b6184112f/go.mod h1:/hqFpkNa9T3JgNAE2fLvCdov7c5bw//FHNZrZ3Uv9/Q=
 github.com/wrouesnel/kongutil v0.0.0-20260819130755-29108a76e5f7 h1:1GWJR3WipDvaAOio5nNRT3i7QAnb7QYF+7K7u67sePk=
 github.com/wrouesnel/kongutil v0.0.0-20260819130755-29108a76e5f7/go.mod h1:yLI6EtInRLAcAg10KKpfF+/TpAUKeU1EiEkbzu1anko=
 github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd h1:LDQqnofYYcmlw+37+D18xFVafGqnRROiFsRrwe6PXO0=
