@@ -137,6 +137,14 @@ func (tb *tabBar) selectWindow(id string) {
 	})
 }
 
+// selectAt selects the window of the tab at a position in the bar, counting from 0, as
+// Alt+number does. It works with the bar hidden too.
+func (tb *tabBar) selectAt(index int) {
+	if index < len(tb.order) {
+		tb.selectWindow(tb.order[index])
+	}
+}
+
 // tabScrollStep is how far, in pixels, one notch of the wheel scrolls the strip.
 const tabScrollStep = 60
 
@@ -188,7 +196,11 @@ func (tb *tabBar) update(session string) {
 		// Names keep their width, up to tabMaxChars, so tabs that don't fit scroll
 		// rather than shrink.
 		t.name.SetWidthChars(min(utf8.RuneCountInString(win.Name), tabMaxChars))
-		t.button.SetTooltipText(windowTooltip(win, now))
+		tip := windowTooltip(win, now)
+		if i < tabShortcuts {
+			tip += fmt.Sprintf("\nAlt+%d", i+1)
+		}
+		t.button.SetTooltipText(tip)
 
 		state := app.tracker.State(windowKey(h.Name, win.ID), now)
 		switch {

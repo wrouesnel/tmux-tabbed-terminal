@@ -33,7 +33,7 @@ var accelerators = func() map[string][]string {
 		"win.fullscreen":     {"F11"},
 		"win.rename-session": {"<Primary><Shift>r"},
 	}
-	for i := 1; i <= sessionShortcuts; i++ {
+	for i := 1; i <= tabShortcuts; i++ {
 		accels["win.switch-to-"+strconv.Itoa(i)] = []string{"<Alt>" + strconv.Itoa(i)}
 	}
 	return accels

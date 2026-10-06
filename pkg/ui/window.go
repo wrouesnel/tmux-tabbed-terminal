@@ -20,8 +20,8 @@ import (
 const (
 	defaultWindowWidth  = 1100
 	defaultWindowHeight = 680
-	// sessionShortcuts is how many sessions have Alt+number shortcuts.
-	sessionShortcuts = 9
+	// tabShortcuts is how many tabs have Alt+number shortcuts.
+	tabShortcuts = 9
 )
 
 // Window is a terminal window: the session list on the left and a tree of panes on the
@@ -155,9 +155,9 @@ func (w *Window) installActions() {
 	add("sidebar-other-side", func() { w.app.setSidebarRight(!w.app.sidebarRight) })
 	add("fullscreen", w.toggleFullscreen)
 	add("close-window", func() { w.window.Close() })
-	for i := 1; i <= sessionShortcuts; i++ {
+	for i := 1; i <= tabShortcuts; i++ {
 		index := i - 1
-		add("switch-to-"+strconv.Itoa(i), func() { w.switchToIndex(index) })
+		add("switch-to-"+strconv.Itoa(i), func() { w.tabs.selectAt(index) })
 	}
 
 	addStr("session-open", w.ShowSession)
@@ -546,13 +546,6 @@ func (w *Window) cycleSession(delta int) {
 		next = len(ids) - 1
 	}
 	w.ShowSession(ids[next])
-}
-
-// switchToIndex shows the session at a position in the list.
-func (w *Window) switchToIndex(index int) {
-	if ids := w.sidebar.visibleIDs(); index < len(ids) {
-		w.ShowSession(ids[index])
-	}
 }
 
 // cyclePane moves focus to the next or previous pane.

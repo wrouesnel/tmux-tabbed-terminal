@@ -115,7 +115,7 @@ also in the main menu.
 |---|---|
 | Ctrl+Shift+T | New session in the focused pane |
 | Ctrl+Page Down / Ctrl+Page Up | Next / previous session in the focused pane |
-| Alt+1 … Alt+9 | Show the session at that position |
+| Alt+1 … Alt+9 | Switch to the tmux window of the tab at that position |
 | Ctrl+Shift+E | Split right |
 | Ctrl+Shift+O | Split down |
 | Ctrl+Tab / Ctrl+Shift+Tab | Focus the next / previous pane |
