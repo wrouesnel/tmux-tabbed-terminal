@@ -1,39 +1,54 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"math"
 	"slices"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 	"github.com/gotk3/gotk3/pango"
+	"go.uber.org/zap"
+
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
 
-// tabMaxChars is the most characters of a session name a tab shows before ellipsizing.
+// tabMaxChars is the most characters of a window name a tab shows before ellipsizing.
 const tabMaxChars = 24
 
-// tabBar is the strip of tabs above the panes: one per session in the session list's
-// current view, in the same order, so the sessions it shows can be clicked between
-// without the list. It scrolls sideways when the tabs don't fit.
+// tabBar is the strip of tabs above the panes: one per tmux window of the session in the
+// focused pane, in tmux's order, like tmux's own status line. Clicking a tab makes it the
+// session's current window. It scrolls sideways when the tabs don't fit.
 type tabBar struct {
-	win      *Window
-	root     *gtk.ScrolledWindow
-	box      *gtk.Box
-	tabs     map[string]*tab
-	order    []string
+	win  *Window
+	root *gtk.ScrolledWindow
+	box  *gtk.Box
+	// session is the key of the session whose windows the tabs are.
+	session string
+	tabs    map[string]*tab
+	order   []string
+	// selected is the ID of the session's current window.
 	selected string
 }
 
-// tab is one session's tab.
+// tab is one window's tab.
 type tab struct {
-	key       string
+	id        string
 	button    *gtk.Button
 	indicator *gtk.Stack
+	index     *gtk.Label
 	name      *gtk.Label
-	host      *gtk.Label
+}
+
+// windowKey identifies a window to the activity tracker. Window IDs start with @ and
+// session IDs with $, so they don't collide with session keys.
+func windowKey(host, windowID string) string {
+	return sessionKey(host, windowID)
 }
 
 func newTabBar(w *Window) *tabBar {
@@ -58,8 +73,8 @@ func newTabBar(w *Window) *tabBar {
 	return tb
 }
 
-func newTab(tb *tabBar, key string) *tab {
-	t := &tab{key: key}
+func newTab(tb *tabBar, id string) *tab {
+	t := &tab{id: id}
 	t.button, _ = gtk.ButtonNew()
 	t.button.SetRelief(gtk.RELIEF_NONE)
 	// Clicking a tab leaves the keyboard with the terminal.
@@ -77,29 +92,49 @@ func newTab(tb *tabBar, key string) *tab {
 	t.indicator.AddNamed(busy, indicatorBusy)
 	t.indicator.AddNamed(unseen, indicatorUnseen)
 
+	t.index, _ = gtk.LabelNew("")
+	addClass(t.index, "ttt-tab-index")
+	addClass(t.index, "dim-label")
 	t.name, _ = gtk.LabelNew("")
 	t.name.SetEllipsize(pango.ELLIPSIZE_END)
 	t.name.SetMaxWidthChars(tabMaxChars)
 	addClass(t.name, "ttt-session-name")
-	t.host, _ = gtk.LabelNew("")
-	addClass(t.host, "ttt-tab-host")
-	addClass(t.host, "dim-label")
 
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, rowSpacing)
 	box.PackStart(t.indicator, false, false, 0)
+	box.PackStart(t.index, false, false, 0)
 	box.PackStart(t.name, false, false, 0)
-	box.PackStart(t.host, false, false, 0)
 	t.button.Add(box)
 	t.button.ShowAll()
 	t.indicator.SetVisibleChildName(indicatorNone)
 
-	w := tb.win
-	t.button.Connect("clicked", func() { w.ShowSession(key) })
-	t.button.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
-		return tb.onButtonPress(t, gdk.EventButtonNewFromEvent(ev))
-	})
-	w.dragSessions(&t.button.Widget, func() string { return key })
+	t.button.Connect("clicked", func() { tb.selectWindow(id) })
 	return t
+}
+
+// selectWindow makes a window its session's current window. The tabs follow at the
+// next snapshot, which is asked for straight away.
+func (tb *tabBar) selectWindow(id string) {
+	if id == tb.selected {
+		return
+	}
+	app := tb.win.app
+	hostName, _ := splitKey(tb.session)
+	h := app.host(hostName)
+	if h == nil {
+		return
+	}
+	app.tracker.MarkSeen(windowKey(hostName, id))
+	runAsync(app, func(ctx context.Context) (struct{}, error) {
+		return struct{}{}, h.client.SelectWindow(ctx, id)
+	}, func(_ struct{}, err error) {
+		if err != nil {
+			// Most likely the window closed since the last snapshot.
+			app.log.Warn("Could not select tmux window",
+				zap.String("host", hostName), zap.String("window", id), zap.Error(err))
+		}
+		h.requestPoll()
+	})
 }
 
 // tabScrollStep is how far, in pixels, one notch of the wheel scrolls the strip.
@@ -126,61 +161,36 @@ func (tb *tabBar) onScroll(ev *gdk.EventScroll) bool {
 	return true
 }
 
-// onButtonPress opens a session's menu on right click, and in a new pane on middle or
-// Ctrl click, as in the session list.
-func (tb *tabBar) onButtonPress(t *tab, ev *gdk.EventButton) bool {
-	if ev.Type() != gdk.EVENT_BUTTON_PRESS {
-		return false
-	}
-	switch {
-	case ev.Button() == gdk.BUTTON_MIDDLE,
-		ev.Button() == gdk.BUTTON_PRIMARY && eventHasControl(ev):
-		tb.win.OpenInSplit(t.key, gtk.ORIENTATION_HORIZONTAL)
-		return true
-	case ev.Button() == gdk.BUTTON_SECONDARY:
-		_, pinned := tb.win.sidebar.pinnedSessions()[t.key]
-		popover, err := gtk.PopoverNewFromModel(t.button, sessionMenu(t.key, pinned))
-		if err != nil {
-			return false
-		}
-		popover.SetPosition(gtk.POS_BOTTOM)
-		popover.Popup()
-		return true
-	}
-	return false
-}
-
-// update shows the sessions in the list's current view as tabs. selected is the session
-// in the focused pane, and shown those in any pane.
-func (tb *tabBar) update(keys []string, shown map[string]bool, selected string) {
-	if !slices.Equal(keys, tb.order) {
-		tb.rebuild(keys)
-	}
-
+// update shows the windows of session, the key of the session in the focused pane, as
+// tabs. With no session there are no tabs.
+func (tb *tabBar) update(session string) {
 	app := tb.win.app
+	h, s := app.lookup(session)
+	var windows []tmux.Window
+	if s != nil {
+		windows = s.Windows
+	}
+	ids := make([]string, len(windows))
+	for i := range windows {
+		ids[i] = windows[i].ID
+	}
+	if session != tb.session || !slices.Equal(ids, tb.order) {
+		tb.rebuild(session, ids)
+	}
+
 	now := timeNow()
-	for i, key := range keys {
-		t := tb.tabs[key]
-		h, s := app.lookup(key)
-		if s == nil {
-			continue
-		}
-		t.name.SetText(s.Name)
+	selected := ""
+	for i := range windows {
+		win := &windows[i]
+		t := tb.tabs[win.ID]
+		t.index.SetText(fmt.Sprintf("%d", win.Index))
+		t.name.SetText(win.Name)
 		// Names keep their width, up to tabMaxChars, so tabs that don't fit scroll
 		// rather than shrink.
-		t.name.SetWidthChars(min(utf8.RuneCountInString(s.Name), tabMaxChars))
-		t.host.SetVisible(!h.Local())
-		t.host.SetText(h.Name)
-		tip := sessionTooltip(s)
-		if !h.Local() {
-			tip = h.Name + "\n" + tip
-		}
-		if i < sessionShortcuts {
-			tip += fmt.Sprintf("\nAlt+%d", i+1)
-		}
-		t.button.SetTooltipText(tip)
+		t.name.SetWidthChars(min(utf8.RuneCountInString(win.Name), tabMaxChars))
+		t.button.SetTooltipText(windowTooltip(win, now))
 
-		state := app.tracker.State(key, now)
+		state := app.tracker.State(windowKey(h.Name, win.ID), now)
 		switch {
 		case state.Active:
 			t.indicator.SetVisibleChildName(indicatorBusy)
@@ -190,8 +200,10 @@ func (tb *tabBar) update(keys []string, shown map[string]bool, selected string) 
 			t.indicator.SetVisibleChildName(indicatorNone)
 		}
 		setClass(t.button, "ttt-unseen", state.Unseen)
-		setClass(t.button, "ttt-shown", shown[key])
-		setClass(t.button, "ttt-selected", key == selected)
+		setClass(t.button, "ttt-selected", win.Active)
+		if win.Active {
+			selected = win.ID
+		}
 	}
 
 	if selected != tb.selected {
@@ -203,22 +215,47 @@ func (tb *tabBar) update(keys []string, shown map[string]bool, selected string) 
 	}
 }
 
-// rebuild replaces the tabs with ones for keys, in order, reusing existing tabs.
-func (tb *tabBar) rebuild(keys []string) {
-	for _, key := range tb.order {
-		tb.box.Remove(tb.tabs[key].button)
+// windowTooltip describes a tmux window for its tab.
+func windowTooltip(win *tmux.Window, now time.Time) string {
+	lines := []string{fmt.Sprintf("%d: %s", win.Index, win.Name)}
+	if win.Title != "" {
+		lines = append(lines, win.Title)
 	}
-	tabs := make(map[string]*tab, len(keys))
-	for _, key := range keys {
-		t, ok := tb.tabs[key]
-		if !ok {
-			t = newTab(tb, key)
+	if win.Command != "" {
+		line := win.Command
+		if win.Path != "" {
+			line += " in " + win.Path
 		}
-		tabs[key] = t
+		lines = append(lines, line)
+	}
+	if !win.Activity.IsZero() {
+		lines = append(lines, fmt.Sprintf("Last output %s ago", now.Sub(win.Activity).Round(time.Second)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// rebuild replaces the tabs with ones for the windows ids of session, in order, reusing
+// existing tabs of the same session.
+func (tb *tabBar) rebuild(session string, ids []string) {
+	for _, id := range tb.order {
+		tb.box.Remove(tb.tabs[id].button)
+	}
+	if session != tb.session {
+		// Window IDs are only unique within a host's server.
+		tb.tabs = map[string]*tab{}
+	}
+	tabs := make(map[string]*tab, len(ids))
+	for _, id := range ids {
+		t, ok := tb.tabs[id]
+		if !ok {
+			t = newTab(tb, id)
+		}
+		tabs[id] = t
 		tb.box.PackStart(t.button, false, false, 0)
 	}
+	tb.session = session
 	tb.tabs = tabs
-	tb.order = slices.Clone(keys)
+	tb.order = slices.Clone(ids)
 	// A tab rebuilt in place may need bringing back into view.
 	tb.selected = ""
 	tb.syncVisible()
@@ -231,7 +268,7 @@ func (tb *tabBar) syncVisible() {
 
 // scrollTo scrolls the strip so a tab is in view.
 func (tb *tabBar) scrollTo(t *tab) {
-	if _, ok := tb.tabs[t.key]; !ok {
+	if _, ok := tb.tabs[t.id]; !ok {
 		return
 	}
 	adj := tb.root.GetHAdjustment()

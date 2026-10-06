@@ -384,6 +384,13 @@ func (c *Client) SwitchClient(ctx context.Context, tty string, session string) e
 	return err
 }
 
+// SelectWindow makes a window, given by its ID such as @3, its session's current
+// window. Every client showing the session follows it.
+func (c *Client) SelectWindow(ctx context.Context, window string) error {
+	_, err := c.run(ctx, "select-window", "-t", window)
+	return err
+}
+
 // ScrollState is where a pane's view is in its history.
 type ScrollState struct {
 	// History is the number of lines scrolled off the top of the pane.

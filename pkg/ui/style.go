@@ -111,14 +111,11 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-tab.ttt-unseen .ttt-session-name {
 	font-weight: bold;
 }
-.ttt-tab.ttt-shown {
-	box-shadow: inset 0 -2px alpha(@theme_selected_bg_color, 0.45);
-}
 .ttt-tab.ttt-selected {
 	box-shadow: inset 0 -2px @theme_selected_bg_color;
 }
-.ttt-tab-host {
-	font-size: smaller;
+.ttt-tab-index {
+	font-feature-settings: "tnum";
 }
 .ttt-empty-title {
 	font-size: larger;

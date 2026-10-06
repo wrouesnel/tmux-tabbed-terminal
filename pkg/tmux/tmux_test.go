@@ -138,6 +138,37 @@ func TestSessionLifecycle(t *testing.T) {
 	}
 }
 
+func TestSelectWindow(t *testing.T) {
+	ctx := context.Background()
+	c := newTestClient(t)
+
+	id, err := c.NewSession(ctx, "windows", t.TempDir())
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	argv := c.Argv("new-window", "-t", id)
+	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil { //nolint:gosec // test
+		t.Fatalf("new-window: %v: %s", err, out)
+	}
+
+	snap, err := c.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	ws := snap.Session(id).Windows
+	if len(ws) != 2 || ws[0].Active || !ws[1].Active {
+		t.Fatalf("windows: got %+v, want two with the second active", ws)
+	}
+
+	if err := c.SelectWindow(ctx, ws[0].ID); err != nil {
+		t.Fatalf("SelectWindow: %v", err)
+	}
+	snap, _ = c.Snapshot(ctx)
+	if got := snap.Session(id).ActiveWindow(); got == nil || got.ID != ws[0].ID {
+		t.Fatalf("active window: got %+v, want %s", got, ws[0].ID)
+	}
+}
+
 func TestParseSnapshot(t *testing.T) {
 	out := strings.ReplaceAll("S\t$1\tmain\t100\t1\n"+
 		"S\t$2\tother\t200\t0\n"+

@@ -616,6 +616,15 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 			if host == h {
 				a.tracker.Observe(key, s.Activity(), visible[key], now)
 			}
+			// Windows for the tab bar: one is on screen if it's the current window of a
+			// session in a pane.
+			for _, win := range s.Windows {
+				wkey := windowKey(host.Name, win.ID)
+				keys[wkey] = true
+				if host == h {
+					a.tracker.Observe(wkey, win.Activity, visible[key] && win.Active, now)
+				}
+			}
 		}
 	}
 	a.tracker.Retain(keys)

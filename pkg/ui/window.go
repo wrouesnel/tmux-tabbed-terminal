@@ -582,7 +582,7 @@ func (w *Window) refresh() {
 
 	shown, selected := w.shownSessions()
 	w.sidebar.update(shown, selected)
-	w.tabs.update(w.sidebar.visibleIDs(), shown, selected)
+	w.tabs.update(selected)
 
 	now := timeNow()
 	for _, p := range panes {
@@ -629,13 +629,6 @@ func (w *Window) shownSessions() (map[string]bool, string) {
 		selected = w.activePane.SessionKey()
 	}
 	return shown, selected
-}
-
-// updateTabs shows the sessions in the session list's current view as tabs, after the
-// view changes.
-func (w *Window) updateTabs() {
-	shown, selected := w.shownSessions()
-	w.tabs.update(w.sidebar.visibleIDs(), shown, selected)
 }
 
 // setStatus shows a message in the title bar until it's cleared with "".

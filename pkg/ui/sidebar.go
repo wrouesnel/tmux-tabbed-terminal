@@ -129,7 +129,6 @@ func newSidebar(w *Window) *sidebar {
 		sb.query, _ = sb.search.GetText()
 		sb.list.InvalidateFilter()
 		sb.list.InvalidateHeaders()
-		w.updateTabs()
 	})
 	// Enter opens the first match. Escape clears the search and returns to the terminal.
 	sb.search.Connect("activate", func() {
@@ -684,9 +683,6 @@ func (sb *sidebar) setHostFilter(name string) {
 	}
 	sb.list.InvalidateFilter()
 	sb.list.InvalidateHeaders()
-	if sb.win.tabs != nil {
-		sb.win.updateTabs()
-	}
 }
 
 // rowOf returns the row widget of an entry.
