@@ -23,8 +23,10 @@ type uiState struct {
 	PinsCollapsed bool `yaml:"pins-collapsed,omitempty"`
 	// HideUnavailablePins hides pinned sessions which aren't running.
 	HideUnavailablePins bool `yaml:"hide-unavailable-pins,omitempty"`
-	// HideTabBar hides the tabs above the panes.
+	// HideTabBar hides the tab bar.
 	HideTabBar bool `yaml:"hide-tab-bar,omitempty"`
+	// TabBarBottom puts the tab bar below the panes rather than above them.
+	TabBarBottom *bool `yaml:"tab-bar-bottom,omitempty"`
 }
 
 // PinnedSession is a session pinned to the top of the list. It's pinned by name rather

@@ -68,6 +68,7 @@ func newWindow(app *App) *Window {
 	w.content, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	w.content.PackStart(w.tabs.root, false, false, 0)
 	w.content.PackStart(w.layout.area, true, true, 0)
+	w.placeTabs()
 
 	w.outer, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
 	w.placeSidebar()
@@ -223,6 +224,16 @@ func (w *Window) setSidebarVisible(visible bool) {
 // syncGroupAction shows the application's grouping setting on the window's toggle.
 func (w *Window) syncGroupAction() {
 	w.groupAction.SetState(glib.VariantFromBoolean(w.app.grouped))
+}
+
+// placeTabs puts the tab bar above or below the panes, as the application is set to.
+func (w *Window) placeTabs() {
+	position := 0
+	if w.app.tabsBottom {
+		position = 1
+	}
+	w.content.ReorderChild(w.tabs.root, position)
+	setClass(w.tabs.root, "ttt-tabbar-bottom", w.app.tabsBottom)
 }
 
 // syncTabsAction shows the application's tab bar setting on the window's toggle and bar.

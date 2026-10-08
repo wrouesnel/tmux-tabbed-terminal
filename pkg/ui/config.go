@@ -12,6 +12,7 @@ type Config struct {
 	Appearance AppearanceConfig `yaml:"appearance"`
 	Activity   ActivityConfig   `yaml:"activity"`
 	Sidebar    SidebarConfig    `yaml:"sidebar"`
+	TabBar     TabBarConfig     `yaml:"tab-bar"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
 	// Hosts are remote hosts whose sessions are listed, besides those added in the UI.
 	Hosts []HostConfig `yaml:"hosts"`
@@ -80,6 +81,13 @@ type SidebarConfig struct {
 	Position string `yaml:"position"`
 }
 
+// TabBarConfig sets how the tab bar of tmux windows is arranged.
+type TabBarConfig struct {
+	// Position is where the bar is, above or below the panes: top or bottom. Preferences
+	// changes it, and that choice is remembered.
+	Position string `yaml:"position"`
+}
+
 // BehaviourConfig sets what the application does on its own.
 type BehaviourConfig struct {
 	// CreateSessionOnStart creates a session when a window opens and there are none.
@@ -119,6 +127,9 @@ func DefaultConfig() Config {
 			GroupByApplication: true,
 			GroupHold:          defaultGroupHold,
 			Position:           "left",
+		},
+		TabBar: TabBarConfig{
+			Position: "top",
 		},
 		Behaviour: BehaviourConfig{
 			CreateSessionOnStart: true,

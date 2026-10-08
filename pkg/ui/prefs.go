@@ -15,6 +15,12 @@ import (
 // empty ID.
 const schemeConfiguredID = "configured"
 
+// IDs of the tab bar positions in Preferences.
+const (
+	tabBarTop    = "top"
+	tabBarBottom = "bottom"
+)
+
 const (
 	prefsSpacing = 12
 	prefsWidth   = 460
@@ -31,6 +37,7 @@ type preferences struct {
 	systemFont *gtk.CheckButton
 	font       *gtk.FontButton
 	bold       *gtk.CheckButton
+	tabBar     *gtk.ComboBoxText
 	// loading is set while the widgets are filled in, so their signals don't apply.
 	loading bool
 }
@@ -182,6 +189,22 @@ func newPreferences(a *App) *preferences {
 	p.bold.SetActive(a.appearance.BoldIsBright)
 	p.bold.Connect("toggled", p.apply)
 	add("Text", p.bold)
+
+	// Layout. Not an appearance preference: it's kept with the other window layout.
+	p.tabBar, _ = gtk.ComboBoxTextNew()
+	p.tabBar.Append(tabBarTop, "At the top")
+	p.tabBar.Append(tabBarBottom, "At the bottom")
+	if a.tabsBottom {
+		p.tabBar.SetActiveID(tabBarBottom)
+	} else {
+		p.tabBar.SetActiveID(tabBarTop)
+	}
+	p.tabBar.Connect("changed", func() {
+		if !p.loading {
+			a.setTabsBottom(p.tabBar.GetActiveID() == tabBarBottom)
+		}
+	})
+	add("Window tabs", p.tabBar)
 
 	hint, _ := gtk.LabelNew("Changes apply to every terminal straight away. A GNOME Terminal profile " +
 		"is followed as it's edited in GNOME Terminal.")

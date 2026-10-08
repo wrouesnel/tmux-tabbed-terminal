@@ -114,6 +114,9 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-tab.ttt-selected {
 	box-shadow: inset 0 -2px @theme_selected_bg_color;
 }
+.ttt-tabbar-bottom .ttt-tab.ttt-selected {
+	box-shadow: inset 0 2px @theme_selected_bg_color;
+}
 .ttt-tab-new {
 	padding: 3px 8px;
 	min-height: 0;
@@ -186,9 +189,14 @@ func terminalStylesheet(fg, bg theme.Color) string {
 	background-image: none;
 	border-color: %[3]s;
 }
-/* The tab bar is the list's surface; the selected tab opens onto the terminal below. */
+/* The tab bar is the list's surface; the selected tab opens onto the terminal, below it
+   or, at the bottom, above it. */
 .ttt-tabbar {
 	border-bottom: 1px solid %[3]s;
+}
+.ttt-tabbar.ttt-tabbar-bottom {
+	border-bottom: none;
+	border-top: 1px solid %[3]s;
 }
 .ttt-nav button.ttt-tab,
 .ttt-nav button.ttt-tab-new {

@@ -66,8 +66,10 @@ type App struct {
 	grouped bool
 	// sidebarRight puts session lists on the right of windows.
 	sidebarRight bool
-	// showTabs shows the tab bar above windows' panes.
+	// showTabs shows the tab bar of windows' panes.
 	showTabs bool
+	// tabsBottom puts the tab bar below the panes rather than above them.
+	tabsBottom bool
 	// state is what the UI remembers between runs.
 	state uiState
 	// dragKey is the session being dragged from a session list, or "".
@@ -126,6 +128,7 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 
 		sidebarRight: cfg.Sidebar.Position == "right",
 		showTabs:     true,
+		tabsBottom:   cfg.TabBar.Position == "bottom",
 	}
 	if st, err := loadState(stateFile()); err != nil {
 		app.log.Warn("Could not read UI state", zap.Error(err))
@@ -138,6 +141,9 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 			app.grouped = *st.GroupByApplication
 		}
 		app.showTabs = !st.HideTabBar
+		if st.TabBarBottom != nil {
+			app.tabsBottom = *st.TabBarBottom
+		}
 	}
 
 	gtkApp.Connect("startup", app.startup)
@@ -688,6 +694,16 @@ func (a *App) setShowTabs(show bool) {
 	a.saveState()
 	for w := range a.windows {
 		w.syncTabsAction()
+	}
+}
+
+// setTabsBottom moves the tab bar of every window below or above its panes.
+func (a *App) setTabsBottom(bottom bool) {
+	a.tabsBottom = bottom
+	a.state.TabBarBottom = &bottom
+	a.saveState()
+	for w := range a.windows {
+		w.placeTabs()
 	}
 }
 

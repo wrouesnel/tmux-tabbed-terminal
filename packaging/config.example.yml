@@ -45,6 +45,11 @@ sidebar:
   # changes it, and that choice is remembered.
   position: left
 
+tab-bar:
+  # Where the bar of the focused session's tmux windows is: top or bottom, above or below
+  # the terminals. Preferences changes it, and that choice is remembered.
+  position: top
+
 behaviour:
   # Create a session when a window opens and there are none.
   create-session-on-start: true
