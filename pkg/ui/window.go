@@ -164,6 +164,7 @@ func (w *Window) installActions() {
 	addStr("session-open", w.ShowSession)
 	addStr("session-split-right", func(id string) { w.OpenInSplit(id, gtk.ORIENTATION_HORIZONTAL) })
 	addStr("session-split-down", func(id string) { w.OpenInSplit(id, gtk.ORIENTATION_VERTICAL) })
+	addStr("session-detach", w.DetachSession)
 	addStr("session-rename", w.RenameSession)
 	addStr("window-rename", w.RenameWindow)
 	addStr("session-kill", w.KillSession)
@@ -352,6 +353,27 @@ func (w *Window) ClosePane(p *Pane) {
 	}
 	w.activePane.Focus()
 	w.refresh()
+}
+
+// showsSession reports whether a session, by key, is in one of the window's panes.
+func (w *Window) showsSession(key string) bool {
+	for _, p := range w.panes() {
+		if p.running && p.SessionKey() == key {
+			return true
+		}
+	}
+	return false
+}
+
+// DetachSession detaches the window's panes showing a session, by key. The session keeps
+// running, and the panes show the page for a detached session, as when it's detached
+// from elsewhere.
+func (w *Window) DetachSession(key string) {
+	for _, p := range w.panes() {
+		if p.running && p.SessionKey() == key {
+			p.detach()
+		}
+	}
 }
 
 // paneExited handles a pane whose tmux client stopped.

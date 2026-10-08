@@ -108,7 +108,8 @@ independent instance instead.
 
 In the session list, click a session to show it in the focused pane, or
 drag it onto a pane. Middle-click or Ctrl+click opens it in a new pane to the right. Right-click gives Open in Split Right,
-Open in Split Down, Rename and Kill. In a terminal, right-click gives copy, paste and split,
+Open in Split Down, Rename and Kill, and Detach for a session shown in the window, which
+leaves the session running and its panes on the Detached page. In a terminal, right-click gives copy, paste and split,
 even with tmux's `mouse` option on; a program that uses the mouse, such as vim or htop,
 gets the click instead, and Shift+right-click gives the menu there. Copy and Paste are
 also in the main menu.

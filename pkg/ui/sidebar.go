@@ -835,7 +835,7 @@ func (sb *sidebar) onButtonPress(ev *gdk.EventButton) bool {
 		return false
 	case e.pin:
 		if ev.Button() == gdk.BUTTON_SECONDARY {
-			return sb.popup(pinMenu(e), ev)
+			return sb.popup(pinMenu(e, sb.win.showsSession(e.target)), ev)
 		}
 		if e.target == "" {
 			return false
@@ -852,7 +852,7 @@ func (sb *sidebar) onButtonPress(ev *gdk.EventButton) bool {
 		return true
 	case gdk.BUTTON_SECONDARY:
 		_, pinned := sb.pinnedSessions()[id]
-		return sb.popup(sessionMenu(id, pinned), ev)
+		return sb.popup(sessionMenu(id, pinned, sb.win.showsSession(id)), ev)
 	case gdk.BUTTON_PRIMARY:
 		if eventHasControl(ev) {
 			sb.win.OpenInSplit(id, gtk.ORIENTATION_HORIZONTAL)
@@ -890,10 +890,11 @@ func (sb *sidebar) pinnedSessions() map[string]bool {
 	return pinned
 }
 
-// pinMenu is the context menu of a pinned session.
-func pinMenu(e *listEntry) *glib.MenuModel {
+// pinMenu is the context menu of a pinned session. shown is set if the session is in one
+// of the window's panes.
+func pinMenu(e *listEntry, shown bool) *glib.MenuModel {
 	if e.target != "" {
-		return sessionMenu(e.target, true)
+		return sessionMenu(e.target, true, shown)
 	}
 	remove := glib.MenuItemNewWithLabel("Unpin")
 	remove.SetActionAndTargetValue("win.pin-remove", glib.VariantFromString(e.key))
@@ -903,7 +904,8 @@ func pinMenu(e *listEntry) *glib.MenuModel {
 }
 
 // sessionMenu is the context menu of a session row. Its actions take the session key.
-func sessionMenu(id string, pinned bool) *glib.MenuModel {
+// shown is set if the session is in one of the window's panes, which Detach then leaves.
+func sessionMenu(id string, pinned, shown bool) *glib.MenuModel {
 	target := glib.VariantFromString(id)
 	item := func(label, action string) *glib.MenuItem {
 		mi := glib.MenuItemNewWithLabel(label)
@@ -914,6 +916,9 @@ func sessionMenu(id string, pinned bool) *glib.MenuModel {
 	open.AppendItem(item("Open", "win.session-open"))
 	open.AppendItem(item("Open in Split Right", "win.session-split-right"))
 	open.AppendItem(item("Open in Split Down", "win.session-split-down"))
+	if shown {
+		open.AppendItem(item("Detach", "win.session-detach"))
+	}
 	save := glib.MenuNew()
 	save.AppendItem(item("Save Scrollback", "win.session-save-scrollback"))
 	save.AppendItem(item("Save Scrollback As…", "win.session-save-scrollback-as"))

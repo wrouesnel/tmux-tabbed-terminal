@@ -394,6 +394,15 @@ func terminalEnv(env []string) []string {
 	return append(result, "TERM=xterm-256color", "COLORTERM=truecolor")
 }
 
+// detach hangs up the pane's client, which tmux takes as the client detaching. Unlike
+// close, the pane stays: it sees its client exit, and shows that the session was
+// detached. A remote client is hung up with its ssh connection.
+func (p *Pane) detach() {
+	if p.running && p.cmd != nil && p.cmd.Process != nil {
+		_ = p.cmd.Process.Signal(syscall.SIGHUP)
+	}
+}
+
 // close hangs up the pane's client. The session keeps running.
 func (p *Pane) close() {
 	p.closed = true
