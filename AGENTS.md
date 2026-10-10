@@ -63,6 +63,17 @@ newer, with dependencies held to versions that build with it. Integration CI
 builds each package the way its build service does. See the README for the release
 workflow.
 
+## Windows
+
+Windows is being ported in steps; it builds but isn't usable yet. Code that only works on
+Unix goes behind build tags, with a Windows counterpart offering the same API:
+`pkg/vte` is `vte_unix.go` (the VTE binding) and `vte_windows.go` (a placeholder until a
+ConPTY terminal replaces it), and pkg/ui uses only the methods both provide. Per-user
+directories come from `userDir` in `pkg/ui/paths.go` (XDG variables, else
+`%LOCALAPPDATA%` on Windows). On Windows, the local host will be the tmux of an installed
+MSYS2 or Cygwin, and without one there is no local host. CI's `windows` job builds in
+MSYS2 UCRT64; there's no Windows toolchain locally, so Windows-only code is checked there.
+
 ## Testing the GUI
 
 `pkg/entrypoints/tmux_tabbed_terminal/gui_test.go` re-runs the test binary under

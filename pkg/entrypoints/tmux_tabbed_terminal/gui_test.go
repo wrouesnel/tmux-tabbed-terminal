@@ -1,3 +1,5 @@
+//go:build !windows
+
 package tmux_tabbed_terminal_test
 
 import (

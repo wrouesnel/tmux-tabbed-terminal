@@ -227,6 +227,21 @@ go run mage.go binary
 The application uses cgo to link GTK3 and VTE, so each architecture is built on a machine
 of that architecture. Cross-compiling needs `CC` and `PKG_CONFIG_LIBDIR` set for the target.
 
+### Windows
+
+Windows support is in progress, and not yet usable. It builds in an
+[MSYS2](https://www.msys2.org/) UCRT64 shell, as CI builds it:
+
+```sh
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_64-gtk3 \
+  mingw-w64-ucrt-x86_64-pkgconf
+go build -o tmux-tabbed-terminal.exe ./cmd/tmux-tabbed-terminal
+```
+
+VTE doesn't support Windows, so panes show a placeholder instead of a terminal for now.
+State and saved scrollback go under `%LOCALAPPDATA%\tmux-tabbed-terminal`, and the
+configuration under `%APPDATA%\tmux-tabbed-terminal`.
+
 ## Releases and packages
 
 Pushing a `v*` tag runs `.github/workflows/release.yml`. It does the following:

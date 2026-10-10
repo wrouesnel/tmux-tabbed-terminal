@@ -33,15 +33,7 @@ func fileSafe(name string) string {
 
 // scrollbackDir is where saved scrollback goes by default.
 func scrollbackDir() string {
-	dir := os.Getenv("XDG_DATA_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "."
-		}
-		dir = filepath.Join(home, ".local", "share")
-	}
-	return filepath.Join(dir, version.Name, "scrollback")
+	return filepath.Join(userDir("XDG_DATA_HOME", ".local", "share"), version.Name, "scrollback")
 }
 
 // scrollbackPath is where Save puts a session's scrollback: by host, session and time.

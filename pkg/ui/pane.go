@@ -149,7 +149,7 @@ func newPane(w *Window) *Pane {
 		w.setActivePane(p)
 		return false
 	})
-	p.term.Connect("contents-changed", func() { w.app.requestPoll(p.hostName) })
+	p.term.OnContentsChanged(func() { w.app.requestPoll(p.hostName) })
 	// Before VTE's own handler, which would otherwise give the click to tmux whenever its
 	// mouse option is on, and tmux's menu can't paste the clipboard.
 	p.term.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {

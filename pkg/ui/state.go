@@ -38,15 +38,7 @@ type PinnedSession struct {
 
 // stateFile is where uiState is kept.
 func stateFile() string {
-	dir := os.Getenv("XDG_STATE_HOME")
-	if dir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			home = "."
-		}
-		dir = filepath.Join(home, ".local", "state")
-	}
-	return filepath.Join(dir, version.Name, "state.yml")
+	return filepath.Join(userDir("XDG_STATE_HOME", ".local", "state"), version.Name, "state.yml")
 }
 
 // loadState reads the UI state. A missing file is an empty state.
