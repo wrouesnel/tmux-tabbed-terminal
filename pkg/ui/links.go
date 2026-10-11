@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -184,6 +186,20 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 	l.uri = (&url.URL{Scheme: "file", Path: path}).String()
 	l.text = path
 	return l
+}
+
+// missingFile returns the path of a file:// URI on this host whose file doesn't exist.
+// The desktop's handler, often a portal, reports nothing back for those, so the window
+// says so itself.
+func missingFile(uri string) (string, bool) {
+	u, err := url.Parse(uri)
+	if err != nil || !strings.EqualFold(u.Scheme, "file") || (u.Host != "" && u.Host != "localhost") {
+		return "", false
+	}
+	if _, err := os.Stat(u.Path); !errors.Is(err, fs.ErrNotExist) {
+		return "", false
+	}
+	return u.Path, true
 }
 
 // addLinks makes a terminal underline links under the pointer: OSC 8 hyperlinks, and

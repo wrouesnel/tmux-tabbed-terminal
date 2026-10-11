@@ -1106,6 +1106,10 @@ func (w *Window) openLink(uri string) {
 	if uri == "" {
 		return
 	}
+	if path, ok := missingFile(uri); ok {
+		w.showError("Could not open the link", fmt.Sprintf("%s doesn't exist.", path))
+		return
+	}
 	if err := gtkx.ShowURI(&w.window.Window, uri); err != nil {
 		w.showError("Could not open the link", err.Error())
 	}

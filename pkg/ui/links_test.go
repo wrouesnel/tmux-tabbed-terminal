@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -121,6 +122,33 @@ func TestLinkInLines(t *testing.T) {
 		text, kind, ok := linkInLines(lines, 20, c.col, c.row)
 		if text != c.want || ok != (c.want != "") || (ok && kind != c.kind) {
 			t.Errorf("cell %d,%d: got %q kind %d ok %v, want %q kind %d", c.col, c.row, text, kind, ok, c.want, c.kind)
+		}
+	}
+}
+
+func TestMissingFile(t *testing.T) {
+	dir := t.TempDir()
+	there := filepath.Join(dir, "there.md")
+	if err := os.WriteFile(there, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(dir, "gone dir", "a.md")
+	cases := []struct {
+		uri      string
+		wantPath string
+		want     bool
+	}{
+		{"file://" + there, "", false},
+		{"file://" + dir, "", false},
+		{(&url.URL{Scheme: "file", Path: gone}).String(), gone, true},
+		{"file://localhost" + filepath.Join(dir, "x"), filepath.Join(dir, "x"), true},
+		{"file://otherhost/nope", "", false},
+		{"https://example.com/nope", "", false},
+	}
+	for _, c := range cases {
+		path, ok := missingFile(c.uri)
+		if path != c.wantPath || ok != c.want {
+			t.Errorf("%s: got %q %v, want %q %v", c.uri, path, ok, c.wantPath, c.want)
 		}
 	}
 }
