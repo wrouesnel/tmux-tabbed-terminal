@@ -593,7 +593,7 @@ func Tools() (err error) {
 		return nil
 	}
 
-	if berr := toolBuild("static", []string{"golangci-lint", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.2"},
+	if berr := toolBuild("static", []string{"golangci-lint", "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0"},
 		[]string{"gocovmerge", "github.com/wadey/gocovmerge@latest"},
 		[]string{"oapi-codegen", "github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest"},
 	); berr != nil {

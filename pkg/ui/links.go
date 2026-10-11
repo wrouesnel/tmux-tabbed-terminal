@@ -5,8 +5,9 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
-	"path/filepath"
+	"path"
 	"regexp"
+	"runtime"
 	"strings"
 	"unicode"
 
@@ -150,7 +151,9 @@ func markdownDestination(text string) string {
 
 // resolveLink returns the link a terminal match is. Markdown destinations without a
 // scheme are paths, relative to cwd, the directory of the program which printed them.
-// remote says that's on another host, where a path can't be opened from here.
+// remote says that's on another host, where a path can't be opened from here. The paths
+// are tmux's, so POSIX ones on every platform: on Windows, those of MSYS2 or Cygwin,
+// which aren't opened until they can be translated to Windows paths.
 func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 	dest := m.Text
 	if !m.Hyperlink && kind == linkMarkdown {
@@ -167,24 +170,24 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 		}
 		return l
 	}
-	if remote || u.Path == "" || u.Host != "" {
+	if remote || runtime.GOOS == "windows" || u.Path == "" || u.Host != "" {
 		return l
 	}
-	path := u.Path
-	if rest, ok := strings.CutPrefix(path, "~/"); ok {
+	p := u.Path
+	if rest, ok := strings.CutPrefix(p, "~/"); ok {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return l
 		}
-		path = filepath.Join(home, rest)
-	} else if !filepath.IsAbs(path) {
+		p = path.Join(home, rest)
+	} else if !path.IsAbs(p) {
 		if cwd == "" {
 			return l
 		}
-		path = filepath.Join(cwd, path)
+		p = path.Join(cwd, p)
 	}
-	l.uri = (&url.URL{Scheme: "file", Path: path}).String()
-	l.text = path
+	l.uri = (&url.URL{Scheme: "file", Path: p}).String()
+	l.text = p
 	return l
 }
 

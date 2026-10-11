@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -83,6 +84,10 @@ func TestResolveLink(t *testing.T) {
 		{"hyperlink scheme", vte.Match{Text: "vscode://open", Hyperlink: true}, linkURL, "", false, "", "vscode://open"},
 	}
 	for _, c := range cases {
+		if runtime.GOOS == "windows" && strings.HasPrefix(c.wantURI, "file:") {
+			// Paths are copied, not opened, until they're translated to Windows paths.
+			c.wantURI, c.wantText = "", markdownDestination(c.m.Text)
+		}
 		l := resolveLink(c.m, c.kind, c.cwd, c.remote)
 		if l.uri != c.wantURI || l.text != c.wantText {
 			t.Errorf("%s: got %+v, want uri %q text %q", c.name, l, c.wantURI, c.wantText)
@@ -127,6 +132,9 @@ func TestLinkInLines(t *testing.T) {
 }
 
 func TestMissingFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file links hold POSIX paths, and Windows doesn't open them yet")
+	}
 	dir := t.TempDir()
 	there := filepath.Join(dir, "there.md")
 	if err := os.WriteFile(there, nil, 0o600); err != nil {

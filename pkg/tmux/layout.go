@@ -4,6 +4,8 @@ import (
 	"context"
 	"strconv"
 	"strings"
+
+	"github.com/pkg/errors"
 )
 
 // Pane is one pane of a window.
@@ -97,8 +99,16 @@ func ParseLayout(out string) *Layout {
 }
 
 // PaneLines returns the lines on a pane's screen, with lines tmux wrapped joined again,
-// so a line may take several rows.
+// so a line may take several rows. On a tmux whose capture-pane crashes, it returns
+// ErrCaptureCrashes without trying.
 func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
+	version, err := c.ServerVersion(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if CaptureCrashes(version) {
+		return nil, errors.Wrap(ErrCaptureCrashes, "tmux "+version)
+	}
 	out, err := c.run(ctx, "capture-pane", "-p", "-J", "-t", pane)
 	if err != nil {
 		return nil, err

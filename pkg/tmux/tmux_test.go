@@ -453,7 +453,11 @@ func TestPaneLines(t *testing.T) {
 	}
 	var lines []string
 	for range 50 {
-		if lines, err = c.PaneLines(ctx, layout.Panes[1].ID); err != nil {
+		lines, err = c.PaneLines(ctx, layout.Panes[1].ID)
+		switch {
+		case errors.Is(err, tmux.ErrCaptureCrashes):
+			t.Skipf("not capturing on this tmux: %v", err)
+		case err != nil:
 			t.Fatal(err)
 		}
 		if strings.Contains(strings.Join(lines, "\n"), long) {
