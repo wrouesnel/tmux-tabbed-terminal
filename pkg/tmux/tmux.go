@@ -190,6 +190,9 @@ type Window struct {
 	InMode bool
 	// Scroll is the active pane's history and scroll position.
 	Scroll ScrollState
+	// Panes is how many panes the window has, and Width how many columns it is wide.
+	Panes int
+	Width int
 	// Title is the title of the window's active pane.
 	Title string
 }
@@ -269,7 +272,8 @@ var (
 		"W", "#{session_id}", "#{window_id}", "#{window_index}", "#{window_active}",
 		"#{window_activity}", "#{pane_current_command}", "#{window_name}", "#{pane_current_path}",
 		"#{pane_id}", "#{alternate_on}", "#{mouse_any_flag}", "#{pane_in_mode}",
-		"#{history_size}", "#{pane_height}", "#{scroll_position}", "#{pane_title}",
+		"#{history_size}", "#{pane_height}", "#{scroll_position}", "#{window_panes}", "#{window_width}",
+		"#{pane_title}",
 	}, fieldSep)
 	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}"}, fieldSep)
 )
@@ -323,7 +327,7 @@ func ParseSnapshot(out string) *Snapshot {
 				Attached: attached,
 			})
 		case "W":
-			if len(fields) < 17 {
+			if len(fields) < 19 {
 				continue
 			}
 			idx, _ := strconv.Atoi(fields[3])
@@ -341,8 +345,10 @@ func ParseSnapshot(out string) *Snapshot {
 				MouseReporting:  fields[11] == "1",
 				InMode:          fields[12] == "1",
 				Scroll:          parseScroll(fields[13], fields[14], fields[15]),
+				Panes:           atoi(fields[16]),
+				Width:           atoi(fields[17]),
 				// The title may contain the separator: keep the rest of the line.
-				Title: strings.Join(fields[16:], fieldSep),
+				Title: strings.Join(fields[18:], fieldSep),
 			})
 		case "C":
 			if len(fields) < 3 {
@@ -447,6 +453,12 @@ type ScrollState struct {
 	Position int
 }
 
+// atoi parses a decimal number, returning 0 if it's invalid.
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
+}
+
 // parseScroll parses the scroll formats. tmux prints an empty scroll_position outside copy
 // mode.
 func parseScroll(history, height, position string) ScrollState {
@@ -491,9 +503,10 @@ func (c *Client) ScrollPane(ctx context.Context, pane string, lines int) (Scroll
 var ErrCaptureCrashes = errors.New("this tmux crashes when capturing a pane, which would end every " +
 	"session on the server: upgrade tmux to save scrollback")
 
-// captureCrashes reports whether a tmux version crashes in capture-pane. RHEL 10 ships a
-// pre-release git snapshot of tmux, which reports itself as next-3.4, that does.
-func captureCrashes(version string) bool {
+// CaptureCrashes reports whether a tmux version, as ServerVersion returns it, crashes in
+// capture-pane. RHEL 10 ships a pre-release git snapshot of tmux, which reports itself as
+// next-3.4, that does.
+func CaptureCrashes(version string) bool {
 	return strings.HasPrefix(strings.TrimSpace(version), "next-3.4")
 }
 
@@ -512,7 +525,7 @@ func (c *Client) CaptureHistory(ctx context.Context, session string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if captureCrashes(version) {
+	if CaptureCrashes(version) {
 		return "", errors.Wrap(ErrCaptureCrashes, "tmux "+version)
 	}
 	out, err := c.run(ctx, "capture-pane", "-p", "-J", "-S", "-", "-E", "-", "-t", session)

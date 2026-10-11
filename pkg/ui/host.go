@@ -61,8 +61,10 @@ type Host struct {
 	err error
 	// polled is set once a poll has finished, successfully or not.
 	polled bool
-	// features are the terminal features clients ask tmux for, once featuresKnown says
-	// the server's version has been read.
+	// version is the server's tmux version, and features the terminal features clients
+	// ask it for, once featuresKnown says the version has been read. version is "" if it
+	// couldn't be.
+	version       string
 	features      []string
 	featuresKnown bool
 

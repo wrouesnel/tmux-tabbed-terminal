@@ -61,6 +61,18 @@ func (t *Terminal) AddMatch(string) (int, error) { return 0, nil }
 // MatchAt reports no link.
 func (t *Terminal) MatchAt(*gdk.Event) (Match, bool) { return Match{}, false }
 
+// CellAt returns 0, 0.
+func (t *Terminal) CellAt(float64, float64) (int, int) { return 0, 0 }
+
+// MatchAtCell reports no match.
+func (t *Terminal) MatchAtCell(int, int) (Match, bool) { return Match{}, false }
+
+// Feed does nothing.
+func (t *Terminal) Feed([]byte) {}
+
+// SetSize does nothing.
+func (t *Terminal) SetSize(int, int) {}
+
 // SetBoldIsBright does nothing.
 func (t *Terminal) SetBoldIsBright(bool) {}
 

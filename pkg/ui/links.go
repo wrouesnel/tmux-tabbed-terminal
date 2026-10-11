@@ -4,7 +4,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/width"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/vte"
 )
@@ -20,7 +24,12 @@ const (
 )
 
 // Link patterns, matched by VTE with PCRE2. They're also valid Go regexps, so the tests
-// can check them. A pattern matches within one line: tmux draws each line separately.
+// can check them. VTE matches across lines the terminal wrapped, which includes lines
+// tmux leaves the terminal to wrap: those of a pane as wide as the window.
+//
+// PCRE2 gives up, and finds no match, when a repeated group runs to a few dozen
+// repetitions, so a pattern mustn't repeat a group once per character: repeat a character
+// class instead. Go's regexps have no such limit, so a VTE test checks long links.
 //
 //nolint:gochecknoglobals
 var linkPatterns = []struct {
@@ -32,8 +41,77 @@ var linkPatterns = []struct {
 	// a quoted title.
 	{linkMarkdown, `!?\[[^\[\]\n]*\]\((?:<[^<>\n]+>|[^\s()<>]+)(?:\s+"[^"\n]*")?\)`},
 	// A URL may hold balanced parentheses, as Wikipedia's do, but doesn't end in
-	// punctuation, which is usually the sentence's.
-	{linkURL, `\b(?:https?|ftp|file)://(?:[^\s()<>"'\[\]{}]|\([^\s()<>]*\))*(?:[^\s()<>"'\[\]{}.,;:!?]|\([^\s()<>]*\))`},
+	// punctuation, which is usually the sentence's. The group repeats once per
+	// parenthesis, not per character.
+	{linkURL, `\b(?:https?|ftp|file)://(?:[^\s()<>"'\[\]{}]*(?:\([^\s()<>]*\)|[^\s()<>"'\[\]{}.,;:!?]))+`},
+}
+
+// linkRegexps are the link patterns compiled with Go's regexps, for finding links in
+// tmux's copy of a pane's lines, case-insensitively as VTE does.
+//
+//nolint:gochecknoglobals
+var linkRegexps = func() []*regexp.Regexp {
+	res := make([]*regexp.Regexp, len(linkPatterns))
+	for i, p := range linkPatterns {
+		res[i] = regexp.MustCompile("(?i)" + p.pattern)
+	}
+	return res
+}()
+
+// runeCells is how many cells a character takes on a terminal: two for East Asian wide
+// ones, none for combining marks.
+func runeCells(r rune) int {
+	switch {
+	case unicode.Is(unicode.Mn, r):
+		return 0
+	case width.LookupRune(r).Kind() == width.EastAsianWide, width.LookupRune(r).Kind() == width.EastAsianFullwidth:
+		return 2 //nolint:mnd // a wide character
+	}
+	return 1
+}
+
+// linkInLines finds the link at a cell of a pane, given the pane's lines as tmux's
+// capture-pane -J returns them, so a line takes as many rows of the pane's width as it
+// needs. It returns the link's text and the kind of pattern it matched.
+func linkInLines(lines []string, paneWidth, col, row int) (string, linkKind, bool) {
+	if paneWidth <= 0 {
+		return "", 0, false
+	}
+	top := 0
+	for _, line := range lines {
+		cells := 0
+		for _, r := range line {
+			cells += runeCells(r)
+		}
+		rows := max(1, (cells+paneWidth-1)/paneWidth)
+		if row >= top+rows {
+			top += rows
+			continue
+		}
+		// The byte offset of the character at the cell.
+		target, at := (row-top)*paneWidth+col, -1
+		cell := 0
+		for i, r := range line {
+			if n := runeCells(r); cell+n > target {
+				at = i
+				break
+			} else {
+				cell += n
+			}
+		}
+		if at < 0 {
+			return "", 0, false
+		}
+		for i, re := range linkRegexps {
+			for _, m := range re.FindAllStringIndex(line, -1) {
+				if m[0] <= at && at < m[1] {
+					return line[m[0]:m[1]], linkPatterns[i].kind, true
+				}
+			}
+		}
+		return "", 0, false
+	}
+	return "", 0, false
 }
 
 // linkSchemes are the URI schemes links may open. Others, such as javascript:, are only

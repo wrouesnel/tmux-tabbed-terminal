@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/vte"
@@ -84,6 +85,42 @@ func TestResolveLink(t *testing.T) {
 		l := resolveLink(c.m, c.kind, c.cwd, c.remote)
 		if l.uri != c.wantURI || l.text != c.wantText {
 			t.Errorf("%s: got %+v, want uri %q text %q", c.name, l, c.wantURI, c.wantText)
+		}
+	}
+}
+
+func TestLinkInLines(t *testing.T) {
+	url := "https://example.com/" + strings.Repeat("a", 50) // 70 cells
+	lines := []string{
+		"$ cat notes.md",
+		"see " + url + " for more", // 83 cells: rows 1 to 5 at width 20
+		"",
+		"[文档](docs/中文.md) wide", // wide characters take two cells: 25 cells, rows 7 and 8
+	}
+	cases := []struct {
+		col, row int
+		want     string
+		kind     linkKind
+	}{
+		{5, 0, "", 0},
+		{4, 1, url, linkURL},  // the link's first cell
+		{3, 1, "", 0},         // the space before it
+		{10, 3, url, linkURL}, // its third row
+		{13, 4, url, linkURL}, // its last cell
+		{14, 4, "", 0},        // the space after it
+		{0, 5, "", 0},         // the line's last row
+		{0, 6, "", 0},         // the empty line
+		{0, 7, "[文档](docs/中文.md)", linkMarkdown},
+		{2, 7, "[文档](docs/中文.md)", linkMarkdown},  // the second cell of 文
+		{19, 7, "[文档](docs/中文.md)", linkMarkdown}, // the closing parenthesis
+		{0, 8, "", 0},
+		{10, 8, "", 0}, // past the end of the line
+		{0, 9, "", 0},  // below every line
+	}
+	for _, c := range cases {
+		text, kind, ok := linkInLines(lines, 20, c.col, c.row)
+		if text != c.want || ok != (c.want != "") || (ok && kind != c.kind) {
+			t.Errorf("cell %d,%d: got %q kind %d ok %v, want %q kind %d", c.col, c.row, text, kind, ok, c.want, c.kind)
 		}
 	}
 }

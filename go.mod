@@ -18,6 +18,7 @@ require (
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/mod v0.33.0
 	golang.org/x/sys v0.41.0
+	golang.org/x/text v0.34.0
 )
 
 require (
@@ -33,7 +34,6 @@ require (
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	github.com/yuseferi/zax/v2 v2.3.5 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
 )
 
 replace go.yaml.in/yaml/v4 => github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd

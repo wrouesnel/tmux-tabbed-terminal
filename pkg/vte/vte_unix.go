@@ -43,6 +43,24 @@ static int ttt_match_add(VteTerminal *terminal, const char *pattern, GError **er
 	vte_terminal_match_set_cursor_name(terminal, tag, "pointer");
 	return tag;
 }
+
+// ttt_cell_at returns the cell at a point of the terminal widget, which pads its text by
+// its CSS padding.
+static void ttt_cell_at(VteTerminal *terminal, double x, double y, glong *col, glong *row) {
+	GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(terminal));
+	GtkBorder padding;
+	gtk_style_context_get_padding(style, gtk_style_context_get_state(style), &padding);
+	*col = (glong)((x - padding.left) / vte_terminal_get_char_width(terminal));
+	*row = (glong)((y - padding.top) / vte_terminal_get_char_height(terminal));
+}
+
+// ttt_match_at_cell returns the regex match at a cell, which the caller frees, or NULL.
+// vte_terminal_check_match_at replaces it, but only from VTE 0.70.
+static char *ttt_match_at_cell(VteTerminal *terminal, glong col, glong row, int *tag) {
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	return vte_terminal_match_check(terminal, col, row, tag);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+}
 */
 import "C"
 
@@ -227,6 +245,39 @@ func (t *Terminal) MatchAt(ev *gdk.Event) (Match, bool) {
 		return Match{Text: C.GoString(text), Tag: int(tag)}, true
 	}
 	return Match{}, false
+}
+
+// CellAt returns the column and row of the screen at a point in the widget, such as a
+// mouse event's.
+func (t *Terminal) CellAt(x, y float64) (int, int) {
+	var col, row C.glong
+	C.ttt_cell_at(t.native(), C.double(x), C.double(y), &col, &row)
+	return int(col), int(row)
+}
+
+// MatchAtCell returns the AddMatch regex match covering a cell of the screen, as
+// MatchAt does for the cell under the pointer.
+func (t *Terminal) MatchAtCell(col, row int) (Match, bool) {
+	var tag C.int
+	text := C.ttt_match_at_cell(t.native(), C.glong(col), C.glong(row), &tag)
+	if text == nil {
+		return Match{}, false
+	}
+	defer C.g_free(C.gpointer(text))
+	return Match{Text: C.GoString(text), Tag: int(tag)}, true
+}
+
+// Feed shows data as if the terminal's program had written it.
+func (t *Terminal) Feed(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	C.vte_terminal_feed(t.native(), (*C.char)(unsafe.Pointer(&data[0])), C.gssize(len(data)))
+}
+
+// SetSize sets the terminal's size in cells.
+func (t *Terminal) SetSize(cols, rows int) {
+	C.vte_terminal_set_size(t.native(), C.glong(cols), C.glong(rows))
 }
 
 // SetBoldIsBright sets whether bold text uses the bright palette colors.

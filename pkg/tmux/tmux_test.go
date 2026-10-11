@@ -214,9 +214,9 @@ func TestNewAndRenameWindow(t *testing.T) {
 func TestParseSnapshot(t *testing.T) {
 	out := strings.ReplaceAll("S\t$1\tmain\t100\t1\n"+
 		"S\t$2\tother\t200\t0\n"+
-		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\t%5\t1\t0\t1\t500\t40\t12\ttitle\twith sep\n"+
-		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t%4\t0\t0\t0\t0\t40\t\t\n"+
-		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t%9\t0\t0\t0\t0\t40\t\t\n"+
+		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\t%5\t1\t0\t1\t500\t40\t12\t2\t120\ttitle\twith sep\n"+
+		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t%4\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
+		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t%9\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"C\t/dev/pts/4\t$1\n"+
 		"garbage\n", "\t", "^|^")
 	snap := tmux.ParseSnapshot(out)
@@ -238,6 +238,9 @@ func TestParseSnapshot(t *testing.T) {
 	}
 	if aw := main.ActiveWindow(); aw.PaneID != "%5" || !aw.AlternateScreen || aw.MouseReporting || !aw.InMode {
 		t.Errorf("pane fields: got %+v", aw)
+	}
+	if aw := main.ActiveWindow(); aw.Panes != 2 || aw.Width != 120 {
+		t.Errorf("panes and width: got %d, %d", aw.Panes, aw.Width)
 	}
 	if got := main.ActiveWindow().Title; got != "title^|^with sep" {
 		t.Errorf("title: got %q", got)
@@ -383,4 +386,80 @@ func TestSupportsHyperlinks(t *testing.T) {
 			t.Errorf("SupportsHyperlinks(%q) = %v, want %v", version, got, want)
 		}
 	}
+}
+
+func TestParseLayout(t *testing.T) {
+	out := strings.ReplaceAll("P\t%0\t0\t0\t43\t28\t0\t/home/u\n"+
+		"P\t%2\t44\t0\t43\t28\t1\t/srv/with\tsep\n"+
+		"O\t2\ttop\n"+
+		"garbage\n", "\t", "^|^")
+	l := tmux.ParseLayout(out)
+	if len(l.Panes) != 2 || l.Top != 2 {
+		t.Fatalf("got %+v", l)
+	}
+	if p := l.Panes[1]; p.ID != "%2" || p.Left != 44 || p.Width != 43 || p.Height != 28 || !p.InMode || p.Path != "/srv/with^|^sep" {
+		t.Errorf("second pane: %+v", p)
+	}
+	for _, c := range []struct {
+		col, row      int
+		want          string
+		paneCol, pRow int
+	}{
+		{0, 2, "%0", 0, 0}, {42, 29, "%0", 42, 27}, {44, 5, "%2", 0, 3}, {86, 2, "%2", 42, 0},
+		{43, 5, "", 0, 0}, {10, 1, "", 0, 0}, {10, 30, "", 0, 0},
+	} {
+		p, col, row := l.PaneAt(c.col, c.row)
+		got := ""
+		if p != nil {
+			got = p.ID
+		}
+		if got != c.want || col != c.paneCol || row != c.pRow {
+			t.Errorf("PaneAt(%d, %d) = %q %d,%d, want %q %d,%d", c.col, c.row, got, col, row, c.want, c.paneCol, c.pRow)
+		}
+	}
+	for status, want := range map[string]int{"O\ton\ttop": 1, "O\toff\ttop": 0, "O\t3\tbottom": 0, "O\ton\tbottom": 0} {
+		if got := tmux.ParseLayout(strings.ReplaceAll(status, "\t", "^|^")).Top; got != want {
+			t.Errorf("%q: top %d, want %d", status, got, want)
+		}
+	}
+}
+
+// TestPaneLines checks a line tmux wrapped in a narrow pane comes back whole, with the
+// layout of a split window.
+func TestPaneLines(t *testing.T) {
+	ctx := context.Background()
+	c := newTestClient(t)
+	id, err := c.NewSession(ctx, "lines", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	long := "https://example.com/" + strings.Repeat("x", 100)
+	argv := c.Argv("split-window", "-h", "-t", id, "-l", "30", "printf '%s\\n' "+long+"; sleep 30")
+	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil { //nolint:gosec // test
+		t.Fatalf("split-window: %v: %s", err, out)
+	}
+	var layout *tmux.Layout
+	for range 50 {
+		if layout, err = c.WindowLayout(ctx, id); err != nil {
+			t.Fatal(err)
+		}
+		if len(layout.Panes) == 2 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if len(layout.Panes) != 2 || layout.Panes[1].Width != 30 || layout.Panes[1].Left == 0 {
+		t.Fatalf("layout: %+v", layout)
+	}
+	var lines []string
+	for range 50 {
+		if lines, err = c.PaneLines(ctx, layout.Panes[1].ID); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(strings.Join(lines, "\n"), long) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("no joined line in %q", lines)
 }

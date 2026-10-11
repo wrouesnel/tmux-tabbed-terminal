@@ -352,6 +352,9 @@ func (p *Pane) attach(key string) {
 		runAsync(p.win.app, h.client.ServerVersion, func(version string, err error) {
 			if !h.featuresKnown {
 				h.featuresKnown = true
+				if err == nil {
+					h.version = version
+				}
 				if err == nil && tmux.SupportsHyperlinks(version) {
 					h.features = []string{"hyperlinks"}
 				}
@@ -463,11 +466,11 @@ func (p *Pane) onButtonPress(event *gdk.Event) bool {
 		return false
 	}
 	if ev.Button() == gdk.BUTTON_PRIMARY && ev.State()&uint(gdk.CONTROL_MASK) != 0 {
-		if l, ok := p.linkAt(event); ok && l.uri != "" {
-			p.win.openLink(l.uri)
-			return true
-		}
-		return false
+		return p.withLinkAt(event, func(l link, ok bool) {
+			if ok {
+				p.win.openLink(l.uri)
+			}
+		})
 	}
 	if ev.Button() != gdk.BUTTON_SECONDARY {
 		return false
@@ -476,38 +479,114 @@ func (p *Pane) onButtonPress(event *gdk.Event) bool {
 		return false
 	}
 	p.Focus()
-	var hasLink bool
-	p.win.contextLink, hasLink = p.linkAt(event)
-	p.win.updateActionState()
-	menu := terminalMenu(hasLink)
-	popover, err := gtk.PopoverNewFromModel(p.term, menu)
-	if err != nil {
-		return false
-	}
 	rect := gdk.Rectangle{}
 	rect.SetX(int(ev.X()))
 	rect.SetY(int(ev.Y()))
 	rect.SetWidth(1)
 	rect.SetHeight(1)
-	popover.SetPointingTo(rect)
-	popover.SetPosition(gtk.POS_BOTTOM)
-	popover.Popup()
+	show := func(l link, onLink bool) {
+		p.win.contextLink = l
+		p.win.updateActionState()
+		popover, err := gtk.PopoverNewFromModel(p.term, terminalMenu(onLink))
+		if err != nil {
+			return
+		}
+		popover.SetPointingTo(rect)
+		popover.SetPosition(gtk.POS_BOTTOM)
+		popover.Popup()
+	}
+	if !p.withLinkAt(event, show) {
+		show(link{}, false)
+	}
 	return true
 }
 
-// linkAt returns the link under a mouse event, if there's one.
-func (p *Pane) linkAt(ev *gdk.Event) (link, bool) {
-	m, ok := p.term.MatchAt(ev)
-	if !ok {
-		return link{}, false
+// linkResult is a link found in tmux's copy of a pane: its text, the kind of pattern it
+// matched and the pane's directory. useVTE says to go by the terminal instead.
+type linkResult struct {
+	text   string
+	kind   linkKind
+	dir    string
+	found  bool
+	useVTE bool
+}
+
+// withLinkAt finds the link under a mouse event, and calls then with it, or with ok
+// false if there's none. It reports whether there may be one, and so whether then will be
+// called: then is called later when tmux has to be asked.
+//
+// The terminal finds links in what it shows, and across the lines it wrapped. That
+// covers a window of one pane as wide as the terminal, where tmux leaves wrapping to the
+// terminal. Elsewhere tmux draws each row of a pane separately, so a link it wrapped looks
+// like two lines: tmux's own copy of the pane's lines, with wrapped lines joined, is read
+// instead.
+func (p *Pane) withLinkAt(event *gdk.Event, then func(l link, ok bool)) bool {
+	m, matched := p.term.MatchAt(event)
+	remote := p.hostName != LocalHost
+	h, s := p.win.app.lookup(p.SessionKey())
+	var aw *tmux.Window
+	if s != nil {
+		aw = s.ActiveWindow()
 	}
-	cwd, remote := "", p.hostName != LocalHost
-	if _, s := p.win.app.lookup(p.SessionKey()); s != nil {
-		if aw := s.ActiveWindow(); aw != nil {
-			cwd = aw.Path
+	fromVTE := func() {
+		if !matched {
+			then(link{}, false)
+			return
 		}
+		dir := ""
+		if aw != nil {
+			dir = aw.Path
+		}
+		then(resolveLink(m, p.linkTags[m.Tag], dir, remote), true)
 	}
-	return resolveLink(m, p.linkTags[m.Tag], cwd, remote), true
+	cols, _ := p.term.Size()
+	if !p.running || m.Hyperlink || aw == nil || aw.InMode || (aw.Panes <= 1 && aw.Width == cols) ||
+		h.version == "" || tmux.CaptureCrashes(h.version) {
+		if !matched {
+			return false
+		}
+		fromVTE()
+		return true
+	}
+
+	ev := gdk.EventButtonNewFromEvent(event)
+	col, row := p.term.CellAt(ev.X(), ev.Y())
+	window, generation := aw.ID, p.generation
+	runAsync(p.win.app, func(ctx context.Context) (linkResult, error) {
+		layout, err := h.client.WindowLayout(ctx, window)
+		if err != nil {
+			return linkResult{}, err
+		}
+		pane, paneCol, paneRow := layout.PaneAt(col, row)
+		switch {
+		case pane == nil:
+			return linkResult{}, nil
+		case pane.InMode:
+			return linkResult{useVTE: true}, nil
+		}
+		lines, err := h.client.PaneLines(ctx, pane.ID)
+		if err != nil {
+			return linkResult{}, err
+		}
+		text, kind, found := linkInLines(lines, pane.Width, paneCol, paneRow)
+		return linkResult{text: text, kind: kind, dir: pane.Path, found: found}, nil
+	}, func(r linkResult, err error) {
+		if p.closed || generation != p.generation {
+			return
+		}
+		switch {
+		case err != nil:
+			p.win.app.log.Debug("Could not read the pane's lines: going by the terminal", zap.Error(err))
+			fromVTE()
+		case r.useVTE:
+			fromVTE()
+		case !r.found:
+			then(link{}, false)
+		default:
+			then(resolveLink(vte.Match{Text: r.text}, r.kind, r.dir, remote), true)
+		}
+	})
+	return true
 }
 
 // programWantsMouse reports whether the program in the pane's active tmux pane has asked
