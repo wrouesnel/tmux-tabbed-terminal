@@ -13,3 +13,11 @@ package vte
 type Color struct {
 	R, G, B, A float64
 }
+
+// Match is a link under the pointer: an OSC 8 hyperlink's URI, or the text of an
+// AddMatch regex's match and that regex's tag.
+type Match struct {
+	Text      string
+	Tag       int
+	Hyperlink bool
+}

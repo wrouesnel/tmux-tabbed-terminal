@@ -21,6 +21,13 @@ or split the window to watch several sessions side by side.
 * **Other hosts.** "Add Host" under the list connects to another machine over ssh and
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones.
+* **Links.** URLs, markdown links and images such as `[docs](docs/README.md)` or
+  `![shot](img/a.png)`, and hyperlinks that programs such as `ls --hyperlink` print are
+  underlined under the pointer. Ctrl+click opens one in its default application, and
+  right-clicking one gives Open Link and Copy Link. Markdown paths are relative to the
+  directory of the session's current window. Paths in remote sessions can only be copied,
+  since the file is on the other host. Hyperlinks need tmux 3.4 or later on the session's
+  host.
 * **Saving scrollback.** Right-click a session, or a terminal, and choose Save Scrollback
   to save the whole tmux history of its current pane as text, under
   `~/.local/share/tmux-tabbed-terminal/scrollback/<host>/<session>/<date-time>.txt`, or

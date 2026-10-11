@@ -5,6 +5,7 @@ package vte
 import (
 	"os/exec"
 
+	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/gtk"
 	"github.com/pkg/errors"
 )
@@ -50,6 +51,15 @@ func SixelSupported() bool { return false }
 
 // SetEnableSixel does nothing.
 func (t *Terminal) SetEnableSixel(bool) {}
+
+// SetAllowHyperlink does nothing.
+func (t *Terminal) SetAllowHyperlink(bool) {}
+
+// AddMatch does nothing: the placeholder has no text to match.
+func (t *Terminal) AddMatch(string) (int, error) { return 0, nil }
+
+// MatchAt reports no link.
+func (t *Terminal) MatchAt(*gdk.Event) (Match, bool) { return Match{}, false }
 
 // SetBoldIsBright does nothing.
 func (t *Terminal) SetBoldIsBright(bool) {}

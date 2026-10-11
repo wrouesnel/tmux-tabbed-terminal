@@ -361,3 +361,26 @@ func TestRemoteThroughHops(t *testing.T) {
 		t.Fatalf("attach through hops should be interactive at every hop: %q", argv)
 	}
 }
+
+func TestAttachArgvFeatures(t *testing.T) {
+	c := tmux.NewClient()
+	c.SocketName = "s"
+	if got, want := strings.Join(c.AttachArgv("$1"), " "), "tmux -u -L s attach-session -t $1"; got != want {
+		t.Errorf("without features: %q, want %q", got, want)
+	}
+	got := strings.Join(c.AttachArgv("$1", "hyperlinks", "clipboard"), " ")
+	if want := "tmux -u -L s -T hyperlinks,clipboard attach-session -t $1"; got != want {
+		t.Errorf("with features: %q, want %q", got, want)
+	}
+}
+
+func TestSupportsHyperlinks(t *testing.T) {
+	for version, want := range map[string]bool{
+		"3.4": true, "3.5a": true, "3.6\n": true, "4.0": true,
+		"3.3a": false, "2.7": false, "next-3.4": false, "openbsd-7.5": false, "master": false, "": false,
+	} {
+		if got := tmux.SupportsHyperlinks(version); got != want {
+			t.Errorf("SupportsHyperlinks(%q) = %v, want %v", version, got, want)
+		}
+	}
+}

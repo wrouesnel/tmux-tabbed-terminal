@@ -47,6 +47,8 @@ type Pane struct {
 	headerDot   *gtk.Label
 	stack       *gtk.Stack
 	term        *vte.Terminal
+	// linkTags are the kinds of the terminal's link patterns, by tag.
+	linkTags map[int]linkKind
 	// dropZone highlights where a dragged session would land.
 	dropZone *gtk.Box
 	// scrollbar shows where the view is in tmux's history, and scrolls it when dragged.
@@ -150,10 +152,14 @@ func newPane(w *Window) *Pane {
 		return false
 	})
 	p.term.OnContentsChanged(func() { w.app.requestPoll(p.hostName) })
+	var err error
+	if p.linkTags, err = addLinks(p.term); err != nil {
+		w.app.log.Warn("Some links won't be recognised", zap.Error(err))
+	}
 	// Before VTE's own handler, which would otherwise give the click to tmux whenever its
 	// mouse option is on, and tmux's menu can't paste the clipboard.
 	p.term.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
-		return p.onButtonPress(gdk.EventButtonNewFromEvent(ev))
+		return p.onButtonPress(ev)
 	})
 
 	p.term.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
@@ -339,7 +345,24 @@ func (p *Pane) attach(key string) {
 	}
 	log := p.win.app.log.With(zap.String("host", hostName), zap.String("session", id))
 
-	argv := h.client.AttachArgv(id)
+	// The first client on a host waits for its tmux version, which says whether it can
+	// pass hyperlinks on. Until a poll has reached the host, clients go without: a remote
+	// one may need its interactive ssh to connect at all.
+	if !h.featuresKnown && h.polled && h.err == nil {
+		runAsync(p.win.app, h.client.ServerVersion, func(version string, err error) {
+			if !h.featuresKnown {
+				h.featuresKnown = true
+				if err == nil && tmux.SupportsHyperlinks(version) {
+					h.features = []string{"hyperlinks"}
+				}
+				log.Debug("tmux version", zap.String("version", version), zap.Error(err))
+			}
+			p.attach(key)
+		})
+		return
+	}
+
+	argv := h.client.AttachArgv(id, h.features...)
 	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // the tmux binary is configured by the user
 	cmd.Env = terminalEnv(os.Environ())
 	if home, err := os.UserHomeDir(); err == nil {
@@ -430,20 +453,33 @@ func (p *Pane) updateHeader(name string, busy bool, showHeader bool) {
 	setClass(p.root, "ttt-active", p.win.activePane == p)
 }
 
-// onButtonPress shows the context menu on a right click. A program in the pane that has
-// asked for mouse events, such as vim or htop, gets the click instead, unless Shift is
-// held, as in GNOME Terminal. tmux itself doesn't count: with its mouse option on, the
-// menu still shows.
-func (p *Pane) onButtonPress(ev *gdk.EventButton) bool {
-	if ev.Type() != gdk.EVENT_BUTTON_PRESS || ev.Button() != gdk.BUTTON_SECONDARY {
+// onButtonPress opens a link on Ctrl+click, and shows the context menu on a right click.
+// A program in the pane that has asked for mouse events, such as vim or htop, gets the
+// right click instead, unless Shift is held, as in GNOME Terminal. tmux itself doesn't
+// count: with its mouse option on, the menu still shows.
+func (p *Pane) onButtonPress(event *gdk.Event) bool {
+	ev := gdk.EventButtonNewFromEvent(event)
+	if ev.Type() != gdk.EVENT_BUTTON_PRESS {
+		return false
+	}
+	if ev.Button() == gdk.BUTTON_PRIMARY && ev.State()&uint(gdk.CONTROL_MASK) != 0 {
+		if l, ok := p.linkAt(event); ok && l.uri != "" {
+			p.win.openLink(l.uri)
+			return true
+		}
+		return false
+	}
+	if ev.Button() != gdk.BUTTON_SECONDARY {
 		return false
 	}
 	if ev.State()&uint(gdk.SHIFT_MASK) == 0 && p.programWantsMouse() {
 		return false
 	}
 	p.Focus()
+	var hasLink bool
+	p.win.contextLink, hasLink = p.linkAt(event)
 	p.win.updateActionState()
-	menu := terminalMenu()
+	menu := terminalMenu(hasLink)
 	popover, err := gtk.PopoverNewFromModel(p.term, menu)
 	if err != nil {
 		return false
@@ -457,6 +493,21 @@ func (p *Pane) onButtonPress(ev *gdk.EventButton) bool {
 	popover.SetPosition(gtk.POS_BOTTOM)
 	popover.Popup()
 	return true
+}
+
+// linkAt returns the link under a mouse event, if there's one.
+func (p *Pane) linkAt(ev *gdk.Event) (link, bool) {
+	m, ok := p.term.MatchAt(ev)
+	if !ok {
+		return link{}, false
+	}
+	cwd, remote := "", p.hostName != LocalHost
+	if _, s := p.win.app.lookup(p.SessionKey()); s != nil {
+		if aw := s.ActiveWindow(); aw != nil {
+			cwd = aw.Path
+		}
+	}
+	return resolveLink(m, p.linkTags[m.Tag], cwd, remote), true
 }
 
 // programWantsMouse reports whether the program in the pane's active tmux pane has asked

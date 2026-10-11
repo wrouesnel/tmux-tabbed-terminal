@@ -7,11 +7,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 	"github.com/gotk3/gotk3/pango"
 	"go.uber.org/zap"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sshconfig"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
@@ -38,6 +40,8 @@ type Window struct {
 	tabs       *tabBar
 	layout     *layout
 	activePane *Pane
+	// contextLink is the link the terminal menu was last opened on, if any.
+	contextLink link
 
 	actions       map[string]*glib.SimpleAction
 	sidebarAction *glib.SimpleAction
@@ -143,6 +147,12 @@ func (w *Window) installActions() {
 	add("close-pane", func() { w.ClosePane(w.activePane) })
 	add("copy", func() { w.activePane.term.CopyClipboard() })
 	add("paste", func() { w.activePane.term.PasteClipboard() })
+	add("open-link", func() { w.openLink(w.contextLink.uri) })
+	add("copy-link", func() {
+		if clip, err := gtk.ClipboardGet(gdk.SELECTION_CLIPBOARD); err == nil {
+			clip.SetText(w.contextLink.text)
+		}
+	})
 	add("zoom-in", func() { w.activePane.Zoom(1) })
 	add("zoom-out", func() { w.activePane.Zoom(-1) })
 	add("zoom-normal", func() { w.activePane.Zoom(0) })
@@ -248,6 +258,8 @@ func (w *Window) updateActionState() {
 	p := w.activePane
 	w.actions["copy"].SetEnabled(p.running && p.term.HasSelection())
 	w.actions["paste"].SetEnabled(p.running)
+	w.actions["open-link"].SetEnabled(w.contextLink.uri != "")
+	w.actions["copy-link"].SetEnabled(w.contextLink.text != "")
 	_, s := w.app.lookup(p.SessionKey())
 	hasSession := s != nil
 	w.actions["rename-session"].SetEnabled(hasSession)
@@ -1087,4 +1099,14 @@ func (w *Window) showError(primary, secondary string) {
 	dlg.FormatSecondaryText("%s", secondary)
 	dlg.Run()
 	dlg.Destroy()
+}
+
+// openLink opens a link's URI in the user's default application for it.
+func (w *Window) openLink(uri string) {
+	if uri == "" {
+		return
+	}
+	if err := gtkx.ShowURI(&w.window.Window, uri); err != nil {
+		w.showError("Could not open the link", err.Error())
+	}
 }

@@ -72,13 +72,18 @@ func mainMenu() *glib.MenuModel {
 	)
 }
 
-// terminalMenu is the context menu of a terminal.
-func terminalMenu() *glib.MenuModel {
-	return menuOf(
+// terminalMenu is the context menu of a terminal, with link items when it was opened on
+// a link.
+func terminalMenu(onLink bool) *glib.MenuModel {
+	var sections []*glib.MenuModel
+	if onLink {
+		sections = append(sections, section("Open Link", "win.open-link", "Copy Link", "win.copy-link"))
+	}
+	return menuOf(append(sections,
 		section("Copy", "win.copy", "Paste", "win.paste"),
 		section("Split Right", "win.split-right", "Split Down", "win.split-down"),
 		section("Save Scrollback", "win.save-scrollback", "Save Scrollback As…", "win.save-scrollback-as",
 			"Scrollback Dir…", "win.scrollback-dir"),
 		section("New Session", "win.new-session", "Close Pane", "win.close-pane"),
-	)
+	)...)
 }

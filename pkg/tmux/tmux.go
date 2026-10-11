@@ -7,6 +7,7 @@ package tmux
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"sort"
@@ -83,11 +84,29 @@ func (c *Client) Argv(args ...string) []string {
 
 // AttachArgv returns the command line of a tmux client attached to session. For a remote
 // server it's an interactive ssh, so ssh can prompt in the terminal if it needs to.
-func (c *Client) AttachArgv(session string) []string {
-	if c.SSH != nil {
-		return c.SSH.argv(true, c.tmuxArgv("attach-session", "-t", session))
+// features are terminal features, such as hyperlinks, which tmux should use for the
+// client's terminal though its TERM doesn't say so. tmux before 3.2 has no -T for them:
+// pass none there.
+func (c *Client) AttachArgv(session string, features ...string) []string {
+	args := []string{"attach-session", "-t", session}
+	if len(features) > 0 {
+		args = append([]string{"-T", strings.Join(features, ",")}, args...)
 	}
-	return c.tmuxArgv("attach-session", "-t", session)
+	if c.SSH != nil {
+		return c.SSH.argv(true, c.tmuxArgv(args...))
+	}
+	return c.tmuxArgv(args...)
+}
+
+// SupportsHyperlinks reports whether a tmux version, as ServerVersion returns it, passes
+// OSC 8 hyperlinks through to terminals with the hyperlinks feature, as tmux 3.4 and later
+// do. Unreleased and unrecognised versions don't count.
+func SupportsHyperlinks(version string) bool {
+	var major, minor int
+	if _, err := fmt.Sscanf(strings.TrimSpace(version), "%d.%d", &major, &minor); err != nil {
+		return false
+	}
+	return major > 3 || (major == 3 && minor >= 4) //nolint:mnd // tmux 3.4
 }
 
 // Remote reports whether the server is on another host.

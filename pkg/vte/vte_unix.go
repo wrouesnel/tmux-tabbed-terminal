@@ -24,6 +24,25 @@ static void ttt_set_enable_sixel(VteTerminal *terminal, gboolean enable) {
 	vte_terminal_set_enable_sixel(terminal, enable);
 #endif
 }
+
+// PCRE2 compile options, from pcre2.h, which VTE's headers don't include.
+#define TTT_PCRE2_CASELESS  0x00000008u
+#define TTT_PCRE2_MULTILINE 0x00000400u
+#define TTT_PCRE2_UCP       0x00020000u
+
+// ttt_match_add adds a regex VTE highlights under the pointer, returning its tag, or -1
+// with error set if it doesn't compile.
+static int ttt_match_add(VteTerminal *terminal, const char *pattern, GError **error) {
+	VteRegex *regex = vte_regex_new_for_match(pattern, -1,
+		TTT_PCRE2_MULTILINE | TTT_PCRE2_UCP | TTT_PCRE2_CASELESS, error);
+	if (regex == NULL) {
+		return -1;
+	}
+	int tag = vte_terminal_match_add_regex(terminal, regex, 0);
+	vte_regex_unref(regex);
+	vte_terminal_match_set_cursor_name(terminal, tag, "pointer");
+	return tag;
+}
 */
 import "C"
 
@@ -34,6 +53,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 	"github.com/pkg/errors"
@@ -171,6 +191,42 @@ func SixelSupported() bool {
 // built with it: check SixelSupported.
 func (t *Terminal) SetEnableSixel(enable bool) {
 	C.ttt_set_enable_sixel(t.native(), gbool(enable))
+}
+
+// SetAllowHyperlink sets whether the terminal follows OSC 8 hyperlinks, which programs
+// use to show a label for a URL. Hovering one underlines it.
+func (t *Terminal) SetAllowHyperlink(allow bool) {
+	C.vte_terminal_set_allow_hyperlink(t.native(), gbool(allow))
+}
+
+// AddMatch adds a PCRE2 regex, matched case-insensitively within one line, whose matches
+// are underlined, with a hand pointer, under the mouse. It returns the tag MatchAt reports
+// for it.
+func (t *Terminal) AddMatch(pattern string) (int, error) {
+	cpattern := C.CString(pattern)
+	defer C.free(unsafe.Pointer(cpattern))
+	var gerr *C.GError
+	tag := C.ttt_match_add(t.native(), cpattern, &gerr)
+	if tag < 0 {
+		return 0, errors.Wrapf(takeError(gerr), "regex %q", pattern)
+	}
+	return int(tag), nil
+}
+
+// MatchAt returns the link under a mouse event, preferring a hyperlink to a regex match.
+// ok is false when there's neither.
+func (t *Terminal) MatchAt(ev *gdk.Event) (Match, bool) {
+	cev := (*C.GdkEvent)(unsafe.Pointer(ev.GdkEvent))
+	if uri := C.vte_terminal_hyperlink_check_event(t.native(), cev); uri != nil {
+		defer C.g_free(C.gpointer(uri))
+		return Match{Text: C.GoString(uri), Hyperlink: true}, true
+	}
+	var tag C.int
+	if text := C.vte_terminal_match_check_event(t.native(), cev, &tag); text != nil {
+		defer C.g_free(C.gpointer(text))
+		return Match{Text: C.GoString(text), Tag: int(tag)}, true
+	}
+	return Match{}, false
 }
 
 // SetBoldIsBright sets whether bold text uses the bright palette colors.
