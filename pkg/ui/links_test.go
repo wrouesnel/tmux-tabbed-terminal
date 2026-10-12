@@ -3,6 +3,7 @@ package ui
 import (
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -49,11 +50,49 @@ func TestLinkPatterns(t *testing.T) {
 	}
 }
 
+func TestLinkSpan(t *testing.T) {
+	url := "https://example.com/" + strings.Repeat("a", 50) // 70 cells
+	lines := []string{"$ cat notes.md", "see " + url + " for more", "[文档](a.md)"}
+	_, _, span, ok := linkInLines(lines, 20, 10, 2)
+	if !ok {
+		t.Fatal("no link")
+	}
+	// The URL runs from cell 4 of row 1 to cell 13 of row 4.
+	for _, c := range []struct {
+		col, row int
+		in       bool
+	}{
+		{4, 1, true}, {3, 1, false}, {19, 2, true}, {0, 3, true}, {13, 4, true}, {14, 4, false},
+		{0, 0, false}, {0, 5, false}, {20, 1, false}, {-1, 2, false},
+	} {
+		if got := span.contains(c.col, c.row); got != c.in {
+			t.Errorf("cell %d,%d: got %v", c.col, c.row, got)
+		}
+	}
+	// A span on the screen, where the pane starts at column 30, row 2.
+	span.left, span.top = 30, span.top+2
+	if !span.contains(34, 3) || span.contains(4, 1) {
+		t.Error("span not moved with its pane")
+	}
+	// Wide characters take two cells: the markdown link is 12 cells, on row 6.
+	if _, _, span, ok = linkInLines(lines, 20, 11, 6); !ok || span.start != 0 || span.end != 12 || span.top != 6 {
+		t.Errorf("wide link: %+v %v", span, ok)
+	}
+	if (cellSpan{}).contains(0, 0) {
+		t.Error("the zero span contains a cell")
+	}
+}
+
 func TestResolveLink(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatal(err)
 	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		t.Fatal(err)
+	}
+	homeNotes := path.Join(filepath.ToSlash(home), "notes.md")
 	cases := []struct {
 		name     string
 		m        vte.Match
@@ -62,35 +101,50 @@ func TestResolveLink(t *testing.T) {
 		remote   bool
 		wantURI  string
 		wantText string
+		wantFile string
 	}{
 		{"url", vte.Match{Text: "https://example.com/a"}, linkURL, "", false,
-			"https://example.com/a", "https://example.com/a"},
+			"https://example.com/a", "https://example.com/a", ""},
 		{"hyperlink", vte.Match{Text: "https://example.com/b", Hyperlink: true}, linkURL, "", true,
-			"https://example.com/b", "https://example.com/b"},
+			"https://example.com/b", "https://example.com/b", ""},
 		{"markdown url", vte.Match{Text: `[a](https://x.org/p "T")`}, linkMarkdown, "/w", true,
-			"https://x.org/p", "https://x.org/p"},
+			"https://x.org/p", "https://x.org/p", ""},
 		{"relative path", vte.Match{Text: "![s](img/a%20b.png)"}, linkMarkdown, "/w/repo", false,
-			"file:///w/repo/img/a%20b.png", "/w/repo/img/a b.png"},
+			"file:///w/repo/img/a%20b.png", "/w/repo/img/a b.png", "/w/repo/img/a b.png"},
 		{"angle brackets", vte.Match{Text: "[f](<docs/my file.md>)"}, linkMarkdown, "/w", false,
-			"file:///w/docs/my%20file.md", "/w/docs/my file.md"},
+			"file:///w/docs/my%20file.md", "/w/docs/my file.md", "/w/docs/my file.md"},
 		{"absolute path", vte.Match{Text: "[f](/etc/hosts#top)"}, linkMarkdown, "", false,
-			"file:///etc/hosts", "/etc/hosts"},
+			"file:///etc/hosts", "/etc/hosts", "/etc/hosts"},
 		{"home path", vte.Match{Text: "[f](~/notes.md)"}, linkMarkdown, "/w", false,
-			"file://" + filepath.Join(home, "notes.md"), filepath.Join(home, "notes.md")},
-		{"remote path", vte.Match{Text: "[f](docs/a.md)"}, linkMarkdown, "/w", true, "", "docs/a.md"},
-		{"no cwd", vte.Match{Text: "[f](docs/a.md)"}, linkMarkdown, "", false, "", "docs/a.md"},
-		{"anchor", vte.Match{Text: "[f](#usage)"}, linkMarkdown, "/w", false, "", "#usage"},
-		{"unsafe scheme", vte.Match{Text: "[x](javascript:alert(1))"}, linkMarkdown, "/w", false, "", "javascript:alert(1)"},
-		{"hyperlink scheme", vte.Match{Text: "vscode://open", Hyperlink: true}, linkURL, "", false, "", "vscode://open"},
+			"file://" + homeNotes, homeNotes, homeNotes},
+		{"remote path", vte.Match{Text: "[f](docs/a.md)"}, linkMarkdown, "/w", true, "", "docs/a.md", "/w/docs/a.md"},
+		{"remote home path", vte.Match{Text: "![i](~/a.png)"}, linkMarkdown, "/w", true, "", "~/a.png", "~/a.png"},
+		{"remote, no cwd", vte.Match{Text: "[f](docs/a.md)"}, linkMarkdown, "", true, "", "docs/a.md", ""},
+		{"no cwd", vte.Match{Text: "[f](docs/a.md)"}, linkMarkdown, "", false, "", "docs/a.md", ""},
+		{"anchor", vte.Match{Text: "[f](#usage)"}, linkMarkdown, "/w", false, "", "#usage", ""},
+		{"unsafe scheme", vte.Match{Text: "[x](javascript:alert(1))"}, linkMarkdown, "/w", false, "", "javascript:alert(1)", ""},
+		{"hyperlink scheme", vte.Match{Text: "vscode://open", Hyperlink: true}, linkURL, "", false, "", "vscode://open", ""},
+		{"file url", vte.Match{Text: "file:///tmp/a.png"}, linkURL, "", false,
+			"file:///tmp/a.png", "file:///tmp/a.png", "/tmp/a.png"},
+		{"ls hyperlink", vte.Match{Text: "file://" + hostname + "/tmp/b.png", Hyperlink: true}, linkURL, "", false,
+			"file://" + hostname + "/tmp/b.png", "file://" + hostname + "/tmp/b.png", "/tmp/b.png"},
+		{"other host's file", vte.Match{Text: "file://elsewhere.invalid/tmp/c.png", Hyperlink: true}, linkURL, "", false,
+			"file://elsewhere.invalid/tmp/c.png", "file://elsewhere.invalid/tmp/c.png", ""},
+		{"remote ls hyperlink", vte.Match{Text: "file://far/tmp/d.png", Hyperlink: true}, linkURL, "", true,
+			"file://far/tmp/d.png", "file://far/tmp/d.png", "/tmp/d.png"},
 	}
 	for _, c := range cases {
-		if runtime.GOOS == "windows" && strings.HasPrefix(c.wantURI, "file:") {
-			// Paths are copied, not opened, until they're translated to Windows paths.
-			c.wantURI, c.wantText = "", markdownDestination(c.m.Text)
+		if runtime.GOOS == "windows" {
+			// Paths are copied, not opened or read, until they're translated to Windows
+			// paths.
+			if !strings.HasPrefix(c.m.Text, "file:") && strings.HasPrefix(c.wantURI, "file:") {
+				c.wantURI, c.wantText = "", markdownDestination(c.m.Text)
+			}
+			c.wantFile = ""
 		}
 		l := resolveLink(c.m, c.kind, c.cwd, c.remote)
-		if l.uri != c.wantURI || l.text != c.wantText {
-			t.Errorf("%s: got %+v, want uri %q text %q", c.name, l, c.wantURI, c.wantText)
+		if l.uri != c.wantURI || l.text != c.wantText || l.file != c.wantFile {
+			t.Errorf("%s: got %+v, want uri %q text %q file %q", c.name, l, c.wantURI, c.wantText, c.wantFile)
 		}
 	}
 }
@@ -124,9 +178,12 @@ func TestLinkInLines(t *testing.T) {
 		{0, 9, "", 0},  // below every line
 	}
 	for _, c := range cases {
-		text, kind, ok := linkInLines(lines, 20, c.col, c.row)
+		text, kind, span, ok := linkInLines(lines, 20, c.col, c.row)
 		if text != c.want || ok != (c.want != "") || (ok && kind != c.kind) {
 			t.Errorf("cell %d,%d: got %q kind %d ok %v, want %q kind %d", c.col, c.row, text, kind, ok, c.want, c.kind)
+		}
+		if ok && !span.contains(c.col, c.row) {
+			t.Errorf("cell %d,%d: not in the link's span %+v", c.col, c.row, span)
 		}
 	}
 }

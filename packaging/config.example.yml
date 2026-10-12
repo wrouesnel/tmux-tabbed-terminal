@@ -56,6 +56,11 @@ clipboard:
   # tmux's set-clipboard option is on.
   from-tmux: true
 
+links:
+  # Show the image a link names, such as ![shot](img/a.png) in markdown, when the pointer
+  # rests on the link. Remote images are read over the host's ssh connection.
+  image-previews: true
+
 behaviour:
   # Create a session when a window opens and there are none.
   create-session-on-start: true

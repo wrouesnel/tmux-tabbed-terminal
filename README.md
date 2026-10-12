@@ -28,6 +28,11 @@ or split the window to watch several sessions side by side.
   in split tmux windows too. Markdown paths are relative to the directory of the pane
   they're in. Paths in remote sessions can only be copied, since the file is on the other
   host. Hyperlinks need tmux 3.4 or later on the session's host.
+* **Image previews.** Rest the pointer on a link to an image file, local or on a remote
+  host, and a preview of it pops up, scaled to fit 360×270 pixels. Remote images are read
+  over the host's ssh connection, and files over 32 MiB are skipped. Images on the web
+  aren't fetched. Turn previews off with `links.image-previews: false` in the
+  configuration file.
 * **Clipboard.** Text copied in tmux lands on the desktop clipboard, from this machine and
   from remote hosts, so it pastes into other applications: each new tmux paste buffer, as
   copy mode makes, and as programs make with OSC 52 when tmux's `set-clipboard` option is

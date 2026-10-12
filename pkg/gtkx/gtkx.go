@@ -8,6 +8,49 @@ package gtkx
 
 static GdkDragContext *to_drag_context(void *p) { return GDK_DRAG_CONTEXT(p); }
 static GtkWindow *to_window(void *p) { return GTK_WINDOW(p); }
+
+// ttt_fit_size scales an image's size down to fit a box, keeping its proportions.
+static void ttt_fit_size(int *w, int *h, const int *box) {
+	double s = MIN(1.0, MIN((double)box[0] / *w, (double)box[1] / *h));
+	*w = MAX(1, (int)(*w * s));
+	*h = MAX(1, (int)(*h * s));
+}
+
+static void ttt_size_prepared(GdkPixbufLoader *loader, int w, int h, gpointer box) {
+	int fw = w, fh = h;
+	ttt_fit_size(&fw, &fh, box);
+	if (fw != w || fh != h) {
+		gdk_pixbuf_loader_set_size(loader, fw, fh);
+	}
+}
+
+// ttt_pixbuf_fit decodes an image, decoding it at a smaller size if it's bigger than the
+// box, and turns it as its EXIF orientation says.
+static GdkPixbuf *ttt_pixbuf_fit(const guchar *data, gsize len, int bw, int bh, GError **err) {
+	int box[2] = {bw, bh};
+	GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+	g_signal_connect(loader, "size-prepared", G_CALLBACK(ttt_size_prepared), box);
+	gboolean ok = gdk_pixbuf_loader_write(loader, data, len, err);
+	if (!gdk_pixbuf_loader_close(loader, ok ? err : NULL)) {
+		ok = FALSE;
+	}
+	GdkPixbuf *pb = NULL;
+	if (ok && gdk_pixbuf_loader_get_pixbuf(loader) != NULL) {
+		pb = gdk_pixbuf_apply_embedded_orientation(gdk_pixbuf_loader_get_pixbuf(loader));
+	}
+	g_object_unref(loader);
+	if (pb != NULL) {
+		// Turning it may have swapped its width and height.
+		int w = gdk_pixbuf_get_width(pb), h = gdk_pixbuf_get_height(pb);
+		ttt_fit_size(&w, &h, box);
+		if (w != gdk_pixbuf_get_width(pb) || h != gdk_pixbuf_get_height(pb)) {
+			GdkPixbuf *scaled = gdk_pixbuf_scale_simple(pb, w, h, GDK_INTERP_BILINEAR);
+			g_object_unref(pb);
+			pb = scaled;
+		}
+	}
+	return pb;
+}
 */
 import "C"
 
@@ -71,4 +114,26 @@ func ShowURI(window *gtk.Window, uri string) error {
 		return errors.New(C.GoString(gerr.message))
 	}
 	return nil
+}
+
+// PixbufFit decodes an image, scaled down to fit width by height if it's bigger, keeping
+// its proportions, and turned as its EXIF orientation says. Being free of widgets, it
+// may run off the main thread.
+func PixbufFit(data []byte, width, height int) (*gdk.Pixbuf, error) {
+	if len(data) == 0 {
+		return nil, errors.New("no image data")
+	}
+	var gerr *C.GError
+	pb := C.ttt_pixbuf_fit((*C.guchar)(unsafe.Pointer(&data[0])), C.gsize(len(data)), C.int(width), C.int(height), &gerr)
+	if gerr != nil {
+		defer C.g_error_free(gerr)
+		if pb != nil {
+			C.g_object_unref(C.gpointer(pb))
+		}
+		return nil, errors.New(C.GoString(gerr.message))
+	}
+	if pb == nil {
+		return nil, errors.New("not an image")
+	}
+	return &gdk.Pixbuf{Object: glib.Take(unsafe.Pointer(pb))}, nil
 }

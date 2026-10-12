@@ -49,6 +49,15 @@ type Pane struct {
 	term        *vte.Terminal
 	// linkTags are the kinds of the terminal's link patterns, by tag.
 	linkTags map[int]linkKind
+	// preview shows the image of the link under the pointer, if there is one. hoverText is
+	// the terminal's match under the pointer, hoverSpan where tmux said the link is, and
+	// hoverTimer waits for the pointer to rest. hoverGen increases whenever the pointer
+	// leaves a link, so a preview on the way for it is dropped.
+	preview    *gtk.Popover
+	hoverText  string
+	hoverSpan  cellSpan
+	hoverTimer glib.SourceHandle
+	hoverGen   int
 	// dropZone highlights where a dragged session would land.
 	dropZone *gtk.Box
 	// scrollbar shows where the view is in tmux's history, and scrolls it when dragged.
@@ -159,10 +168,24 @@ func newPane(w *Window) *Pane {
 	// Before VTE's own handler, which would otherwise give the click to tmux whenever its
 	// mouse option is on, and tmux's menu can't paste the clipboard.
 	p.term.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		p.hidePreview()
 		return p.onButtonPress(ev)
+	})
+	p.term.Connect("motion-notify-event", func(_ interface{}, ev *gdk.Event) bool {
+		p.onMotion(ev)
+		return false
+	})
+	p.term.Connect("leave-notify-event", func() bool {
+		p.hidePreview()
+		return false
+	})
+	p.term.Connect("key-press-event", func() bool {
+		p.hidePreview()
+		return false
 	})
 
 	p.term.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
+		p.hidePreview()
 		return p.onScroll(gdk.EventScrollNewFromEvent(ev))
 	})
 
@@ -307,6 +330,7 @@ func (p *Pane) Focus() {
 // one is replaced: its tty is on the other host. The ssh master connection makes that
 // quick too.
 func (p *Pane) Show(key string) {
+	p.hidePreview()
 	hostName, id := splitKey(key)
 	if p.running && p.SessionKey() == key {
 		return
@@ -405,6 +429,7 @@ func (p *Pane) exited(generation int, err error) {
 	}
 	p.win.app.log.Debug("tmux client exited", zap.String("session", p.sessionID), zap.Error(err))
 	p.running, p.tty, p.cmd = false, "", nil
+	p.hidePreview()
 	p.win.paneExited(p)
 }
 
@@ -432,6 +457,7 @@ func (p *Pane) detach() {
 // close hangs up the pane's client. The session keeps running.
 func (p *Pane) close() {
 	p.closed = true
+	p.hidePreview()
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Signal(syscall.SIGHUP)
 	}
@@ -507,6 +533,7 @@ type linkResult struct {
 	text   string
 	kind   linkKind
 	dir    string
+	span   cellSpan
 	found  bool
 	useVTE bool
 }
@@ -522,12 +549,15 @@ type linkResult struct {
 // instead.
 func (p *Pane) withLinkAt(event *gdk.Event, then func(l link, ok bool)) bool {
 	m, matched := p.term.MatchAt(event)
+	ev := gdk.EventButtonNewFromEvent(event)
+	return p.linkAt(m, matched, ev.X(), ev.Y(), then)
+}
+
+// linkAt is withLinkAt for the point x, y of the terminal, where it found the match m, if
+// matched says it did.
+func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link, ok bool)) bool {
 	remote := p.hostName != LocalHost
-	h, s := p.win.app.lookup(p.SessionKey())
-	var aw *tmux.Window
-	if s != nil {
-		aw = s.ActiveWindow()
-	}
+	h, aw, readLines := p.readsPaneLines(m)
 	fromVTE := func() {
 		if !matched {
 			then(link{}, false)
@@ -539,9 +569,7 @@ func (p *Pane) withLinkAt(event *gdk.Event, then func(l link, ok bool)) bool {
 		}
 		then(resolveLink(m, p.linkTags[m.Tag], dir, remote), true)
 	}
-	cols, _ := p.term.Size()
-	if !p.running || m.Hyperlink || aw == nil || aw.InMode || (aw.Panes <= 1 && aw.Width == cols) ||
-		h.version == "" || tmux.CaptureCrashes(h.version) {
+	if !readLines {
 		if !matched {
 			return false
 		}
@@ -549,8 +577,7 @@ func (p *Pane) withLinkAt(event *gdk.Event, then func(l link, ok bool)) bool {
 		return true
 	}
 
-	ev := gdk.EventButtonNewFromEvent(event)
-	col, row := p.term.CellAt(ev.X(), ev.Y())
+	col, row := p.term.CellAt(x, y)
 	window, generation := aw.ID, p.generation
 	runAsync(p.win.app, func(ctx context.Context) (linkResult, error) {
 		layout, err := h.client.WindowLayout(ctx, window)
@@ -568,8 +595,10 @@ func (p *Pane) withLinkAt(event *gdk.Event, then func(l link, ok bool)) bool {
 		if err != nil {
 			return linkResult{}, err
 		}
-		text, kind, found := linkInLines(lines, pane.Width, paneCol, paneRow)
-		return linkResult{text: text, kind: kind, dir: pane.Path, found: found}, nil
+		text, kind, span, found := linkInLines(lines, pane.Width, paneCol, paneRow)
+		// From the pane's cells to the screen's.
+		span.left, span.top = pane.Left, span.top+pane.Top+layout.Top
+		return linkResult{text: text, kind: kind, dir: pane.Path, span: span, found: found}, nil
 	}, func(r linkResult, err error) {
 		if p.closed || generation != p.generation {
 			return
@@ -583,10 +612,29 @@ func (p *Pane) withLinkAt(event *gdk.Event, then func(l link, ok bool)) bool {
 		case !r.found:
 			then(link{}, false)
 		default:
-			then(resolveLink(vte.Match{Text: r.text}, r.kind, r.dir, remote), true)
+			l := resolveLink(vte.Match{Text: r.text}, r.kind, r.dir, remote)
+			l.span = r.span
+			then(l, true)
 		}
 	})
 	return true
+}
+
+// readsPaneLines reports whether links are looked for in tmux's copy of the pane's lines,
+// rather than in what the terminal shows, for a point where the terminal found the match
+// m, if any, and returns the host and window to ask for them.
+func (p *Pane) readsPaneLines(m vte.Match) (*Host, *tmux.Window, bool) {
+	h, s := p.win.app.lookup(p.SessionKey())
+	var aw *tmux.Window
+	if s != nil {
+		aw = s.ActiveWindow()
+	}
+	cols, _ := p.term.Size()
+	if !p.running || m.Hyperlink || aw == nil || aw.InMode || (aw.Panes <= 1 && aw.Width == cols) ||
+		h.version == "" || tmux.CaptureCrashes(h.version) {
+		return h, aw, false
+	}
+	return h, aw, true
 }
 
 // programWantsMouse reports whether the program in the pane's active tmux pane has asked

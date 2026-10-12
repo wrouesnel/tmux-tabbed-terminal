@@ -14,6 +14,7 @@ type Config struct {
 	Sidebar    SidebarConfig    `yaml:"sidebar"`
 	TabBar     TabBarConfig     `yaml:"tab-bar"`
 	Clipboard  ClipboardConfig  `yaml:"clipboard"`
+	Links      LinksConfig      `yaml:"links"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
 	// Hosts are remote hosts whose sessions are listed, besides those added in the UI.
 	Hosts []HostConfig `yaml:"hosts"`
@@ -97,6 +98,13 @@ type ClipboardConfig struct {
 	FromTmux bool `yaml:"from-tmux"`
 }
 
+// LinksConfig sets what links in terminals do.
+type LinksConfig struct {
+	// ImagePreviews shows the image a link names, on this machine or a remote host, when
+	// the pointer rests on the link.
+	ImagePreviews bool `yaml:"image-previews"`
+}
+
 // BehaviourConfig sets what the application does on its own.
 type BehaviourConfig struct {
 	// CreateSessionOnStart creates a session when a window opens and there are none.
@@ -142,6 +150,9 @@ func DefaultConfig() Config {
 		},
 		Clipboard: ClipboardConfig{
 			FromTmux: true,
+		},
+		Links: LinksConfig{
+			ImagePreviews: true,
 		},
 		Behaviour: BehaviourConfig{
 			CreateSessionOnStart: true,

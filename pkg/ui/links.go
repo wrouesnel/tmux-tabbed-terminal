@@ -73,20 +73,43 @@ func runeCells(r rune) int {
 	return 1
 }
 
+// cellSpan is the cells a link covers on the screen: from offset start to end of the
+// rows from row top, each width cells wide from column left.
+type cellSpan struct {
+	left, top, width int
+	start, end       int
+}
+
+// contains reports whether the span covers a cell. The zero span covers none.
+func (s cellSpan) contains(col, row int) bool {
+	col, row = col-s.left, row-s.top
+	if col < 0 || col >= s.width || row < 0 {
+		return false
+	}
+	i := row*s.width + col
+	return i >= s.start && i < s.end
+}
+
+// cellsOf is how many cells a string takes on a terminal.
+func cellsOf(text string) int {
+	cells := 0
+	for _, r := range text {
+		cells += runeCells(r)
+	}
+	return cells
+}
+
 // linkInLines finds the link at a cell of a pane, given the pane's lines as tmux's
 // capture-pane -J returns them, so a line takes as many rows of the pane's width as it
-// needs. It returns the link's text and the kind of pattern it matched.
-func linkInLines(lines []string, paneWidth, col, row int) (string, linkKind, bool) {
+// needs. It returns the link's text, the kind of pattern it matched and the cells of the
+// pane it covers.
+func linkInLines(lines []string, paneWidth, col, row int) (string, linkKind, cellSpan, bool) {
 	if paneWidth <= 0 {
-		return "", 0, false
+		return "", 0, cellSpan{}, false
 	}
 	top := 0
 	for _, line := range lines {
-		cells := 0
-		for _, r := range line {
-			cells += runeCells(r)
-		}
-		rows := max(1, (cells+paneWidth-1)/paneWidth)
+		rows := max(1, (cellsOf(line)+paneWidth-1)/paneWidth)
 		if row >= top+rows {
 			top += rows
 			continue
@@ -103,18 +126,19 @@ func linkInLines(lines []string, paneWidth, col, row int) (string, linkKind, boo
 			}
 		}
 		if at < 0 {
-			return "", 0, false
+			return "", 0, cellSpan{}, false
 		}
 		for i, re := range linkRegexps {
 			for _, m := range re.FindAllStringIndex(line, -1) {
 				if m[0] <= at && at < m[1] {
-					return line[m[0]:m[1]], linkPatterns[i].kind, true
+					span := cellSpan{top: top, width: paneWidth, start: cellsOf(line[:m[0]]), end: cellsOf(line[:m[1]])}
+					return line[m[0]:m[1]], linkPatterns[i].kind, span, true
 				}
 			}
 		}
-		return "", 0, false
+		return "", 0, cellSpan{}, false
 	}
-	return "", 0, false
+	return "", 0, cellSpan{}, false
 }
 
 // linkSchemes are the URI schemes links may open. Others, such as javascript:, are only
@@ -124,10 +148,14 @@ func linkInLines(lines []string, paneWidth, col, row int) (string, linkKind, boo
 var linkSchemes = map[string]bool{"http": true, "https": true, "ftp": true, "mailto": true, "file": true}
 
 // link is a link in a terminal: the URI it opens, or "" if it can't be opened from here,
-// and the text Copy Link copies.
+// the text Copy Link copies, and the path of the file it names on the session's host, or
+// "". A path on another host may start with ~/, for the home directory there. span is
+// where it is on the screen, when tmux was asked, as it is in split windows.
 type link struct {
 	uri  string
 	text string
+	file string
+	span cellSpan
 }
 
 // markdownDestination returns the destination of a markdown link, such as a.png in
@@ -151,9 +179,10 @@ func markdownDestination(text string) string {
 
 // resolveLink returns the link a terminal match is. Markdown destinations without a
 // scheme are paths, relative to cwd, the directory of the program which printed them.
-// remote says that's on another host, where a path can't be opened from here. The paths
-// are tmux's, so POSIX ones on every platform: on Windows, those of MSYS2 or Cygwin,
-// which aren't opened until they can be translated to Windows paths.
+// remote says that's on another host, where a path can't be opened from here, though the
+// file can still be read through the host's connection. The paths are tmux's, so POSIX
+// ones on every platform: on Windows, those of MSYS2 or Cygwin, which aren't used until
+// they can be translated to Windows paths.
 func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 	dest := m.Text
 	if !m.Hyperlink && kind == linkMarkdown {
@@ -168,13 +197,21 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 		if linkSchemes[strings.ToLower(u.Scheme)] {
 			l.uri = dest
 		}
+		// ls --hyperlink names the host the file is on.
+		if strings.EqualFold(u.Scheme, "file") && runtime.GOOS != "windows" && (remote || isThisHost(u.Host)) {
+			l.file = u.Path
+		}
 		return l
 	}
-	if remote || runtime.GOOS == "windows" || u.Path == "" || u.Host != "" {
+	if runtime.GOOS == "windows" || u.Path == "" || u.Host != "" {
 		return l
 	}
 	p := u.Path
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {
+		if remote {
+			l.file = p
+			return l
+		}
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return l
@@ -186,9 +223,22 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 		}
 		p = path.Join(cwd, p)
 	}
+	l.file = p
+	if remote {
+		return l
+	}
 	l.uri = (&url.URL{Scheme: "file", Path: p}).String()
 	l.text = p
 	return l
+}
+
+// isThisHost reports whether a file URI's host is this machine.
+func isThisHost(host string) bool {
+	if host == "" || strings.EqualFold(host, "localhost") {
+		return true
+	}
+	name, err := os.Hostname()
+	return err == nil && strings.EqualFold(host, name)
 }
 
 // missingFile returns the path of a file:// URI on this host whose file doesn't exist.
