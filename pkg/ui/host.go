@@ -67,6 +67,10 @@ type Host struct {
 	version       string
 	features      []string
 	featuresKnown bool
+	// lastBuffer is the newest paste buffer seen, once buffersKnown says a snapshot has
+	// been read, for copying new ones to the clipboard.
+	lastBuffer   *tmux.Buffer
+	buffersKnown bool
 
 	kick   chan struct{}
 	cancel context.CancelFunc

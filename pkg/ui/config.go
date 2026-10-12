@@ -13,6 +13,7 @@ type Config struct {
 	Activity   ActivityConfig   `yaml:"activity"`
 	Sidebar    SidebarConfig    `yaml:"sidebar"`
 	TabBar     TabBarConfig     `yaml:"tab-bar"`
+	Clipboard  ClipboardConfig  `yaml:"clipboard"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
 	// Hosts are remote hosts whose sessions are listed, besides those added in the UI.
 	Hosts []HostConfig `yaml:"hosts"`
@@ -88,6 +89,14 @@ type TabBarConfig struct {
 	Position string `yaml:"position"`
 }
 
+// ClipboardConfig sets how the desktop clipboard follows tmux.
+type ClipboardConfig struct {
+	// FromTmux puts text copied in tmux, on any host, on the desktop clipboard: each new
+	// paste buffer, as copy mode makes, and as programs make with OSC 52 when tmux's
+	// set-clipboard option is on.
+	FromTmux bool `yaml:"from-tmux"`
+}
+
 // BehaviourConfig sets what the application does on its own.
 type BehaviourConfig struct {
 	// CreateSessionOnStart creates a session when a window opens and there are none.
@@ -130,6 +139,9 @@ func DefaultConfig() Config {
 		},
 		TabBar: TabBarConfig{
 			Position: "top",
+		},
+		Clipboard: ClipboardConfig{
+			FromTmux: true,
 		},
 		Behaviour: BehaviourConfig{
 			CreateSessionOnStart: true,

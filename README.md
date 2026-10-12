@@ -28,6 +28,11 @@ or split the window to watch several sessions side by side.
   in split tmux windows too. Markdown paths are relative to the directory of the pane
   they're in. Paths in remote sessions can only be copied, since the file is on the other
   host. Hyperlinks need tmux 3.4 or later on the session's host.
+* **Clipboard.** Text copied in tmux lands on the desktop clipboard, from this machine and
+  from remote hosts, so it pastes into other applications: each new tmux paste buffer, as
+  copy mode makes, and as programs make with OSC 52 when tmux's `set-clipboard` option is
+  on. Buffers that already exist when the app starts are left alone. Turn it off with
+  `clipboard.from-tmux: false` in the configuration file.
 * **Saving scrollback.** Right-click a session, or a terminal, and choose Save Scrollback
   to save the whole tmux history of its current pane as text, under
   `~/.local/share/tmux-tabbed-terminal/scrollback/<host>/<session>/<date-time>.txt`, or

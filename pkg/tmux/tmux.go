@@ -238,6 +238,31 @@ type ClientInfo struct {
 type Snapshot struct {
 	Sessions []Session
 	Clients  []ClientInfo
+	// Buffer is the newest paste buffer, or nil if there are none.
+	Buffer *Buffer
+}
+
+// Buffer is a tmux paste buffer, as copy mode makes.
+type Buffer struct {
+	Name string
+	// Created is when the buffer was made. tmux before 3.1 doesn't say: it's zero there.
+	Created time.Time
+	// Size is the buffer's length in bytes.
+	Size int
+}
+
+// NewerThan reports whether b was made after old: later, or in the same second under
+// another name. Without creation times, as before tmux 3.1, any other name is newer.
+func (b *Buffer) NewerThan(old *Buffer) bool {
+	switch {
+	case old == nil:
+		return true
+	case b.Created.After(old.Created):
+		return true
+	case b.Created.Before(old.Created):
+		return false
+	}
+	return b.Name != old.Name
 }
 
 // Session returns the session with the given ID, or nil.
@@ -276,6 +301,7 @@ var (
 		"#{pane_title}",
 	}, fieldSep)
 	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}"}, fieldSep)
+	bufferFormat = strings.Join([]string{"B", "#{buffer_name}", "#{buffer_created}", "#{buffer_size}"}, fieldSep)
 )
 
 // Snapshot reads every session, window and client on the server. A server which isn't
@@ -284,7 +310,9 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 	out, err := c.run(ctx,
 		"list-sessions", "-F", sessionFormat, ";",
 		"list-windows", "-a", "-F", windowFormat, ";",
-		"list-clients", "-F", clientFormat)
+		"list-clients", "-F", clientFormat, ";",
+		// Newest first.
+		"list-buffers", "-F", bufferFormat)
 	if err != nil {
 		if isNoServerError(err.Error()) {
 			return &Snapshot{}, nil
@@ -355,6 +383,13 @@ func ParseSnapshot(out string) *Snapshot {
 				continue
 			}
 			snap.Clients = append(snap.Clients, ClientInfo{TTY: fields[1], SessionID: fields[2]})
+		case "B":
+			// Buffers are listed newest first: keep the first.
+			if len(fields) < 4 || snap.Buffer != nil {
+				continue
+			}
+			size, _ := strconv.Atoi(fields[3])
+			snap.Buffer = &Buffer{Name: fields[1], Created: parseUnix(fields[2]), Size: size}
 		}
 	}
 
@@ -407,6 +442,11 @@ func (c *Client) RenameSession(ctx context.Context, session string, name string)
 func (c *Client) SwitchClient(ctx context.Context, tty string, session string) error {
 	_, err := c.run(ctx, "switch-client", "-c", tty, "-t", session)
 	return err
+}
+
+// ShowBuffer returns the contents of a paste buffer.
+func (c *Client) ShowBuffer(ctx context.Context, name string) (string, error) {
+	return c.run(ctx, "show-buffer", "-b", name)
 }
 
 // NewWindow creates a window at the end of a session, makes it the session's current

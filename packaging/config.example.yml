@@ -50,6 +50,12 @@ tab-bar:
   # the terminals. Preferences changes it, and that choice is remembered.
   position: top
 
+clipboard:
+  # Put text copied in tmux on the desktop clipboard, from this machine and remote hosts:
+  # each new paste buffer, as copy mode makes, and as programs make with OSC 52 when
+  # tmux's set-clipboard option is on.
+  from-tmux: true
+
 behaviour:
   # Create a session when a window opens and there are none.
   create-session-on-start: true

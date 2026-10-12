@@ -619,6 +619,9 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 		snap = &tmux.Snapshot{}
 	}
 	h.snapshot = snap
+	if err == nil {
+		a.syncClipboard(h, snap.Buffer)
+	}
 
 	// A local client may have switched session inside tmux.
 	if h.Local() {

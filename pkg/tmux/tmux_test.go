@@ -218,6 +218,8 @@ func TestParseSnapshot(t *testing.T) {
 		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t%4\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t%9\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"C\t/dev/pts/4\t$1\n"+
+		"B\tbuffer2\t400\t11\n"+
+		"B\tbuffer1\t350\t5\n"+
 		"garbage\n", "\t", "^|^")
 	snap := tmux.ParseSnapshot(out)
 	if len(snap.Sessions) != 2 {
@@ -253,6 +255,77 @@ func TestParseSnapshot(t *testing.T) {
 	}
 	if snap.Session("$2").Activity() != (time.Time{}) {
 		t.Error("session without windows should have no activity")
+	}
+	if b := snap.Buffer; b == nil || b.Name != "buffer2" || b.Created.Unix() != 400 || b.Size != 11 {
+		t.Errorf("newest buffer: got %+v, want buffer2", b)
+	}
+}
+
+func TestBufferNewerThan(t *testing.T) {
+	at := func(name string, secs int64) *tmux.Buffer {
+		return &tmux.Buffer{Name: name, Created: time.Unix(secs, 0)}
+	}
+	old := at("buffer1", 100)
+	for _, tc := range []struct {
+		name string
+		b    *tmux.Buffer
+		want bool
+	}{
+		{"later", at("buffer2", 101), true},
+		{"same second, another name", at("buffer2", 100), true},
+		{"the same buffer", at("buffer1", 100), false},
+		// The newest buffer was deleted, leaving an older one first.
+		{"earlier", at("buffer0", 99), false},
+		{"no creation times, another name", &tmux.Buffer{Name: "buffer2"}, true},
+	} {
+		prev := old
+		if tc.b.Created.IsZero() {
+			prev = &tmux.Buffer{Name: "buffer1"}
+		}
+		if got := tc.b.NewerThan(prev); got != tc.want {
+			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if !old.NewerThan(nil) {
+		t.Error("a buffer isn't newer than none")
+	}
+}
+
+func TestBuffers(t *testing.T) {
+	ctx := context.Background()
+	c := newTestClient(t)
+	if _, err := c.NewSession(ctx, "buffers", t.TempDir()); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+
+	snap, err := c.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap.Buffer != nil {
+		t.Fatalf("new server has a buffer: %+v", snap.Buffer)
+	}
+
+	text := "first line\nsecond ünïcode line\n"
+	for _, s := range []string{"older", text} {
+		argv := c.Argv("set-buffer", "--", s)
+		if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil { //nolint:gosec // test
+			t.Fatalf("set-buffer: %v: %s", err, out)
+		}
+	}
+	snap, err = c.Snapshot(ctx)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if snap.Buffer == nil || snap.Buffer.Size != len(text) {
+		t.Fatalf("newest buffer: got %+v, want one of %d bytes", snap.Buffer, len(text))
+	}
+	got, err := c.ShowBuffer(ctx, snap.Buffer.Name)
+	if err != nil {
+		t.Fatalf("ShowBuffer: %v", err)
+	}
+	if got != text {
+		t.Errorf("contents: got %q, want %q", got, text)
 	}
 }
 
@@ -315,11 +388,25 @@ func TestRemoteThroughSSH(t *testing.T) {
 	if s := snap.Session(id); s == nil || s.Name != "it's remote" || len(s.Windows) != 1 {
 		t.Fatalf("session through ssh: %+v", snap)
 	}
+
+	// A buffer copied on the remote host reads back through ssh unchanged.
+	text := "it's \"$HOME\" `here`\nand a second line\n"
+	argv := local.Argv("set-buffer", "--", text)
+	if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil { //nolint:gosec // test
+		t.Fatalf("set-buffer: %v: %s", err, out)
+	}
+	if snap, err = remote.Snapshot(ctx); err != nil || snap.Buffer == nil {
+		t.Fatalf("buffer through ssh: %+v, %v", snap, err)
+	}
+	if got, err := remote.ShowBuffer(ctx, snap.Buffer.Name); err != nil || got != text {
+		t.Fatalf("ShowBuffer through ssh: %q, %v; want %q", got, err, text)
+	}
+
 	if err := remote.KillSession(ctx, id); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}
 
-	argv := remote.AttachArgv("$7")
+	argv = remote.AttachArgv("$7")
 	if argv[0] != fake || argv[1] != "-t" || argv[len(argv)-1] != "tmux -u -L "+local.SocketName+" attach-session -t '$7'" {
 		t.Fatalf("attach argv: %q", argv)
 	}
