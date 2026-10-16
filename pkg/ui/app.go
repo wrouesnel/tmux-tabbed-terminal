@@ -763,8 +763,13 @@ func (a *App) installActions() {
 		}
 	})
 
-	for action, accels := range accelerators {
-		a.gtkApp.SetAccelsForAction(action, accels)
+	accels, errs := shortcuts(a.cfg.Keyboard.Shortcuts)
+	for _, err := range errs {
+		// The message is the whole story: a stack trace wouldn't help with a typo.
+		a.log.Warn("Ignoring a keyboard shortcut from the configuration", zap.String("problem", err.Error()))
+	}
+	for action, keys := range accels {
+		a.gtkApp.SetAccelsForAction(action, keys)
 	}
 }
 

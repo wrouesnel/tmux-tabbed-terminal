@@ -14,6 +14,7 @@ type Config struct {
 	Sidebar    SidebarConfig    `yaml:"sidebar"`
 	TabBar     TabBarConfig     `yaml:"tab-bar"`
 	Clipboard  ClipboardConfig  `yaml:"clipboard"`
+	Keyboard   KeyboardConfig   `yaml:"keyboard"`
 	Links      LinksConfig      `yaml:"links"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
 	// Hosts are remote hosts whose sessions are listed, besides those added in the UI.
@@ -103,6 +104,16 @@ type LinksConfig struct {
 	// ImagePreviews shows the image a link names, on this machine or a remote host, when
 	// the pointer rests on the link.
 	ImagePreviews bool `yaml:"image-previews"`
+}
+
+// KeyboardConfig sets the keyboard shortcuts.
+type KeyboardConfig struct {
+	// Shortcuts replace the default shortcuts of actions. Keys are action names: those
+	// with default shortcuts by their short name, such as paste or split-right, and any
+	// action by its full name, such as win.save-scrollback. Values are GTK accelerators,
+	// such as "<Control><Shift>v" or "<Shift>Insert". An empty list leaves the action
+	// without a shortcut.
+	Shortcuts map[string][]string `yaml:"shortcuts"`
 }
 
 // BehaviourConfig sets what the application does on its own.

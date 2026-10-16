@@ -1,9 +1,13 @@
 package ui
 
 import (
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/gotk3/gotk3/glib"
+	"github.com/gotk3/gotk3/gtk"
+	"github.com/pkg/errors"
 )
 
 // accelerators are the keyboard shortcuts, by detailed action name. They follow GNOME
@@ -38,6 +42,55 @@ var accelerators = func() map[string][]string {
 	}
 	return accels
 }()
+
+// shortcuts returns the keyboard shortcuts with overrides, from the configuration file,
+// in place of the defaults, and an error for each override which can't be used: an
+// unknown action or an accelerator GTK can't parse. Unusable ones are skipped.
+func shortcuts(overrides map[string][]string) (map[string][]string, []error) {
+	result := make(map[string][]string, len(accelerators))
+	for action, accels := range accelerators {
+		result[action] = accels
+	}
+	names := make([]string, 0, len(overrides))
+	for name := range overrides {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var errs []error
+	for _, name := range names {
+		action, ok := shortcutAction(name)
+		if !ok {
+			errs = append(errs, errors.Errorf("keyboard shortcut for unknown action %q", name))
+			continue
+		}
+		accels := []string{}
+		for _, accel := range overrides[name] {
+			if key, mods := gtk.AcceleratorParse(accel); key == 0 && mods == 0 {
+				errs = append(errs, errors.Errorf("keyboard shortcut %q for %s isn't a GTK accelerator", accel, name))
+				continue
+			}
+			accels = append(accels, accel)
+		}
+		result[action] = accels
+	}
+	return result, errs
+}
+
+// shortcutAction returns the detailed action name of a shortcut's key in the
+// configuration: a full name as it is, or the short name of an action with a default
+// shortcut.
+func shortcutAction(name string) (string, bool) {
+	if strings.HasPrefix(name, "app.") || strings.HasPrefix(name, "win.") {
+		return name, true
+	}
+	for _, prefix := range []string{"win.", "app."} {
+		if _, ok := accelerators[prefix+name]; ok {
+			return prefix + name, true
+		}
+	}
+	return "", false
+}
 
 // section builds a menu section from label and detailed action pairs.
 func section(items ...string) *glib.MenuModel {

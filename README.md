@@ -150,6 +150,19 @@ also in the main menu.
 | Ctrl+Shift+Q | Close window |
 | F11 | Full screen |
 
+The shortcuts can be changed with `keyboard.shortcuts` in the configuration file, by
+action, in GTK's accelerator syntax. For example, to paste with Shift+Insert too:
+
+```yaml
+keyboard:
+  shortcuts:
+    paste: ["<Control><Shift>v", "<Shift>Insert"]
+```
+
+Shortcuts with Ctrl+Shift and a letter are safest: a terminal sends programs the same
+thing for them as for Ctrl and the letter, so nothing is lost. Plain Ctrl+V, for one, is
+better left to programs, which use it to insert a character literally or select a block.
+
 If a pane's client detaches (`prefix d`), the pane offers to reattach. If its session
 ends, the pane closes, or, if it's the only pane, moves on to the most recently active
 session.

@@ -61,6 +61,16 @@ links:
   # rests on the link. Remote images are read over the host's ssh connection.
   image-previews: true
 
+keyboard:
+  # Shortcuts in place of the defaults, by action. Actions with a default shortcut go by
+  # their short name: new-window, preferences, close-window, new-session, close-pane,
+  # copy, paste, split-right, split-down, next-session, prev-session, next-pane,
+  # prev-pane, zoom-in, zoom-out, zoom-normal, show-sidebar, find-session, fullscreen,
+  # rename-session and switch-to-1 to switch-to-9. Any action goes by its full name, such
+  # as win.save-scrollback. Shortcuts are GTK accelerators; an empty list removes them.
+  shortcuts: {}
+  #  paste: ["<Control><Shift>v", "<Shift>Insert"]
+
 behaviour:
   # Create a session when a window opens and there are none.
   create-session-on-start: true
