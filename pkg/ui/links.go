@@ -177,6 +177,17 @@ func markdownDestination(text string) string {
 	return dest
 }
 
+// trimUnbalancedBrackets removes closing square brackets from the end of a URL which no
+// opening one matches. A URL holds square brackets only around an IPv6 host, so these
+// are the text around the link: some programs which make hyperlinks of the URLs they
+// print include the bracket after one written as [https://example.com].
+func trimUnbalancedBrackets(s string) string {
+	for strings.HasSuffix(s, "]") && strings.Count(s, "]") > strings.Count(s, "[") {
+		s = s[:len(s)-1]
+	}
+	return s
+}
+
 // resolveLink returns the link a terminal match is. Markdown destinations without a
 // scheme are paths, relative to cwd, the directory of the program which printed them.
 // remote says that's on another host, where a path can't be opened from here, though the
@@ -185,7 +196,10 @@ func markdownDestination(text string) string {
 // they can be translated to Windows paths.
 func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 	dest := m.Text
-	if !m.Hyperlink && kind == linkMarkdown {
+	switch {
+	case m.Hyperlink:
+		dest = trimUnbalancedBrackets(dest)
+	case kind == linkMarkdown:
 		dest = markdownDestination(m.Text)
 	}
 	l := link{text: dest}

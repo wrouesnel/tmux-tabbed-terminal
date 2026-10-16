@@ -124,6 +124,13 @@ func TestResolveLink(t *testing.T) {
 		{"anchor", vte.Match{Text: "[f](#usage)"}, linkMarkdown, "/w", false, "", "#usage", ""},
 		{"unsafe scheme", vte.Match{Text: "[x](javascript:alert(1))"}, linkMarkdown, "/w", false, "", "javascript:alert(1)", ""},
 		{"hyperlink scheme", vte.Match{Text: "vscode://open", Hyperlink: true}, linkURL, "", false, "", "vscode://open", ""},
+		// A hyperlink made of a URL written as [https://...], bracket and all.
+		{"hyperlink with a closing bracket", vte.Match{Text: "https://ghe.example.com/o/r/pull/125194]", Hyperlink: true},
+			linkURL, "", false, "https://ghe.example.com/o/r/pull/125194", "https://ghe.example.com/o/r/pull/125194", ""},
+		{"hyperlink to an IPv6 host", vte.Match{Text: "http://[::1]:8080/a", Hyperlink: true}, linkURL, "", false,
+			"http://[::1]:8080/a", "http://[::1]:8080/a", ""},
+		{"hyperlink to an IPv6 host, bracketed", vte.Match{Text: "http://[::1]]", Hyperlink: true}, linkURL, "", false,
+			"http://[::1]", "http://[::1]", ""},
 		{"file url", vte.Match{Text: "file:///tmp/a.png"}, linkURL, "", false,
 			"file:///tmp/a.png", "file:///tmp/a.png", "/tmp/a.png"},
 		{"ls hyperlink", vte.Match{Text: "file://" + hostname + "/tmp/b.png", Hyperlink: true}, linkURL, "", false,
@@ -145,6 +152,16 @@ func TestResolveLink(t *testing.T) {
 		l := resolveLink(c.m, c.kind, c.cwd, c.remote)
 		if l.uri != c.wantURI || l.text != c.wantText || l.file != c.wantFile {
 			t.Errorf("%s: got %+v, want uri %q text %q file %q", c.name, l, c.wantURI, c.wantText, c.wantFile)
+		}
+	}
+}
+
+func TestLinkPatternsSkipBrackets(t *testing.T) {
+	const url = "https://ghe.example.com/o/r/pull/125194"
+	for _, line := range []string{"[" + url + "]", "see [" + url + "] here", "(" + url + ")."} {
+		text, kind, _, ok := linkInLines([]string{line}, 200, 10, 0) //nolint:mnd
+		if !ok || kind != linkURL || text != url {
+			t.Errorf("%q: got %q, %v, %v; want %q", line, text, kind, ok, url)
 		}
 	}
 }
