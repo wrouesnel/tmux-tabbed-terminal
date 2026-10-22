@@ -36,12 +36,16 @@ type Window struct {
 	outer   *gtk.Paned
 	sidebar *sidebar
 	// content is the terminal side of the window: the tab bar over the panes.
-	content    *gtk.Box
+	content *gtk.Box
+	// main is the content with the download toast over it.
+	main       *gtk.Overlay
 	tabs       *tabBar
 	layout     *layout
 	activePane *Pane
 	// contextLink is the link the terminal menu was last opened on, if any.
 	contextLink link
+	// downloads tells of finished downloads.
+	downloads *downloadBar
 
 	actions       map[string]*glib.SimpleAction
 	sidebarAction *glib.SimpleAction
@@ -72,6 +76,12 @@ func newWindow(app *App) *Window {
 	w.content, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	w.content.PackStart(w.tabs.root, false, false, 0)
 	w.content.PackStart(w.layout.area, true, true, 0)
+	// The download toast floats over the content, so that showing it doesn't move or
+	// resize the terminals.
+	w.downloads = newDownloadBar(w)
+	w.main, _ = gtk.OverlayNew()
+	w.main.Add(w.content)
+	w.main.AddOverlay(w.downloads.bar)
 	w.placeTabs()
 
 	w.outer, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
@@ -148,6 +158,7 @@ func (w *Window) installActions() {
 	add("copy", func() { w.activePane.term.CopyClipboard() })
 	add("paste", func() { w.activePane.term.PasteClipboard() })
 	add("open-link", func() { w.openLink(w.contextLink.uri) })
+	add("download-link", func() { w.downloadLink(w.contextLink) })
 	add("copy-link", func() {
 		if clip, err := gtk.ClipboardGet(gdk.SELECTION_CLIPBOARD); err == nil {
 			clip.SetText(w.contextLink.text)
@@ -259,6 +270,7 @@ func (w *Window) updateActionState() {
 	w.actions["copy"].SetEnabled(p.running && p.term.HasSelection())
 	w.actions["paste"].SetEnabled(p.running)
 	w.actions["open-link"].SetEnabled(w.contextLink.uri != "")
+	w.actions["download-link"].SetEnabled(w.contextLink.downloadable())
 	w.actions["copy-link"].SetEnabled(w.contextLink.text != "")
 	_, s := w.app.lookup(p.SessionKey())
 	hasSession := s != nil
@@ -338,15 +350,15 @@ func (w *Window) placeSidebar() {
 	}
 	if parent, err := w.sidebar.root.GetParent(); err == nil && parent != nil {
 		w.outer.Remove(w.sidebar.root)
-		w.outer.Remove(w.content)
+		w.outer.Remove(w.main)
 	}
 	if w.app.sidebarRight {
-		w.outer.Pack1(w.content, true, false)
+		w.outer.Pack1(w.main, true, false)
 		w.outer.Pack2(w.sidebar.root, false, false)
 		w.outer.SetPosition(total - width)
 	} else {
 		w.outer.Pack1(w.sidebar.root, false, false)
-		w.outer.Pack2(w.content, true, false)
+		w.outer.Pack2(w.main, true, false)
 		w.outer.SetPosition(width)
 	}
 }

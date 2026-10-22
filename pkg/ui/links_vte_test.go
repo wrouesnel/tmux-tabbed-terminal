@@ -63,6 +63,9 @@ func TestLinkPatternsInVTE(t *testing.T) {
 			3, 3, "https://ex.com/wrapped", linkURL},
 		{"wrapped parentheses", "(" + wiki + ").", 3, 1, wiki, linkURL},
 		{"long markdown, second row", "[docs](" + longPath + ")", 10, 1, "[docs](" + longPath + ")", linkMarkdown},
+		{"path", "error in ~/src/x.go:12:5: oops", 12, 0, "~/src/x.go:12:5", linkPath},
+		{"path in a url", "see https://example.com/a/b", 22, 0, "https://example.com/a/b", linkURL},
+		{"not a path", "and/or 10/22", 3, 0, "", 0},
 	}
 	for _, c := range cases {
 		win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
@@ -82,6 +85,10 @@ func TestLinkPatternsInVTE(t *testing.T) {
 		pumpGTK(200 * time.Millisecond) //nolint:mnd
 		m, ok := term.MatchAtCell(c.col, c.row)
 		switch {
+		case c.want == "":
+			if ok {
+				t.Errorf("%s: matched %q, want nothing", c.name, m.Text)
+			}
 		case !ok:
 			t.Errorf("%s: no match at %d,%d", c.name, c.col, c.row)
 		case m.Text != c.want || tags[m.Tag] != c.kind:

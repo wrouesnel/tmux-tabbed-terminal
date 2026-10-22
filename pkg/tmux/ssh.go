@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -241,6 +242,36 @@ func (s *SSH) Output(ctx context.Context, remote ...string) (string, error) {
 		s.resetMasters()
 	}
 	return out, err
+}
+
+// Stream runs a command on the destination, starting master connections as needed, and
+// copies its standard output to w as it comes.
+func (s *SSH) Stream(ctx context.Context, w io.Writer, remote ...string) error {
+	if err := s.ensureMaster(ctx); err != nil {
+		return err
+	}
+	argv := s.argv(false, remote)
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // configured ssh
+	stderr := new(strings.Builder)
+	cmd.Stdout, cmd.Stderr = w, stderr
+	if err := cmd.Run(); err != nil {
+		s.resetMasters()
+		return errors.Wrapf(err, "%s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// fileScript writes the file named by its first argument to standard output, refusing
+// anything that isn't a regular file, such as a directory. A name starting with ~/ is in
+// the home directory.
+const fileScript = `case $1 in "~/"*) set -- "$HOME/${1#"~/"}" ;; esac
+[ -f "$1" ] || { echo "$1 isn't a file" >&2; exit 1; }
+exec cat -- "$1"`
+
+// CopyFile copies a file on the destination to w. A name starting with ~/ is in the home
+// directory there.
+func (s *SSH) CopyFile(ctx context.Context, w io.Writer, name string) error {
+	return s.Stream(ctx, w, "sh", "-c", fileScript, "sh", name)
 }
 
 // Name describes the route to the destination, such as "db via bastion".

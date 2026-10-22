@@ -22,12 +22,21 @@ or split the window to watch several sessions side by side.
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones.
 * **Links.** URLs, markdown links and images such as `[docs](docs/README.md)` or
-  `![shot](img/a.png)`, and hyperlinks that programs such as `ls --hyperlink` print are
-  underlined under the pointer. Ctrl+click opens one in its default application, and
-  right-clicking one gives Open Link and Copy Link. Links wrapped onto several lines work,
-  in split tmux windows too. Markdown paths are relative to the directory of the pane
-  they're in. Paths in remote sessions can only be copied, since the file is on the other
-  host. Hyperlinks need tmux 3.4 or later on the session's host.
+  `![shot](img/a.png)`, file paths, and hyperlinks that programs such as `ls --hyperlink`
+  print are underlined under the pointer. Ctrl+click opens one in its default application,
+  and right-clicking one gives Open Link, Download and Copy Link. Links wrapped onto
+  several lines work, in split tmux windows too. Hyperlinks need tmux 3.4 or later on the
+  session's host.
+* **File paths.** Paths that start with `/`, `~/`, `./` or `../`, such as
+  `/var/log/syslog` or `./src/main.go:12:5`, are links. A line and column after the path,
+  as compilers print them, are left out. Relative paths, including markdown ones, are
+  relative to the directory of the pane they're in. Bare relative paths such as
+  `src/main.go` aren't links, since too much ordinary text looks like them.
+* **Downloads.** A path in a remote session names a file on that host: Ctrl+click it, or
+  right-click it and pick Download, to copy it into your Downloads folder over the host's
+  ssh connection. A file already there of the same name is kept, and the new one gets a
+  number. When it's done, a notice at the bottom of the window offers to open the file or
+  its folder. Only files can be downloaded, not directories.
 * **Image previews.** Rest the pointer on a link to an image file, local or on a remote
   host, and a preview of it pops up, scaled to fit 360×270 pixels. Remote images are read
   over the host's ssh connection, and files over 32 MiB are skipped. Images on the web

@@ -24,6 +24,10 @@ const (
 	linkURL linkKind = iota
 	// linkMarkdown is a markdown link or image, such as [label](url) or ![alt](a.png).
 	linkMarkdown
+	// linkPath is a file path: absolute, in the home directory or explicitly relative,
+	// such as /var/log/syslog, ~/notes.md or ./out/a.tar, perhaps with a line and column
+	// after it, as in compilers' messages.
+	linkPath
 )
 
 // Link patterns, matched by VTE with PCRE2. They're also valid Go regexps, so the tests
@@ -47,6 +51,12 @@ var linkPatterns = []struct {
 	// punctuation, which is usually the sentence's. The group repeats once per
 	// parenthesis, not per character.
 	{linkURL, `\b(?:https?|ftp|file)://(?:[^\s()<>"'\[\]{}]*(?:\([^\s()<>]*\)|[^\s()<>"'\[\]{}.,;:!?]))+`},
+	// Paths last, so the path part of a URL opens as the URL. A path starts with /, ~/,
+	// ./ or ../, and not straight after a letter or digit, which \B checks, so that and/or
+	// and 10/22 aren't paths. The first character after the slash is a letter, digit, _,
+	// . or ~, so +/- isn't one either. Like a URL, it doesn't end in punctuation. \x60 is
+	// a backquote.
+	{linkPath, `\B(?:~|\.\.?)?/(?:[\w.~][^\s"'<>|;&(){}\[\]\x60]*[^\s"'<>|;&(){}\[\]\x60.,:;!?]|\w)`},
 }
 
 // linkRegexps are the link patterns compiled with Go's regexps, for finding links in
@@ -150,12 +160,20 @@ var linkSchemes = map[string]bool{"http": true, "https": true, "ftp": true, "mai
 // link is a link in a terminal: the URI it opens, or "" if it can't be opened from here,
 // the text Copy Link copies, and the path of the file it names on the session's host, or
 // "". A path on another host may start with ~/, for the home directory there. span is
-// where it is on the screen, when tmux was asked, as it is in split windows.
+// where it is on the screen, when tmux was asked, as it is in split windows. host is the
+// name of the session's host.
 type link struct {
 	uri  string
 	text string
 	file string
+	host string
 	span cellSpan
+}
+
+// downloadable reports whether the link names a file on another host, which can be
+// copied here.
+func (l link) downloadable() bool {
+	return l.file != "" && l.host != "" && l.host != LocalHost
 }
 
 // markdownDestination returns the destination of a markdown link, such as a.png in
@@ -201,6 +219,13 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 		dest = trimUnbalancedBrackets(dest)
 	case kind == linkMarkdown:
 		dest = markdownDestination(m.Text)
+	case kind == linkPath:
+		// A path is taken as it is, not as a URL, whose ? and # it may hold.
+		dest = lineSuffix.ReplaceAllString(dest, "")
+		if runtime.GOOS == "windows" {
+			return link{text: dest}
+		}
+		return resolvePath(link{text: dest}, dest, cwd, remote)
 	}
 	l := link{text: dest}
 	u, err := url.Parse(dest)
@@ -220,7 +245,19 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 	if runtime.GOOS == "windows" || u.Path == "" || u.Host != "" {
 		return l
 	}
-	p := u.Path
+	return resolvePath(l, u.Path, cwd, remote)
+}
+
+// lineSuffix is the line, and perhaps column, after a path in compilers' messages, such
+// as :12 or :12:5.
+//
+//nolint:gochecknoglobals
+var lineSuffix = regexp.MustCompile(`(?::\d+){1,2}$`)
+
+// resolvePath sets the file, and on this host the URI, of a link to path p, which is
+// relative to cwd unless it's absolute or starts with ~/. On another host, it's left
+// starting with ~/ for the home directory there.
+func resolvePath(l link, p, cwd string, remote bool) link {
 	if rest, ok := strings.CutPrefix(p, "~/"); ok {
 		if remote {
 			l.file = p

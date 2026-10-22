@@ -1,6 +1,7 @@
 package tmux_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -409,6 +410,42 @@ func TestRemoteThroughSSH(t *testing.T) {
 	argv = remote.AttachArgv("$7")
 	if argv[0] != fake || argv[1] != "-t" || argv[len(argv)-1] != "tmux -u -L "+local.SocketName+" attach-session -t '$7'" {
 		t.Fatalf("attach argv: %q", argv)
+	}
+}
+
+// TestCopyFileThroughSSH copies files with awkward names and contents through the fake
+// ssh, and refuses directories.
+func TestCopyFileThroughSSH(t *testing.T) {
+	fake, err := filepath.Abs("testdata/fake-ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssh := &tmux.SSH{Destination: "test-host", Binary: fake, ControlDir: t.TempDir()}
+	dir := t.TempDir()
+	content := []byte("binary\x00\xff and text\n")
+	name := filepath.Join(dir, "it's a $file `x`.bin")
+	if err := os.WriteFile(name, content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	if err := ssh.CopyFile(context.Background(), &out, name); err != nil {
+		t.Fatalf("CopyFile: %v", err)
+	}
+	if !bytes.Equal(out.Bytes(), content) {
+		t.Errorf("copied %q, want %q", out.Bytes(), content)
+	}
+	// ~/ is the home directory, wherever ssh starts.
+	t.Setenv("HOME", dir)
+	out.Reset()
+	if err := ssh.CopyFile(context.Background(), &out, "~/"+filepath.Base(name)); err != nil {
+		t.Fatalf("CopyFile in the home directory: %v", err)
+	}
+	if !bytes.Equal(out.Bytes(), content) {
+		t.Errorf("copied %q from the home directory", out.Bytes())
+	}
+	err = ssh.CopyFile(context.Background(), &out, dir)
+	if err == nil || !strings.Contains(err.Error(), "isn't a file") {
+		t.Errorf("copying a directory: %v", err)
 	}
 }
 

@@ -30,6 +30,12 @@ func TestLinkPatterns(t *testing.T) {
 			[]string{"https://en.wikipedia.org/wiki/Tmux_(software)", "ftp://h/f"}},
 		{linkURL, `"https://q.example/x" <file:///tmp/a.txt>`, []string{"https://q.example/x", "file:///tmp/a.txt"}},
 		{linkURL, "nothttps://x and https:// alone", []string{}},
+		{linkPath, "see /var/log/syslog, ~/notes.md and ./out/a.tar.gz.",
+			[]string{"/var/log/syslog", "~/notes.md", "./out/a.tar.gz"}},
+		{linkPath, "pkg/ui/x.go:12:5: error in ../lib/y.c:3", []string{"../lib/y.c:3"}},
+		{linkPath, `--out=/tmp/x "/q/a b" (/r/c) '/s/d'`, []string{"/tmp/x", "/q/a", "/r/c", "/s/d"}},
+		{linkPath, "and/or 10/22/2026 +/- w/o / // ./ ~/ a /", []string{}},
+		{linkPath, "/a and /usr/lib64/", []string{"/a", "/usr/lib64/"}},
 	}
 	patterns := map[linkKind]*regexp.Regexp{}
 	for _, p := range linkPatterns {
@@ -131,6 +137,14 @@ func TestResolveLink(t *testing.T) {
 			"http://[::1]:8080/a", "http://[::1]:8080/a", ""},
 		{"hyperlink to an IPv6 host, bracketed", vte.Match{Text: "http://[::1]]", Hyperlink: true}, linkURL, "", false,
 			"http://[::1]", "http://[::1]", ""},
+		{"path", vte.Match{Text: "/var/log/a#1?.log"}, linkPath, "/w", false,
+			"file:///var/log/a%231%3F.log", "/var/log/a#1?.log", "/var/log/a#1?.log"},
+		{"relative path with a line", vte.Match{Text: "./src/main.go:12:5"}, linkPath, "/w", false,
+			"file:///w/src/main.go", "/w/src/main.go", "/w/src/main.go"},
+		{"home path", vte.Match{Text: "~/notes.md"}, linkPath, "/w", false,
+			"file://" + homeNotes, homeNotes, homeNotes},
+		{"remote path", vte.Match{Text: "../a.tar:3"}, linkPath, "/w/x", true, "", "../a.tar", "/w/a.tar"},
+		{"remote home path", vte.Match{Text: "~/a.log"}, linkPath, "/w", true, "", "~/a.log", "~/a.log"},
 		{"file url", vte.Match{Text: "file:///tmp/a.png"}, linkURL, "", false,
 			"file:///tmp/a.png", "file:///tmp/a.png", "/tmp/a.png"},
 		{"ls hyperlink", vte.Match{Text: "file://" + hostname + "/tmp/b.png", Hyperlink: true}, linkURL, "", false,

@@ -482,7 +482,8 @@ func (p *Pane) updateHeader(name string, busy bool, showHeader bool) {
 	setClass(p.root, "ttt-active", p.win.activePane == p)
 }
 
-// onButtonPress opens a link on Ctrl+click, and shows the context menu on a right click.
+// onButtonPress opens a link on Ctrl+click, or downloads the file a link on another
+// host names, and shows the context menu on a right click.
 // A program in the pane that has asked for mouse events, such as vim or htop, gets the
 // right click instead, unless Shift is held, as in GNOME Terminal. tmux itself doesn't
 // count: with its mouse option on, the menu still shows.
@@ -493,7 +494,11 @@ func (p *Pane) onButtonPress(event *gdk.Event) bool {
 	}
 	if ev.Button() == gdk.BUTTON_PRIMARY && ev.State()&uint(gdk.CONTROL_MASK) != 0 {
 		return p.withLinkAt(event, func(l link, ok bool) {
-			if ok {
+			switch {
+			case !ok:
+			case l.uri == "" && l.downloadable():
+				p.win.downloadLink(l)
+			default:
 				p.win.openLink(l.uri)
 			}
 		})
@@ -567,7 +572,9 @@ func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link,
 		if aw != nil {
 			dir = aw.Path
 		}
-		then(resolveLink(m, p.linkTags[m.Tag], dir, remote), true)
+		l := resolveLink(m, p.linkTags[m.Tag], dir, remote)
+		l.host = p.hostName
+		then(l, true)
 	}
 	if !readLines {
 		if !matched {
@@ -613,7 +620,7 @@ func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link,
 			then(link{}, false)
 		default:
 			l := resolveLink(vte.Match{Text: r.text}, r.kind, r.dir, remote)
-			l.span = r.span
+			l.span, l.host = r.span, p.hostName
 			then(l, true)
 		}
 	})
