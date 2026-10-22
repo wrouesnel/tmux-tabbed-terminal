@@ -103,6 +103,10 @@ func startProcess(cmd *exec.Cmd, console windows.Handle) (windows.Handle, error)
 	}
 	si := &windows.StartupInfoEx{ProcThreadAttributeList: attrs.List()}
 	si.Cb = uint32(unsafe.Sizeof(*si))
+	// Without this, a child inherits this process's standard handles when they're
+	// redirected, as when started from a shell or a test, and writes there rather than
+	// to the console. With it and no handles, it takes the console's.
+	si.Flags |= windows.STARTF_USESTDHANDLES
 
 	app, err := windows.UTF16PtrFromString(cmd.Path)
 	if err != nil {
