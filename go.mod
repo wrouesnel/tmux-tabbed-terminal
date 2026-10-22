@@ -5,6 +5,7 @@ go 1.24.1
 require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/chigopher/pathlib v0.19.1
+	github.com/danielgatis/go-vte v1.0.11
 	github.com/gotk3/gotk3 v0.6.5-0.20251124190141-e7a9e823ca35
 	github.com/integralist/go-findroot v0.0.0-20160518114804-ac90681525dc
 	github.com/magefile/mage v1.17.2
@@ -22,6 +23,7 @@ require (
 )
 
 require (
+	github.com/danielgatis/go-utf8 v1.0.1 // indirect
 	github.com/dsnet/compress v0.0.1 // indirect
 	github.com/frankban/quicktest v1.14.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect

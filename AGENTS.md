@@ -67,8 +67,11 @@ workflow.
 
 Windows is being ported in steps; it builds but isn't usable yet. Code that only works on
 Unix goes behind build tags, with a Windows counterpart offering the same API:
-`pkg/vte` is `vte_unix.go` (the VTE binding) and `vte_windows.go` (a placeholder until a
-ConPTY terminal replaces it), and pkg/ui uses only the methods both provide. Per-user
+`pkg/vte` is `vte_unix.go` (the VTE binding) and `vte_native.go` (the `pkg/termwidget`
+terminal, on ConPTY), and pkg/ui uses only the methods both provide. Build or test with
+`-tags nativeterm` to use `vte_native.go` on Linux too. `pkg/termwidget` is meant to be
+split out into its own module, so it mustn't import the rest of this repository; its
+README says what it does and doesn't cover. Per-user
 directories come from `userDir` in `pkg/ui/paths.go` (XDG variables, else
 `%LOCALAPPDATA%` on Windows). On Windows, the local host will be the tmux of an installed
 MSYS2 or Cygwin, and without one there is no local host. CI's `windows` job builds in

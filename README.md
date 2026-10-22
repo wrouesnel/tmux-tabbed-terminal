@@ -268,7 +268,9 @@ pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_
 go build -o tmux-tabbed-terminal.exe ./cmd/tmux-tabbed-terminal
 ```
 
-VTE doesn't support Windows, so panes show a placeholder instead of a terminal for now.
+VTE doesn't support Windows, so panes there use the terminal widget in
+[`pkg/termwidget`](pkg/termwidget/README.md), a prototype, on a ConPTY pseudo console.
+Building on Linux with `-tags nativeterm` uses that widget instead of VTE, to try it out.
 State and saved scrollback go under `%LOCALAPPDATA%\tmux-tabbed-terminal`, and the
 configuration under `%APPDATA%\tmux-tabbed-terminal`.
 
@@ -351,7 +353,8 @@ MIT: see [LICENSE](LICENSE). The binary links
 | `cmd/tmux-tabbed-terminal` | `main`. It only calls the entrypoint. |
 | `pkg/entrypoints/tmux_tabbed_terminal` | Command line, logging, configuration loading, and the `run` and `config` commands. |
 | `pkg/ui` | The GTK3 interface: application, windows, sidebar, pane split tree, terminal panes, appearance and menus. |
-| `pkg/vte` | cgo bindings for the parts of VTE the UI uses. |
+| `pkg/vte` | cgo bindings for the parts of VTE the UI uses, or on Windows the same API over `pkg/termwidget`. |
+| `pkg/termwidget` | A prototype terminal widget for where VTE isn't available: an emulator, a pty (ConPTY on Windows) and a GTK drawing area. Kept free of the rest of the repository, to be split out. |
 | `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
 | `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop). |
 | `pkg/sshconfig` | Lists the concrete hosts of an OpenSSH client configuration, following `Include`. |

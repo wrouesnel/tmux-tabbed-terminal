@@ -66,6 +66,9 @@ jobs:
           go-version: stable
       - name: Test
         run: go run mage.go test
+      # The same tests with pkg/termwidget, the Windows terminal, in place of VTE.
+      - name: Test with the native terminal
+        run: go test -count=1 -tags nativeterm ./pkg/termwidget/... ./pkg/ui ./pkg/vte ./pkg/entrypoints/...
       - name: Merge Coverage Files
         run: go run mage.go coverage
       - name: Coveralls
@@ -89,8 +92,8 @@ jobs:
       - name: Build
         run: go run mage.go binary
 
-  # The Windows build, with GTK3 and Go from MSYS2's UCRT64 environment. Terminals are a
-  # placeholder there for now: VTE doesn't support Windows.
+  # The Windows build, with GTK3 and Go from MSYS2's UCRT64 environment. VTE doesn't
+  # support Windows, so terminals there are pkg/termwidget's, on ConPTY.
   windows:
     runs-on: windows-2025
     defaults:
@@ -117,7 +120,8 @@ jobs:
       - name: Test
         run: |
           go test -count=1 -run '^$' ./...
-          go test -count=1 ./pkg/activity ./pkg/sessionlist ./pkg/theme ./pkg/ui ./pkg/vte
+          go test -count=1 ./pkg/activity ./pkg/sessionlist ./pkg/theme ./pkg/ui ./pkg/vte \
+            ./pkg/termwidget/...
 
   # The source RPM, rebuilt in a container of each RHEL release as COPR builds it: from the
   # vendored source tarball, with the release's own Go and libraries.

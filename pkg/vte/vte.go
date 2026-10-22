@@ -5,8 +5,8 @@
 // created by VTE, rather than through vte_terminal_spawn_async, so that Go owns the
 // process and knows its tty.
 //
-// VTE doesn't support Windows, where the widget is a placeholder for now and starting a
-// process fails with ErrUnsupported.
+// VTE doesn't support Windows, where the widget is a termwidget.Terminal instead. Build
+// with the nativeterm tag to use that on Linux too.
 package vte
 
 // Color is an RGBA color with components from 0 to 1.
