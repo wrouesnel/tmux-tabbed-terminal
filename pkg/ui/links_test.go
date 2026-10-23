@@ -155,11 +155,14 @@ func TestResolveLink(t *testing.T) {
 			"file://far/tmp/d.png", "file://far/tmp/d.png", "/tmp/d.png"},
 	}
 	for _, c := range cases {
-		if runtime.GOOS == "windows" {
-			// Paths are copied, not opened or read, until they're translated to Windows
-			// paths.
+		if runtime.GOOS == "windows" && !c.remote {
+			// Local paths are copied, not opened or read, until they're translated to
+			// Windows paths. Paths on other hosts are theirs, so they're unchanged.
 			if !strings.HasPrefix(c.m.Text, "file:") && strings.HasPrefix(c.wantURI, "file:") {
 				c.wantURI, c.wantText = "", markdownDestination(c.m.Text)
+				if c.kind == linkPath {
+					c.wantText = lineSuffix.ReplaceAllString(c.m.Text, "")
+				}
 			}
 			c.wantFile = ""
 		}

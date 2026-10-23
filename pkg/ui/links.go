@@ -222,7 +222,7 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 	case kind == linkPath:
 		// A path is taken as it is, not as a URL, whose ? and # it may hold.
 		dest = lineSuffix.ReplaceAllString(dest, "")
-		if runtime.GOOS == "windows" {
+		if runtime.GOOS == "windows" && !remote {
 			return link{text: dest}
 		}
 		return resolvePath(link{text: dest}, dest, cwd, remote)
@@ -237,12 +237,12 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 			l.uri = dest
 		}
 		// ls --hyperlink names the host the file is on.
-		if strings.EqualFold(u.Scheme, "file") && runtime.GOOS != "windows" && (remote || isThisHost(u.Host)) {
+		if strings.EqualFold(u.Scheme, "file") && (remote || (runtime.GOOS != "windows" && isThisHost(u.Host))) {
 			l.file = u.Path
 		}
 		return l
 	}
-	if runtime.GOOS == "windows" || u.Path == "" || u.Host != "" {
+	if (runtime.GOOS == "windows" && !remote) || u.Path == "" || u.Host != "" {
 		return l
 	}
 	return resolvePath(l, u.Path, cwd, remote)
