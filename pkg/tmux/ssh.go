@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -128,7 +127,7 @@ func (s *SSH) ensureMaster(ctx context.Context) error {
 		return s.ensureRemoteMaster(ctx)
 	}
 
-	if exec.CommandContext(ctx, s.binary(), s.checkArgs()...).Run() == nil { //nolint:gosec // configured ssh
+	if Command(ctx, append([]string{s.binary()}, s.checkArgs()...)).Run() == nil {
 		return nil
 	}
 	if err := os.MkdirAll(filepath.Dir(s.controlPath()), 0o700); err != nil { //nolint:mnd // owner only
@@ -143,7 +142,7 @@ func (s *SSH) ensureMaster(ctx context.Context) error {
 	defer os.Remove(stderr.Name())
 	defer stderr.Close()
 
-	cmd := exec.CommandContext(ctx, s.binary(), s.masterArgs()...) //nolint:gosec // configured ssh
+	cmd := Command(ctx, append([]string{s.binary()}, s.masterArgs()...))
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		msg, _ := os.ReadFile(stderr.Name())
@@ -222,7 +221,7 @@ func (s *SSH) output(ctx context.Context, remote ...string) (string, error) {
 // outputForwarding is output, forwarding the agent into the destination if forward is set.
 func (s *SSH) outputForwarding(ctx context.Context, forward bool, remote ...string) (string, error) {
 	argv := s.chainArgv(false, forward, remote)
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // configured ssh
+	cmd := Command(ctx, argv)
 	stdout, stderr := new(strings.Builder), new(strings.Builder)
 	cmd.Stdout, cmd.Stderr = stdout, stderr
 	if err := cmd.Run(); err != nil {
@@ -251,7 +250,7 @@ func (s *SSH) Stream(ctx context.Context, w io.Writer, remote ...string) error {
 		return err
 	}
 	argv := s.argv(false, remote)
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // configured ssh
+	cmd := Command(ctx, argv)
 	stderr := new(strings.Builder)
 	cmd.Stdout, cmd.Stderr = w, stderr
 	if err := cmd.Run(); err != nil {

@@ -399,7 +399,7 @@ func (p *Pane) attach(key string) {
 	}
 
 	argv := h.client.AttachArgv(id, h.features...)
-	cmd := exec.Command(argv[0], argv[1:]...) //nolint:gosec // the tmux binary is configured by the user
+	cmd := tmux.Command(context.Background(), argv)
 	cmd.Env = terminalEnv(os.Environ())
 	if home, err := os.UserHomeDir(); err == nil {
 		cmd.Dir = home

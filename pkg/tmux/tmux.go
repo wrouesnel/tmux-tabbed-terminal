@@ -9,7 +9,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"sort"
 	"strconv"
 	"strings"
@@ -135,7 +134,7 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 		}
 	}
 	argv := c.Argv(args...)
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // the binary is configured by the user
+	cmd := Command(ctx, argv)
 	cmd.Env = Environ(os.Environ())
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
 	cmd.Stdout = stdout

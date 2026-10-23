@@ -121,7 +121,12 @@ func startProcess(cmd *exec.Cmd, console windows.Handle) (windows.Handle, error)
 	if err != nil {
 		return 0, err
 	}
-	cmdLine, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(cmd.Args))
+	// As os/exec does, a command line the caller made takes the place of one made from Args.
+	line := windows.ComposeCommandLine(cmd.Args)
+	if cmd.SysProcAttr != nil && cmd.SysProcAttr.CmdLine != "" {
+		line = cmd.SysProcAttr.CmdLine
+	}
+	cmdLine, err := windows.UTF16PtrFromString(line)
 	if err != nil {
 		return 0, err
 	}
