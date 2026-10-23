@@ -54,6 +54,87 @@ static void ttt_cell_at(VteTerminal *terminal, double x, double y, glong *col, g
 	*row = (glong)((y - padding.top) / vte_terminal_get_char_height(terminal));
 }
 
+// ttt_hyperlink_at_cell returns the URI of the hyperlink at a cell, which the caller frees,
+// or NULL, by asking about a copy of a button or motion event moved to the cell.
+static char *ttt_hyperlink_at_cell(VteTerminal *terminal, GdkEvent *probe, glong col, glong row) {
+	GtkStyleContext *style = gtk_widget_get_style_context(GTK_WIDGET(terminal));
+	GtkBorder padding;
+	gtk_style_context_get_padding(style, gtk_style_context_get_state(style), &padding);
+	gdouble x = padding.left + (col + 0.5) * vte_terminal_get_char_width(terminal);
+	gdouble y = padding.top + (row + 0.5) * vte_terminal_get_char_height(terminal);
+	switch (probe->type) {
+	case GDK_BUTTON_PRESS:
+	case GDK_2BUTTON_PRESS:
+	case GDK_3BUTTON_PRESS:
+	case GDK_BUTTON_RELEASE:
+		probe->button.x = x;
+		probe->button.y = y;
+		break;
+	case GDK_MOTION_NOTIFY:
+		probe->motion.x = x;
+		probe->motion.y = y;
+		break;
+	default:
+		return NULL;
+	}
+	return vte_terminal_hyperlink_check_event(terminal, probe);
+}
+
+// TTT_MAX_LINK_CELLS bounds the cells a hyperlink's extent is looked for in.
+#define TTT_MAX_LINK_CELLS 4096
+
+// ttt_hyperlink_span finds the cells of the screen, counted in reading order, which carry
+// the hyperlink under a button or motion event, returning FALSE if there's none. VTE has
+// no call for a hyperlink's extent, so it's found by asking about the cells either side,
+// since a hyperlink can wrap onto the next row.
+static gboolean ttt_hyperlink_span(VteTerminal *terminal, GdkEvent *event, glong *start, glong *end) {
+	char *uri = vte_terminal_hyperlink_check_event(terminal, event);
+	if (uri == NULL) {
+		return FALSE;
+	}
+	gdouble x, y;
+	if (!gdk_event_get_coords(event, &x, &y)) {
+		g_free(uri);
+		return FALSE;
+	}
+	glong col, row;
+	ttt_cell_at(terminal, x, y, &col, &row);
+	glong cols = vte_terminal_get_column_count(terminal);
+	glong cells = cols * vte_terminal_get_row_count(terminal);
+	*start = *end = row * cols + col;
+	GdkEvent *probe = gdk_event_copy(event);
+	for (glong i = *start - 1; i >= 0 && *start - i < TTT_MAX_LINK_CELLS; i--) {
+		char *other = ttt_hyperlink_at_cell(terminal, probe, i % cols, i / cols);
+		gboolean same = other != NULL && g_str_equal(other, uri);
+		g_free(other);
+		if (!same) {
+			break;
+		}
+		*start = i;
+	}
+	for (glong i = *end + 1; i < cells && i - *end < TTT_MAX_LINK_CELLS; i++) {
+		char *other = ttt_hyperlink_at_cell(terminal, probe, i % cols, i / cols);
+		gboolean same = other != NULL && g_str_equal(other, uri);
+		g_free(other);
+		if (!same) {
+			break;
+		}
+		*end = i;
+	}
+	gdk_event_free(probe);
+	g_free(uri);
+	return TRUE;
+}
+
+// ttt_displayed_text returns the text of the screen, which the caller frees. VTE's calls
+// for a range of it count rows from a start it doesn't give, and changed whether they
+// include the last column, so text is taken from the whole screen instead.
+static char *ttt_displayed_text(VteTerminal *terminal) {
+	G_GNUC_BEGIN_IGNORE_DEPRECATIONS
+	return vte_terminal_get_text(terminal, NULL, NULL, NULL);
+	G_GNUC_END_IGNORE_DEPRECATIONS
+}
+
 // ttt_match_at_cell returns the regex match at a cell, which the caller frees, or NULL.
 // vte_terminal_check_match_at replaces it, but only from VTE 0.70.
 static char *ttt_match_at_cell(VteTerminal *terminal, glong col, glong row, int *tag) {
@@ -245,6 +326,23 @@ func (t *Terminal) MatchAt(ev *gdk.Event) (Match, bool) {
 		return Match{Text: C.GoString(text), Tag: int(tag)}, true
 	}
 	return Match{}, false
+}
+
+// HyperlinkText returns the text shown for the hyperlink under a button or motion
+// event, as distinct from its URI, which MatchAt returns. ok is false when there's no
+// hyperlink there.
+func (t *Terminal) HyperlinkText(ev *gdk.Event) (string, bool) {
+	var start, end C.glong
+	if C.ttt_hyperlink_span(t.native(), (*C.GdkEvent)(unsafe.Pointer(ev.GdkEvent)), &start, &end) == 0 {
+		return "", false
+	}
+	text := C.ttt_displayed_text(t.native())
+	if text == nil {
+		return "", false
+	}
+	defer C.g_free(C.gpointer(text))
+	cols, _ := t.Size()
+	return CellsText(C.GoString(text), cols, int(start), int(end)), true
 }
 
 // CellAt returns the column and row of the screen at a point in the widget, such as a

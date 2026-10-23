@@ -168,6 +168,9 @@ type link struct {
 	file string
 	host string
 	span cellSpan
+	// shown is the link as the terminal shows it, such as a path with its line number.
+	// A hyperlink's is its URI: the text it's on is the terminal's.
+	shown string
 }
 
 // downloadable reports whether the link names a file on another host, which can be

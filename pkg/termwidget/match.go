@@ -58,6 +58,17 @@ func (t *Terminal) MatchAt(ev *gdk.Event) (Match, bool) {
 	return t.MatchAtCell(col, row)
 }
 
+// HyperlinkText returns the text shown for the hyperlink under a button or motion
+// event, as distinct from its URI, which MatchAt returns: the run of cells around it,
+// in reading order, that carry the same hyperlink. ok is false when there's none.
+func (t *Terminal) HyperlinkText(ev *gdk.Event) (string, bool) {
+	b := gdk.EventButtonNewFromEvent(ev)
+	if !t.matches.allowHyperlink {
+		return "", false
+	}
+	return t.emu.LinkText(t.CellAt(b.X(), b.Y()))
+}
+
 // MatchAtCell returns the AddMatch regex match covering a cell of the screen.
 func (t *Terminal) MatchAtCell(col, row int) (Match, bool) {
 	cols, rows := t.emu.Size()

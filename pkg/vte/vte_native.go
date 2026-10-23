@@ -80,6 +80,10 @@ func (t *Terminal) MatchAt(ev *gdk.Event) (Match, bool) {
 	return Match(m), ok
 }
 
+// HyperlinkText returns the text shown for the hyperlink under a button or motion
+// event, as distinct from its URI, which MatchAt returns.
+func (t *Terminal) HyperlinkText(ev *gdk.Event) (string, bool) { return t.t.HyperlinkText(ev) }
+
 // CellAt returns the column and row of the screen at a point in the widget.
 func (t *Terminal) CellAt(x, y float64) (int, int) { return t.t.CellAt(x, y) }
 

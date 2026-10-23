@@ -224,6 +224,27 @@ func (e *Emulator) Resize(cols, rows int) {
 	e.resetTabs()
 }
 
+// LinkText returns the text shown for the hyperlink at a cell: the run of cells around
+// it, in reading order, that carry the same hyperlink. ok is false when the cell has none.
+func (e *Emulator) LinkText(col, row int) (string, bool) {
+	if col < 0 || row < 0 || col >= e.cols || row >= e.rows {
+		return "", false
+	}
+	id := e.Line(row).Cells[col].Link
+	if e.Link(id) == "" {
+		return "", false
+	}
+	same := func(i int) bool { return e.Line(i / e.cols).Cells[i%e.cols].Link == id }
+	start, end := row*e.cols+col, row*e.cols+col
+	for start > 0 && same(start-1) {
+		start--
+	}
+	for end < e.cols*e.rows-1 && same(end+1) {
+		end++
+	}
+	return e.Text(start%e.cols, start/e.cols, end%e.cols, end/e.cols), true
+}
+
 // Text returns the screen's text from cell (x0, y0) to cell (x1, y1) inclusive, with
 // trailing blanks trimmed from each line and lines joined by newlines, except where the
 // text wrapped.

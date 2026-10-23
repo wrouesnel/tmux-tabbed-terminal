@@ -160,6 +160,30 @@ func TestHyperlinks(t *testing.T) {
 	}
 }
 
+func TestLinkText(t *testing.T) {
+	// A hyperlink wrapping onto the next row, and another to the same URI after it.
+	e := screen(t, 8, 3, "see \x1b]8;;https://x.test/\x1b\\my link\x1b]8;;\x1b\\ or \x1b]8;;https://x.test/\x1b\\it\x1b]8;;\x1b\\")
+	cases := []struct {
+		col, row int
+		want     string
+		ok       bool
+	}{
+		{4, 0, "my link", true},
+		{2, 1, "my link", true},
+		{0, 0, "", false},
+		{4, 1, "", false},
+		{8, 0, "", false},
+	}
+	for _, c := range cases {
+		if got, ok := e.LinkText(c.col, c.row); got != c.want || ok != c.ok {
+			t.Errorf("at %d,%d: %q %v, want %q %v", c.col, c.row, got, ok, c.want, c.ok)
+		}
+	}
+	if got, _ := e.LinkText(7, 1); got != "it" {
+		t.Errorf("second link: %q", got)
+	}
+}
+
 func TestTitle(t *testing.T) {
 	e := screen(t, 5, 1, "\x1b]2;hello; there\x07")
 	if e.Title() != "hello; there" {

@@ -688,6 +688,25 @@ func (w *Window) setStatus(msg string) {
 	w.refresh()
 }
 
+// copyLinkText puts the text of a clicked link on the clipboard, and says so in the
+// title bar.
+func (w *Window) copyLinkText(text string) {
+	clip, err := gtk.ClipboardGet(gdk.SELECTION_CLIPBOARD)
+	if err != nil {
+		w.app.log.Warn("Could not get the clipboard", zap.Error(err))
+		return
+	}
+	clip.SetText(text)
+	shown := []rune(text)
+	if len(shown) > copiedMaxChars {
+		shown = append(shown[:copiedMaxChars-1], '…')
+	}
+	w.flashStatus("Copied " + string(shown))
+}
+
+// copiedMaxChars is the most of a copied link's text the title bar shows.
+const copiedMaxChars = 60
+
 // windowSubtitle describes a tmux window for the title bar.
 func windowSubtitle(aw *tmux.Window) string {
 	if aw.Title != "" {

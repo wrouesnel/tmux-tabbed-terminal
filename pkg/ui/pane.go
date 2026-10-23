@@ -80,6 +80,11 @@ type Pane struct {
 	generation int
 	closed     bool
 
+	// clickCell is the cell a plain left button press was in, and clicking whether one is
+	// down, so its release can tell a click on a link from a drag.
+	clickCell [2]int
+	clicking  bool
+
 	// Mouse wheel state: lines waiting to be scrolled, whether a scroll command is
 	// running, and the streak of quick wheel events which speeds scrolling up.
 	scrollPending float64
@@ -170,6 +175,10 @@ func newPane(w *Window) *Pane {
 	p.term.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
 		p.hidePreview()
 		return p.onButtonPress(ev)
+	})
+	p.term.Connect("button-release-event", func(_ interface{}, ev *gdk.Event) bool {
+		p.onButtonRelease(ev)
+		return false
 	})
 	p.term.Connect("motion-notify-event", func(_ interface{}, ev *gdk.Event) bool {
 		p.onMotion(ev)
@@ -483,13 +492,20 @@ func (p *Pane) updateHeader(name string, busy bool, showHeader bool) {
 }
 
 // onButtonPress opens a link on Ctrl+click, or downloads the file a link on another
-// host names, and shows the context menu on a right click.
+// host names, and shows the context menu on a right click. A plain left click is noted
+// for onButtonRelease, and left to the terminal.
 // A program in the pane that has asked for mouse events, such as vim or htop, gets the
 // right click instead, unless Shift is held, as in GNOME Terminal. tmux itself doesn't
 // count: with its mouse option on, the menu still shows.
 func (p *Pane) onButtonPress(event *gdk.Event) bool {
 	ev := gdk.EventButtonNewFromEvent(event)
+	p.clicking = false
 	if ev.Type() != gdk.EVENT_BUTTON_PRESS {
+		return false
+	}
+	if ev.Button() == gdk.BUTTON_PRIMARY && ev.State()&uint(clickModifiers) == 0 {
+		col, row := p.term.CellAt(ev.X(), ev.Y())
+		p.clickCell, p.clicking = [2]int{col, row}, true
 		return false
 	}
 	if ev.Button() == gdk.BUTTON_PRIMARY && ev.State()&uint(gdk.CONTROL_MASK) != 0 {
@@ -530,6 +546,37 @@ func (p *Pane) onButtonPress(event *gdk.Event) bool {
 		show(link{}, false)
 	}
 	return true
+}
+
+// clickModifiers are the modifiers that make a left click something other than a plain
+// click.
+const clickModifiers = gdk.CONTROL_MASK | gdk.SHIFT_MASK | gdk.MOD1_MASK | gdk.SUPER_MASK
+
+// onButtonRelease copies the text a link shows, rather than where it leads, when a plain
+// left click, which didn't move or select anything, ends on one. A program in the pane
+// that has asked for mouse events has the click instead.
+func (p *Pane) onButtonRelease(event *gdk.Event) {
+	ev := gdk.EventButtonNewFromEvent(event)
+	if !p.clicking || ev.Button() != gdk.BUTTON_PRIMARY {
+		return
+	}
+	p.clicking = false
+	col, row := p.term.CellAt(ev.X(), ev.Y())
+	if [2]int{col, row} != p.clickCell || p.term.HasSelection() || p.programWantsMouse() {
+		return
+	}
+	// An OSC 8 hyperlink's text is in the terminal, which only gives its URI as a match.
+	if m, ok := p.term.MatchAt(event); ok && m.Hyperlink {
+		if text, ok := p.term.HyperlinkText(event); ok && strings.TrimSpace(text) != "" {
+			p.win.copyLinkText(text)
+		}
+		return
+	}
+	p.withLinkAt(event, func(l link, ok bool) {
+		if ok && l.shown != "" {
+			p.win.copyLinkText(l.shown)
+		}
+	})
 }
 
 // linkResult is a link found in tmux's copy of a pane: its text, the kind of pattern it
@@ -573,7 +620,7 @@ func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link,
 			dir = aw.Path
 		}
 		l := resolveLink(m, p.linkTags[m.Tag], dir, remote)
-		l.host = p.hostName
+		l.host, l.shown = p.hostName, m.Text
 		then(l, true)
 	}
 	if !readLines {
@@ -620,7 +667,7 @@ func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link,
 			then(link{}, false)
 		default:
 			l := resolveLink(vte.Match{Text: r.text}, r.kind, r.dir, remote)
-			l.span, l.host = r.span, p.hostName
+			l.span, l.host, l.shown = r.span, p.hostName, r.text
 			then(l, true)
 		}
 	})

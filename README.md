@@ -23,8 +23,10 @@ or split the window to watch several sessions side by side.
   sessions open in panes like local ones.
 * **Links.** URLs, markdown links and images such as `[docs](docs/README.md)` or
   `![shot](img/a.png)`, file paths, and hyperlinks that programs such as `ls --hyperlink`
-  print are underlined under the pointer. Ctrl+click opens one in its default application,
-  and right-clicking one gives Open Link, Download and Copy Link. Links wrapped onto
+  print are underlined under the pointer. Clicking one copies its text as shown, such as
+  a hyperlink's words rather than where it leads, or a path with its line number.
+  Ctrl+click opens one in its default application, and right-clicking one gives Open
+  Link, Download and Copy Link, which copies where it leads. Links wrapped onto
   several lines work, in split tmux windows too. Hyperlinks need tmux 3.4 or later on the
   session's host.
 * **File paths.** Paths that start with `/`, `~/`, `./` or `../`, such as
