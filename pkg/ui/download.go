@@ -76,12 +76,47 @@ func downloadName(remotePath string) string {
 // through the host's ssh connection, and says so in the download toast. Only regular files
 // are copied.
 func (w *Window) downloadLink(l link) {
+	w.downloadLinkTo(l, "")
+}
+
+// downloadLinkAs asks where to save the file a link on another host names, starting in
+// the Downloads folder with its name, and downloads it there.
+func (w *Window) downloadLinkAs(l link) {
+	if !l.downloadable() {
+		return
+	}
+	dlg, err := gtk.FileChooserNativeDialogNew("Save As", w.window, gtk.FILE_CHOOSER_ACTION_SAVE,
+		"_Save", "_Cancel")
+	if err != nil {
+		return
+	}
+	dlg.SetDoOverwriteConfirmation(true)
+	dlg.SetCurrentName(downloadName(l.file))
+	dir := downloadsDir()
+	if !isDir(dir) {
+		dir, _ = os.UserHomeDir()
+	}
+	dlg.SetCurrentFolder(dir)
+	response := dlg.Run()
+	dest := dlg.GetFilename()
+	dlg.Destroy()
+	if response != int(gtk.RESPONSE_ACCEPT) || dest == "" {
+		return
+	}
+	w.downloadLinkTo(l, dest)
+}
+
+// downloadLinkTo downloads the file a link on another host names to dest, replacing what's
+// there, or into the Downloads folder under a name no file has yet if dest is empty.
+func (w *Window) downloadLinkTo(l link, dest string) {
 	h := w.app.host(l.host)
 	if !l.downloadable() || h == nil || h.client.SSH == nil {
 		return
 	}
-	name := downloadName(l.file)
-	dir := downloadsDir()
+	name, dir := downloadName(l.file), downloadsDir()
+	if dest != "" {
+		name, dir = filepath.Base(dest), filepath.Dir(dest)
+	}
 	log := w.app.log.With(zap.String("host", l.host), zap.String("file", l.file))
 	w.setStatus("Downloading " + name + "…")
 
@@ -89,7 +124,7 @@ func (w *Window) downloadLink(l link) {
 	// stops rather than for the usual command timeout.
 	ctx := w.app.ctx
 	go func() {
-		dest, err := func() (string, error) {
+		saved, err := func() (string, error) {
 			if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:mnd // owner only
 				return "", err
 			}
@@ -106,8 +141,11 @@ func (w *Window) downloadLink(l link) {
 			if copyErr != nil {
 				return "", copyErr
 			}
-			dest := freePath(dir, name)
-			return dest, os.Rename(tmp.Name(), dest)
+			to := dest
+			if to == "" {
+				to = freePath(dir, name)
+			}
+			return to, os.Rename(tmp.Name(), to)
 		}()
 		glib.IdleAdd(func() {
 			w.setStatus("")
@@ -116,8 +154,8 @@ func (w *Window) downloadLink(l link) {
 				w.showError("Could not download "+name, err.Error())
 				return
 			}
-			log.Info("Downloaded", zap.String("to", dest))
-			w.downloads.show(dest)
+			log.Info("Downloaded", zap.String("to", saved))
+			w.downloads.show(saved)
 		})
 	}()
 }

@@ -130,8 +130,8 @@ func mainMenu() *glib.MenuModel {
 func terminalMenu(onLink bool) *glib.MenuModel {
 	var sections []*glib.MenuModel
 	if onLink {
-		sections = append(sections, section("Open Link", "win.open-link", "Download", "win.download-link",
-			"Copy Link", "win.copy-link"))
+		sections = append(sections, section("Open Link", "win.open-link", "Save", "win.download-link",
+			"Save As…", "win.download-link-as", "Copy Link", "win.copy-link"))
 	}
 	return menuOf(append(sections,
 		section("Copy", "win.copy", "Paste", "win.paste"),

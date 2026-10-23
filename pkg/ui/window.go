@@ -159,6 +159,7 @@ func (w *Window) installActions() {
 	add("paste", func() { w.activePane.term.PasteClipboard() })
 	add("open-link", func() { w.openLink(w.contextLink.uri) })
 	add("download-link", func() { w.downloadLink(w.contextLink) })
+	add("download-link-as", func() { w.downloadLinkAs(w.contextLink) })
 	add("copy-link", func() {
 		if clip, err := gtk.ClipboardGet(gdk.SELECTION_CLIPBOARD); err == nil {
 			clip.SetText(w.contextLink.text)
@@ -271,6 +272,7 @@ func (w *Window) updateActionState() {
 	w.actions["paste"].SetEnabled(p.running)
 	w.actions["open-link"].SetEnabled(w.contextLink.uri != "")
 	w.actions["download-link"].SetEnabled(w.contextLink.downloadable())
+	w.actions["download-link-as"].SetEnabled(w.contextLink.downloadable())
 	w.actions["copy-link"].SetEnabled(w.contextLink.text != "")
 	_, s := w.app.lookup(p.SessionKey())
 	hasSession := s != nil

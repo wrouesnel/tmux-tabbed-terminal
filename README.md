@@ -26,7 +26,7 @@ or split the window to watch several sessions side by side.
   print are underlined under the pointer. Clicking one copies its text as shown, such as
   a hyperlink's words rather than where it leads, or a path with its line number.
   Ctrl+click opens one in its default application, and right-clicking one gives Open
-  Link, Download and Copy Link, which copies where it leads. Links wrapped onto
+  Link, Save, Save As… and Copy Link, which copies where it leads. Links wrapped onto
   several lines work, in split tmux windows too. Hyperlinks need tmux 3.4 or later on the
   session's host.
 * **File paths.** Paths that start with `/`, `~/`, `./` or `../`, such as
@@ -35,9 +35,9 @@ or split the window to watch several sessions side by side.
   relative to the directory of the pane they're in. Bare relative paths such as
   `src/main.go` aren't links, since too much ordinary text looks like them.
 * **Downloads.** A path in a remote session names a file on that host: Ctrl+click it, or
-  right-click it and pick Download, to copy it into your Downloads folder over the host's
+  right-click it and pick Save, to copy it into your Downloads folder over the host's
   ssh connection. A file already there of the same name is kept, and the new one gets a
-  number. When it's done, a notice at the bottom of the window offers to open the file or
+  number. Save As… asks where to put it instead, and asks before replacing a file. When it's done, a notice at the bottom of the window offers to open the file or
   its folder. Only files can be downloaded, not directories.
 * **Image previews.** Rest the pointer on a link to an image file, local or on a remote
   host, and a preview of it pops up, scaled to fit 360×270 pixels. Remote images are read
