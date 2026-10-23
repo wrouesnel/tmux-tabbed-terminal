@@ -18,9 +18,19 @@ type conPty struct {
 	in      *os.File // writes to the console's input
 	out     *os.File // reads the console's output
 	once    sync.Once
+	outOnce sync.Once
 }
 
-func (p *conPty) Read(b []byte) (int, error)  { return p.out.Read(b) }
+// Read reads the console's output. Its pipe ends once the console has been closed and
+// has written all it had, and is closed then.
+func (p *conPty) Read(b []byte) (int, error) {
+	n, err := p.out.Read(b)
+	if err != nil {
+		p.outOnce.Do(func() { _ = p.out.Close() })
+	}
+	return n, err
+}
+
 func (p *conPty) Write(b []byte) (int, error) { return p.in.Write(b) }
 func (p *conPty) Name() string                { return "" }
 
@@ -29,16 +39,15 @@ func (p *conPty) Resize(cols, rows int) error {
 	return windows.ResizePseudoConsole(p.console, windows.Coord{X: int16(cols), Y: int16(rows)})
 }
 
-// Close closes the console, which ends its programs, and its pipes. The console's output
-// pipe ends after what's left in it has been read.
+// Close closes the console, which ends its programs, and its input pipe. Its output pipe
+// is left to Read to close when it ends, after what's left in it has been read: newer
+// Windows doesn't wait for that before ClosePseudoConsole returns, so closing the pipe
+// then would lose the end of the output.
 func (p *conPty) Close() error {
 	p.once.Do(func() {
 		// ClosePseudoConsole waits for its output to be read on older Windows, so it
 		// mustn't wait on the goroutine reading it.
-		go func() {
-			windows.ClosePseudoConsole(p.console)
-			_ = p.out.Close()
-		}()
+		go windows.ClosePseudoConsole(p.console)
 		_ = p.in.Close()
 	})
 	return nil
