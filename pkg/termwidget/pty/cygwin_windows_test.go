@@ -2,12 +2,15 @@ package pty
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os/exec"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 // msysShell returns MSYS2's or Cygwin's sh, if it's installed with script and stty.
@@ -89,13 +92,32 @@ func TestCygwinPty(t *testing.T) {
 	}
 }
 
-// TestCygwinPtyClose hangs a program up.
+// TestCygwinPtyClose hangs a program up, ending what it started too.
 func TestCygwinPtyClose(t *testing.T) {
-	cmd := exec.Command(msysShell(t), "-c", "sleep 600")
+	cmd := exec.Command(msysShell(t), "-c", `sleep 600 & echo "winpid=$(cat /proc/$!/winpid)."; wait`)
 	p, err := Start(cmd, 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
+	var out []byte
+	buf := make([]byte, 256)
+	for !bytes.Contains(out, []byte(".")) || !bytes.Contains(out, []byte("winpid=")) {
+		n, err := p.Read(buf)
+		out = append(out, buf[:n]...)
+		if err != nil {
+			t.Fatalf("reading: %v, after %q", err, out)
+		}
+	}
+	var pid uint32
+	if _, err := fmt.Sscanf(string(out[bytes.Index(out, []byte("winpid=")):]), "winpid=%d.", &pid); err != nil {
+		t.Fatalf("no sleep process ID in %q: %v", out, err)
+	}
+	sleep, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
+	if err != nil {
+		t.Fatalf("opening sleep, process %d: %v", pid, err)
+	}
+	defer windows.CloseHandle(sleep)
+
 	waited := make(chan error)
 	go func() { waited <- cmd.Wait() }()
 	_ = p.Close()
@@ -103,5 +125,8 @@ func TestCygwinPtyClose(t *testing.T) {
 	case <-waited:
 	case <-time.After(20 * time.Second):
 		t.Fatal("the program didn't end when its pty was closed")
+	}
+	if ev, _ := windows.WaitForSingleObject(sleep, 10000); ev != windows.WAIT_OBJECT_0 {
+		t.Error("what the program started didn't end when its pty was closed")
 	}
 }

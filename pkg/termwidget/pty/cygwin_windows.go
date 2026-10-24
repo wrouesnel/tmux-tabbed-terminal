@@ -8,7 +8,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 // markerTimeout is how long Start waits for the pty's name. The shell names it as soon as
@@ -42,6 +46,9 @@ type cygwinPty struct {
 	out  *os.File
 	stty string
 	proc *os.Process
+	// job holds script and every process it starts, and ends them when it's closed: by
+	// Close, or by Windows when this process ends.
+	job windows.Handle
 
 	// ready is closed once the pty's name has been read from the output, or that's
 	// given up. head is the output read until then, and headErr how reading it ended.
@@ -75,6 +82,8 @@ func startCygwin(cmd *exec.Cmd, cols, rows int, script, stty string) (Pty, error
 	sc := exec.Command(script, "-qfec", scriptCommand(cmd.Args, cols, rows), "/dev/null")
 	sc.Env, sc.Dir = cmd.Env, cmd.Dir
 	sc.Stdin, sc.Stdout, sc.Stderr = inR, outW, outW
+	// script starts suspended, so that it's in its job before it can start anything.
+	sc.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
 	err = sc.Start()
 	_ = inR.Close()
 	_ = outW.Close()
@@ -83,11 +92,18 @@ func startCygwin(cmd *exec.Cmd, cols, rows int, script, stty string) (Pty, error
 		_ = outR.Close()
 		return nil, fmt.Errorf("starting %s: %w", script, err)
 	}
+	job, err := runInJob(sc.Process)
+	if err != nil {
+		_ = sc.Process.Kill()
+		_ = inW.Close()
+		_ = outR.Close()
+		return nil, err
+	}
 	// The caller waits for cmd, which waits for the process.
 	cmd.Process = sc.Process
 
 	p := &cygwinPty{
-		in: inW, out: outR, stty: stty, proc: sc.Process,
+		in: inW, out: outR, stty: stty, proc: sc.Process, job: job,
 		ready: make(chan struct{}), cols: cols, rows: rows,
 		resized: make(chan struct{}, 1), done: make(chan struct{}),
 	}
@@ -98,6 +114,42 @@ func startCygwin(cmd *exec.Cmd, cols, rows int, script, stty string) (Pty, error
 	case <-time.After(markerTimeout):
 	}
 	return p, nil
+}
+
+// ntResumeProcess resumes every thread of a process. os/exec doesn't return the thread
+// handle ResumeThread would need.
+var ntResumeProcess = windows.NewLazySystemDLL("ntdll.dll").NewProc("NtResumeProcess")
+
+// runInJob puts a suspended process in a new job, which ends it and everything it starts
+// once the job's handle is closed, and resumes it.
+func runInJob(proc *os.Process) (windows.Handle, error) {
+	//nolint:gosec // process IDs fit
+	h, err := windows.OpenProcess(windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE|
+		windows.PROCESS_SUSPEND_RESUME, false, uint32(proc.Pid))
+	if err != nil {
+		return 0, fmt.Errorf("opening process %d: %w", proc.Pid, err)
+	}
+	defer closeHandle(h)
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return 0, fmt.Errorf("CreateJobObject: %w", err)
+	}
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{}
+	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if _, err := windows.SetInformationJobObject(job, windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info))); err != nil {
+		closeHandle(job)
+		return 0, fmt.Errorf("SetInformationJobObject: %w", err)
+	}
+	if err := windows.AssignProcessToJobObject(job, h); err != nil {
+		closeHandle(job)
+		return 0, fmt.Errorf("AssignProcessToJobObject: %w", err)
+	}
+	if status, _, _ := ntResumeProcess.Call(uintptr(h)); status != 0 {
+		closeHandle(job)
+		return 0, fmt.Errorf("NtResumeProcess: status %#x", status)
+	}
+	return job, nil
 }
 
 // readName reads the output until the pty's name has been taken out of it.
@@ -190,13 +242,13 @@ func (p *cygwinPty) resizer() {
 	}
 }
 
-// Close hangs the program up: ending script closes the pty, and its program reads the
-// end of its input.
+// Close hangs the program up: closing its job ends script and everything it started.
 func (p *cygwinPty) Close() error {
 	var err error
 	p.once.Do(func() {
 		close(p.done)
 		_ = p.in.Close()
+		closeHandle(p.job)
 		if kerr := p.proc.Kill(); kerr != nil && !errors.Is(kerr, os.ErrProcessDone) {
 			err = kerr
 		}
