@@ -60,6 +60,9 @@ func start(cmd *exec.Cmd, cols, rows int) (Pty, error) {
 	if cmd.Process != nil {
 		return nil, errors.New("pty: already started")
 	}
+	if script, stty, ok := cygwinTools(cmd.Path); ok {
+		return startCygwin(cmd, cols, rows, script, stty)
+	}
 	var inR, inW, outR, outW windows.Handle
 	if err := windows.CreatePipe(&inR, &inW, nil, 0); err != nil {
 		return nil, fmt.Errorf("creating the input pipe: %w", err)
