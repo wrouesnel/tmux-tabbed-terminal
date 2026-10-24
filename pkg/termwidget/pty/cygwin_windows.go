@@ -82,8 +82,9 @@ func startCygwin(cmd *exec.Cmd, cols, rows int, script, stty string) (Pty, error
 	sc := exec.Command(script, "-qfec", scriptCommand(cmd.Args, cols, rows), "/dev/null")
 	sc.Env, sc.Dir = cmd.Env, cmd.Dir
 	sc.Stdin, sc.Stdout, sc.Stderr = inR, outW, outW
-	// script starts suspended, so that it's in its job before it can start anything.
-	sc.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED}
+	// script starts suspended, so that it's in its job before it can start anything, and
+	// with its console window hidden, which a GUI program's console children would show.
+	sc.SysProcAttr = &syscall.SysProcAttr{CreationFlags: windows.CREATE_SUSPENDED, HideWindow: true}
 	err = sc.Start()
 	_ = inR.Close()
 	_ = outW.Close()
@@ -236,6 +237,7 @@ func (p *cygwinPty) resizer() {
 		}
 		//nolint:gosec // stty is beside the program, and the name came from tty
 		cmd := exec.Command(p.stty, "-F", name, "cols", strconv.Itoa(cols), "rows", strconv.Itoa(rows))
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 		if err := cmd.Run(); err == nil {
 			setCols, setRows = cols, rows
 		}

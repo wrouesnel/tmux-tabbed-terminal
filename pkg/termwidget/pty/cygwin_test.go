@@ -8,7 +8,7 @@ import (
 
 func TestScriptCommand(t *testing.T) {
 	got := scriptCommand([]string{`C:\msys64\usr\bin\tmux.exe`, "attach", "-t", "it's #{x}"}, 97, 36)
-	want := `stty cols 97 rows 36; printf '\033]7799;tty=%s\007' "$(tty)"; ` +
+	want := `/usr/bin/stty cols 97 rows 36; printf '\033]7799;tty=%s\007' "$(/usr/bin/tty)"; ` +
 		`exec 'C:\msys64\usr\bin\tmux.exe' 'attach' '-t' 'it'\''s #{x}'`
 	if got != want {
 		t.Errorf("got  %s\nwant %s", got, want)

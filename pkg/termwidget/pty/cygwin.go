@@ -18,13 +18,15 @@ const ttyMarker = "\x1b]7799;tty="
 
 // scriptCommand returns the shell command script runs: it sets the pty's size, names the
 // pty, and then becomes argv. The size is set before the name is written, so that resizes
-// made after the name is known come later.
+// made after the name is known come later. stty and tty are given by their paths, since
+// the runtime's bin folder needn't be in PATH, as it isn't for one installed with this
+// program; /usr/bin is that folder for both Cygwin and MSYS2.
 func scriptCommand(argv []string, cols, rows int) string {
 	quoted := make([]string, len(argv))
 	for i, arg := range argv {
 		quoted[i] = shellQuote(arg)
 	}
-	return fmt.Sprintf(`stty cols %d rows %d; printf '\033]7799;tty=%%s\007' "$(tty)"; exec %s`,
+	return fmt.Sprintf(`/usr/bin/stty cols %d rows %d; printf '\033]7799;tty=%%s\007' "$(/usr/bin/tty)"; exec %s`,
 		cols, rows, strings.Join(quoted, " "))
 }
 
