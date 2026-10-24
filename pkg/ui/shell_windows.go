@@ -7,13 +7,13 @@ import (
 )
 
 // bundledTmux returns the tmux installed with the application, in the MSYS2 tree beside
-// it, or "" if there's none.
+// its bin folder, or "" if there's none.
 func bundledTmux() string {
 	exe, err := os.Executable()
 	if err != nil {
 		return ""
 	}
-	tmux := filepath.Join(filepath.Dir(exe), "msys", "usr", "bin", "tmux.exe")
+	tmux := filepath.Join(filepath.Dir(filepath.Dir(exe)), "msys", "usr", "bin", "tmux.exe")
 	if _, err := os.Stat(tmux); err != nil {
 		return ""
 	}

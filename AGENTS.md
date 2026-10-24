@@ -65,7 +65,7 @@ workflow.
 
 ## Windows
 
-Windows is being ported in steps; it builds but isn't usable yet. Code that only works on
+Windows is being ported in steps; it works, but is less tested than Linux. Code that only works on
 Unix goes behind build tags, with a Windows counterpart offering the same API:
 `pkg/vte` is `vte_unix.go` (the VTE binding) and `vte_native.go` (the `pkg/termwidget`
 terminal, on ConPTY), and pkg/ui uses only the methods both provide. Build or test with
@@ -73,9 +73,14 @@ terminal, on ConPTY), and pkg/ui uses only the methods both provide. Build or te
 split out into its own module, so it mustn't import the rest of this repository; its
 README says what it does and doesn't cover. Per-user
 directories come from `userDir` in `pkg/ui/paths.go` (XDG variables, else
-`%LOCALAPPDATA%` on Windows). On Windows, the local host will be the tmux of an installed
-MSYS2 or Cygwin, and without one there is no local host. CI's `windows` job builds in
-MSYS2 UCRT64; there's no Windows toolchain locally, so Windows-only code is checked there.
+`%LOCALAPPDATA%` on Windows). On Windows, the local host is the MSYS2 tmux the installer
+puts in `msys` beside `bin`, or with `use-system-tmux` the tmux in PATH, from MSYS2 or
+Cygwin. Their programs run on a Cygwin pty through `script` (`pkg/termwidget/pty`), and
+Windows paths given to them go through their `cygpath` (`pkg/tmux`). Console programs are
+started with hidden consoles, since the application is a GUI program; the bundle needs
+`cygwin-console-helper.exe`, or the runtime opens visible ones. CI's `windows` job builds
+in MSYS2 UCRT64 and makes the installer with `packaging/windows`; there's no Windows
+toolchain locally, so Windows-only code is checked there.
 
 ## Testing the GUI
 

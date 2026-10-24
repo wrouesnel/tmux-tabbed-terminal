@@ -92,8 +92,8 @@ jobs:
       - name: Build
         run: go run mage.go binary
 
-  # The Windows build, with GTK3 and Go from MSYS2's UCRT64 environment. VTE doesn't
-  # support Windows, so terminals there are pkg/termwidget's, on ConPTY.
+  # The Windows build, with GTK3 and Go from MSYS2's UCRT64 environment, and its installer.
+  # VTE doesn't support Windows, so terminals there are pkg/termwidget's.
   windows:
     runs-on: windows-2025
     defaults:
@@ -102,6 +102,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # The installer's version comes from git describe.
+          fetch-depth: 0
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
@@ -112,6 +115,7 @@ jobs:
             mingw-w64-ucrt-x86_64-go
             mingw-w64-ucrt-x86_64-gtk3
             mingw-w64-ucrt-x86_64-pkgconf
+            tmux
       - name: Build
         run: go build -o tmux-tabbed-terminal.exe ./cmd/tmux-tabbed-terminal
       - name: Vet
@@ -122,6 +126,27 @@ jobs:
           go test -count=1 -run '^$' ./...
           go test -count=1 ./pkg/activity ./pkg/sessionlist ./pkg/theme ./pkg/ui ./pkg/vte \
             ./pkg/termwidget/...
+      # The per-user installer, with the GTK runtime and a private MSYS2 tmux bundled.
+      - name: Bundle
+        run: packaging/windows/bundle.sh dist/bundle "$(git describe --tags --always)"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -OutFile "$env:RUNNER_TEMP\is.exe" `
+            -Uri https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe
+          Start-Process -Wait -FilePath "$env:RUNNER_TEMP\is.exe" `
+            -ArgumentList '/VERYSILENT', '/CURRENTUSER', '/SUPPRESSMSGBOXES', '/NORESTART'
+      - name: Installer
+        shell: pwsh
+        run: |
+          $version = (git describe --tags --always) -replace '^v', ''
+          & "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" /Q "/DAppVersion=$version" `
+            "/DBundleDir=$pwd\dist\bundle" "/O$pwd\dist" packaging\windows\tmux-tabbed-terminal.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-installer
+          path: dist/*-setup.exe
 
   # The source RPM, rebuilt in a container of each RHEL release as COPR builds it: from the
   # vendored source tarball, with the release's own Go and libraries.

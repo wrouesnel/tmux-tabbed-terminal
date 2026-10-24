@@ -1,7 +1,7 @@
 ---
-# GitHub releases carry code only: the vendored source tarball and compiled binary
-# archives, with checksums. Packages are built from source and published by Launchpad
-# (Ubuntu, through the PPA) and COPR (RHEL); none are attached to the release.
+# GitHub releases carry the vendored source tarball, compiled binary archives and the
+# Windows installer, with checksums. Linux packages are built from source and published by
+# Launchpad (Ubuntu, through the PPA) and COPR (RHEL); none are attached to the release.
 name: Release
 on:
   push:
@@ -65,8 +65,8 @@ jobs:
             release/*.tar.gz
             release/*.sha256
 
-  # The GitHub release: the vendored source tarball, which packages are built from, and
-  # the binary archives.
+  # The GitHub release: the vendored source tarball, which packages are built from, the
+  # binary archives and the Windows installer, which the integration checks build.
   github-release:
     needs:
       - integration
@@ -95,6 +95,15 @@ jobs:
           merge-multiple: true
           path: release/binaries
 
+      - name: Download Windows installer
+        uses: actions/download-artifact@v8
+        with:
+          name: windows-installer
+          path: release/windows
+
+      - name: Windows installer checksum
+        run: cd release/windows && for f in *.exe; do sha256sum "$f" > "$f.sha256"; done
+
       - name: Release
         uses: softprops/action-gh-release@v3
         with:
@@ -102,6 +111,7 @@ jobs:
           files: |
             release/source/*
             release/binaries/*
+            release/windows/*
 
   # Uploads signed source packages to the PPA, where Launchpad builds them. Needs the PPA
   # on Launchpad with the signing key registered to the account: see the README.

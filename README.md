@@ -270,14 +270,23 @@ of that architecture. Cross-compiling needs `CC` and `PKG_CONFIG_LIBDIR` set for
 
 ### Windows
 
-Windows support is in progress, and not yet usable. It builds in an
-[MSYS2](https://www.msys2.org/) UCRT64 shell, as CI builds it:
+Windows support is in progress. Each release has a per-user installer,
+`tmux-tabbed-terminal-<version>-windows-amd64-setup.exe`, which needs no administrator
+rights and nothing else installed: it brings the GTK runtime and a private MSYS2 tmux, and
+new sessions run PowerShell unless Preferences picks another shell. Preferences can switch
+to a tmux in PATH, such as MSYS2's own, instead.
+
+It builds in an [MSYS2](https://www.msys2.org/) UCRT64 shell, as CI builds it:
 
 ```sh
 pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_64-gtk3 \
   mingw-w64-ucrt-x86_64-pkgconf
 go build -o tmux-tabbed-terminal.exe ./cmd/tmux-tabbed-terminal
 ```
+
+`pacman -S tmux` and then `packaging/windows/bundle.sh OUTDIR` make the installer's
+bundle, and [Inno Setup](https://jrsoftware.org/isinfo.php) 6 makes the installer from
+it with [`packaging/windows/tmux-tabbed-terminal.iss`](packaging/windows/tmux-tabbed-terminal.iss).
 
 VTE doesn't support Windows, so panes there use the terminal widget in
 [`pkg/termwidget`](pkg/termwidget/README.md), a prototype. An MSYS2 or Cygwin tmux runs on
