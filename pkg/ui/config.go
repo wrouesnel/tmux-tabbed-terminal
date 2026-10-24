@@ -23,19 +23,32 @@ type Config struct {
 
 // TmuxConfig selects the tmux server.
 type TmuxConfig struct {
-	// Binary is the tmux executable.
+	// Binary is the tmux executable. Where the application was installed with a tmux of
+	// its own, as on Windows, the default, "tmux", means that one.
 	Binary string `yaml:"binary"`
+	// UseSystemTmux runs the tmux in PATH rather than the one installed with the
+	// application. Preferences changes it, and that choice is remembered.
+	UseSystemTmux bool `yaml:"use-system-tmux"`
+	// DefaultShell is the shell new sessions, windows and panes on this machine run, set
+	// as tmux's default-shell. Empty leaves tmux's own setting, except that the tmux
+	// installed with the application runs PowerShell. Preferences changes it, and that
+	// choice is remembered.
+	DefaultShell string `yaml:"default-shell"`
 	// SocketName selects a server by name, as with tmux -L.
 	SocketName string `yaml:"socket-name"`
 	// SocketPath selects a server by socket path, as with tmux -S.
 	SocketPath string `yaml:"socket-path"`
 }
 
-// Client returns a tmux client for the configured server.
-func (c TmuxConfig) Client() *tmux.Client {
+// Client returns a tmux client for the configured server. useSystem picks the tmux in
+// PATH over the one installed with the application.
+func (c TmuxConfig) Client(useSystem bool) *tmux.Client {
 	client := tmux.NewClient()
 	if c.Binary != "" {
 		client.Binary = c.Binary
+	}
+	if bundled := bundledTmux(); bundled != "" && !useSystem && client.Binary == "tmux" {
+		client.Binary = bundled
 	}
 	client.SocketName = c.SocketName
 	client.SocketPath = c.SocketPath

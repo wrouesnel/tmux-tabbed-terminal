@@ -4,8 +4,15 @@
 # keep the defaults shown here.
 
 tmux:
-  # The tmux executable.
+  # The tmux executable. Where the application was installed with a tmux of its own, as
+  # on Windows, "tmux" means that one.
   binary: tmux
+  # Run the tmux in PATH rather than the one installed with the application.
+  use-system-tmux: false
+  # The shell new sessions, windows and panes on this machine run, set as tmux's
+  # default-shell. Empty leaves tmux's own setting, except that the tmux installed with
+  # the application runs PowerShell.
+  default-shell: ""
   # Select a tmux server other than the default one, as with tmux -L or tmux -S.
   socket-name: ""
   socket-path: ""

@@ -9,9 +9,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/errors"
@@ -36,6 +38,30 @@ type Client struct {
 	// SSH, if set, runs tmux on another host. Binary and the socket settings then apply
 	// to the remote tmux.
 	SSH *SSH
+
+	mu           sync.Mutex
+	defaultShell string
+}
+
+// SetDefaultShell sets the server's default-shell option each time a session or window
+// is made, so that they and the panes split from them run shell. Empty leaves the option
+// alone. It's safe to call while other calls are running.
+func (c *Client) SetDefaultShell(shell string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.defaultShell = shell
+}
+
+// withDefaultShell puts setting the default shell, if one is set, before a command that
+// makes a shell. tmux runs the two in order, starting the server first if it must.
+func (c *Client) withDefaultShell(ctx context.Context, args []string) []string {
+	c.mu.Lock()
+	shell := c.defaultShell
+	c.mu.Unlock()
+	if shell == "" {
+		return args
+	}
+	return append([]string{"set-option", "-g", "default-shell", c.ServerPath(ctx, shell), ";"}, args...)
 }
 
 // NewClient returns a client for the default tmux server.
@@ -330,6 +356,18 @@ func parseUnix(s string) time.Time {
 	return time.Unix(secs, 0)
 }
 
+// programName shortens a Windows program's path, such as C:\\Windows\\System32\\cmd.exe,
+// to its name, cmd. A Cygwin or MSYS2 tmux gives such paths, with their backslashes
+// escaped, as the command of a pane running a Windows program, and names its window
+// after it. Anything else is returned unchanged.
+func programName(s string) string {
+	if len(s) < 3 || s[1] != ':' || s[2] != '\\' || !strings.EqualFold(filepath.Ext(s), ".exe") {
+		return s
+	}
+	name := s[strings.LastIndexByte(s, '\\')+1:]
+	return name[:len(name)-len(".exe")]
+}
+
 // ParseSnapshot parses the output of the snapshot command. Malformed lines are skipped.
 //
 //nolint:mnd // field counts are fixed by the format strings
@@ -363,8 +401,8 @@ func ParseSnapshot(out string) *Snapshot {
 				Index:    idx,
 				Active:   fields[4] == "1",
 				Activity: parseUnix(fields[5]),
-				Command:  fields[6],
-				Name:     fields[7],
+				Command:  programName(fields[6]),
+				Name:     programName(fields[7]),
 				Path:     fields[8],
 				PaneID:   fields[9],
 				// tmux prints 1 for set flags.
@@ -411,9 +449,9 @@ func (c *Client) NewSession(ctx context.Context, name string, dir string) (strin
 		args = append(args, "-s", name)
 	}
 	if dir != "" {
-		args = append(args, "-c", dir)
+		args = append(args, "-c", c.ServerPath(ctx, dir))
 	}
-	out, err := c.run(ctx, args...)
+	out, err := c.run(ctx, c.withDefaultShell(ctx, args)...)
 	if err != nil {
 		return "", err
 	}
@@ -454,9 +492,9 @@ func (c *Client) NewWindow(ctx context.Context, session string, dir string) (str
 	// session: is the next free index in the session.
 	args := []string{"new-window", "-t", session + ":", "-P", "-F", "#{window_id}"}
 	if dir != "" {
-		args = append(args, "-c", dir)
+		args = append(args, "-c", c.ServerPath(ctx, dir))
 	}
-	out, err := c.run(ctx, args...)
+	out, err := c.run(ctx, c.withDefaultShell(ctx, args)...)
 	if err != nil {
 		return "", err
 	}

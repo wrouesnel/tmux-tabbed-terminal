@@ -180,7 +180,8 @@ func (a *App) startup() {
 
 	// Fill the local session list before the first window opens. Remote hosts fill in as
 	// their first polls come back.
-	local := newHost(LocalHost, HostConfig{}, a.cfg.Tmux.Client())
+	local := newHost(LocalHost, HostConfig{}, a.cfg.Tmux.Client(a.useSystemTmux()))
+	local.client.SetDefaultShell(a.defaultShell())
 	ctx, cancel := a.commandContext()
 	defer cancel()
 	if snap, err := local.client.Snapshot(ctx); err == nil {

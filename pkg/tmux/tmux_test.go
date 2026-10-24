@@ -180,6 +180,8 @@ func TestNewAndRenameWindow(t *testing.T) {
 	}
 	dir := t.TempDir()
 	win, err := c.NewWindow(ctx, id, dir)
+	// tmux reports the directory as it takes it: on Windows, a Cygwin tmux's POSIX path.
+	dir = c.ServerPath(ctx, dir)
 	if err != nil {
 		t.Fatalf("NewWindow: %v", err)
 	}
@@ -590,4 +592,47 @@ func TestPaneLines(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("no joined line in %q", lines)
+}
+
+// TestDefaultShell sets the server's default shell as sessions and windows are made.
+func TestDefaultShell(t *testing.T) {
+	ctx := context.Background()
+	c := newTestClient(t)
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("no sh")
+	}
+	c.SetDefaultShell(sh)
+	id, err := c.NewSession(ctx, "shell", "")
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if _, err := c.NewWindow(ctx, id, ""); err != nil {
+		t.Fatalf("NewWindow: %v", err)
+	}
+	argv := c.Argv("show-options", "-gv", "default-shell")
+	out, err := tmux.Command(ctx, argv).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// On Windows, a Cygwin tmux is given the shell's POSIX path.
+	got := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(got, "/") || !strings.HasSuffix(strings.TrimSuffix(got, ".exe"), "/sh") {
+		t.Errorf("default-shell is %q, set from %q", got, sh)
+	}
+}
+
+func TestProgramName(t *testing.T) {
+	for in, want := range map[string]string{
+		`C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`: "powershell",
+		`C:\Windows\System32\cmd.EXE`:                                    "cmd",
+		"bash":                                                           "bash",
+		"logs -- tail":                                                   "logs -- tail",
+		`C:\notes.txt`:                                                   `C:\notes.txt`,
+		"/usr/bin/vim":                                                   "/usr/bin/vim",
+	} {
+		if got := tmux.ProgramName(in); got != want {
+			t.Errorf("ProgramName(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

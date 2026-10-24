@@ -280,7 +280,10 @@ go build -o tmux-tabbed-terminal.exe ./cmd/tmux-tabbed-terminal
 ```
 
 VTE doesn't support Windows, so panes there use the terminal widget in
-[`pkg/termwidget`](pkg/termwidget/README.md), a prototype, on a ConPTY pseudo console.
+[`pkg/termwidget`](pkg/termwidget/README.md), a prototype. An MSYS2 or Cygwin tmux runs on
+a Cygwin pty through their `script`, and other programs on a ConPTY pseudo console.
+Preferences sets the shell new sessions run, such as PowerShell or cmd, as tmux's
+`default-shell`.
 Building on Linux with `-tags nativeterm` uses that widget instead of VTE, to try it out.
 State and saved scrollback go under `%LOCALAPPDATA%\tmux-tabbed-terminal`, and the
 configuration under `%APPDATA%\tmux-tabbed-terminal`.

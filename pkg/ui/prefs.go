@@ -38,6 +38,8 @@ type preferences struct {
 	font       *gtk.FontButton
 	bold       *gtk.CheckButton
 	tabBar     *gtk.ComboBoxText
+	shell      *gtk.ComboBoxText
+	systemTmux *gtk.CheckButton
 	// loading is set while the widgets are filled in, so their signals don't apply.
 	loading bool
 }
@@ -205,6 +207,41 @@ func newPreferences(a *App) *preferences {
 		}
 	})
 	add("Window tabs", p.tabBar)
+
+	// tmux. Not appearance preferences either.
+	p.shell, _ = gtk.ComboBoxTextNewWithEntry()
+	for _, shell := range shellChoices() {
+		p.shell.AppendText(shell)
+	}
+	if entry, err := p.shell.GetEntry(); err == nil {
+		placeholder := "tmux's default-shell"
+		if fallback := a.fallbackShell(); fallback != "" {
+			placeholder = fallback
+		}
+		entry.SetPlaceholderText(placeholder)
+		entry.SetText(a.chosenShell())
+	}
+	p.shell.SetTooltipText("The program new sessions, windows and panes on this machine run. " +
+		"Leave it empty for the default.")
+	p.shell.Connect("changed", func() {
+		if !p.loading {
+			a.setDefaultShell(p.shell.GetActiveText())
+		}
+	})
+	add("Shell", p.shell)
+
+	if bundledTmux() != "" {
+		p.systemTmux, _ = gtk.CheckButtonNewWithLabel("Use the system tmux (after restarting)")
+		p.systemTmux.SetActive(a.useSystemTmux())
+		p.systemTmux.SetTooltipText("Run the tmux in PATH, such as MSYS2's, rather than the one " +
+			"installed with this application.")
+		p.systemTmux.Connect("toggled", func() {
+			if !p.loading {
+				a.setUseSystemTmux(p.systemTmux.GetActive())
+			}
+		})
+		add("tmux", p.systemTmux)
+	}
 
 	hint, _ := gtk.LabelNew("Changes apply to every terminal straight away. A GNOME Terminal profile " +
 		"is followed as it's edited in GNOME Terminal.")
