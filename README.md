@@ -30,10 +30,12 @@ or split the window to watch several sessions side by side.
   several lines work, in split tmux windows too. Hyperlinks need tmux 3.4 or later on the
   session's host.
 * **File paths.** Paths that start with `/`, `~/`, `./` or `../`, such as
-  `/var/log/syslog` or `./src/main.go:12:5`, are links. A line and column after the path,
-  as compilers print them, are left out. Relative paths, including markdown ones, are
-  relative to the directory of the pane they're in. Bare relative paths such as
-  `src/main.go` aren't links, since too much ordinary text looks like them.
+  `/var/log/syslog` or `./src/main.go:12:5`, are links. So are relative paths to files
+  with an extension, such as `src/main.go:12:5`, and markdown code spans that hold a path
+  or a file name, such as `` `src/` `` or `` `README.md` ``, as tools such as coding
+  agents print them. A line and column after the path, as compilers print them, are left
+  out. Relative paths, including markdown ones, are relative to the directory of the pane
+  they're in. Other bare words with slashes, such as and/or, aren't links.
 * **Downloads.** A path in a remote session names a file on that host: Ctrl+click it, or
   right-click it and pick Save, to copy it into your Downloads folder over the host's
   ssh connection. A file already there of the same name is kept, and the new one gets a

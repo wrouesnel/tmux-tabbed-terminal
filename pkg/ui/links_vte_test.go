@@ -66,6 +66,9 @@ func TestLinkPatternsInVTE(t *testing.T) {
 		{"path", "error in ~/src/x.go:12:5: oops", 12, 0, "~/src/x.go:12:5", linkPath},
 		{"path in a url", "see https://example.com/a/b", 22, 0, "https://example.com/a/b", linkURL},
 		{"not a path", "and/or 10/22", 3, 0, "", 0},
+		{"code span", "edit `pkg/ui/links.go` now", 9, 0, "`pkg/ui/links.go`", linkCode},
+		{"relative path", "pkg/ui/x.go:12:5: oops", 3, 0, "pkg/ui/x.go:12:5", linkRelative},
+		{"long relative path, second row", longPath + ":7", 10, 1, longPath + ":7", linkRelative},
 	}
 	for _, c := range cases {
 		win, err := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)

@@ -36,6 +36,15 @@ func TestLinkPatterns(t *testing.T) {
 		{linkPath, `--out=/tmp/x "/q/a b" (/r/c) '/s/d'`, []string{"/tmp/x", "/q/a", "/r/c", "/s/d"}},
 		{linkPath, "and/or 10/22/2026 +/- w/o / // ./ ~/ a /", []string{}},
 		{linkPath, "/a and /usr/lib64/", []string{"/a", "/usr/lib64/"}},
+		{linkCode, "edit `pkg/ui/links.go`, `README.md` and `main.go:12`; see `packaging/windows/`.",
+			[]string{"`pkg/ui/links.go`", "`README.md`", "`main.go:12`", "`packaging/windows/`"}},
+		{linkCode, "`./out/a.tar` and `~/notes.md` and `../x`", []string{"`./out/a.tar`", "`~/notes.md`", "`../x`"}},
+		// Code which isn't a path, and spans which hold spaces or start with a slash.
+		{linkCode, "run `go test`, set `x = 1.5`, `v1.2` and `a b/c` and `/etc/hosts` and ``", []string{}},
+		{linkRelative, "pkg/ui/x.go:12:5: error in ../lib/y.c:3", []string{"pkg/ui/x.go:12:5", "lib/y.c:3"}},
+		{linkRelative, "see docs/README.md, src/a-b/c_d.test.ts and .github/workflows/ci.yml.",
+			[]string{"docs/README.md", "src/a-b/c_d.test.ts", ".github/workflows/ci.yml"}},
+		{linkRelative, "and/or w/o TCP/IP 10/22/2026 1/2.5 a/b README.md v1.2/3", []string{}},
 	}
 	patterns := map[linkKind]*regexp.Regexp{}
 	for _, p := range linkPatterns {
@@ -145,6 +154,17 @@ func TestResolveLink(t *testing.T) {
 			"file://" + homeNotes, homeNotes, homeNotes},
 		{"remote path", vte.Match{Text: "../a.tar:3"}, linkPath, "/w/x", true, "", "../a.tar", "/w/a.tar"},
 		{"remote home path", vte.Match{Text: "~/a.log"}, linkPath, "/w", true, "", "~/a.log", "~/a.log"},
+		{"code span", vte.Match{Text: "`pkg/ui/links.go`"}, linkCode, "/w/repo", false,
+			"file:///w/repo/pkg/ui/links.go", "/w/repo/pkg/ui/links.go", "/w/repo/pkg/ui/links.go"},
+		{"code span with a line", vte.Match{Text: "`main.go:12`"}, linkCode, "/w", false,
+			"file:///w/main.go", "/w/main.go", "/w/main.go"},
+		{"code span, home", vte.Match{Text: "`~/notes.md`"}, linkCode, "/w", false,
+			"file://" + homeNotes, homeNotes, homeNotes},
+		{"remote code span", vte.Match{Text: "`docs/a.md`"}, linkCode, "/w", true, "", "docs/a.md", "/w/docs/a.md"},
+		{"code span, no cwd", vte.Match{Text: "`docs/a.md`"}, linkCode, "", false, "", "docs/a.md", ""},
+		{"relative path", vte.Match{Text: "pkg/ui/x.go:12:5"}, linkRelative, "/w/repo", false,
+			"file:///w/repo/pkg/ui/x.go", "/w/repo/pkg/ui/x.go", "/w/repo/pkg/ui/x.go"},
+		{"remote relative path", vte.Match{Text: "src/a.c:3"}, linkRelative, "/w", true, "", "src/a.c", "/w/src/a.c"},
 		{"file url", vte.Match{Text: "file:///tmp/a.png"}, linkURL, "", false,
 			"file:///tmp/a.png", "file:///tmp/a.png", "/tmp/a.png"},
 		{"ls hyperlink", vte.Match{Text: "file://" + hostname + "/tmp/b.png", Hyperlink: true}, linkURL, "", false,
@@ -160,8 +180,8 @@ func TestResolveLink(t *testing.T) {
 			// Windows paths. Paths on other hosts are theirs, so they're unchanged.
 			if !strings.HasPrefix(c.m.Text, "file:") && strings.HasPrefix(c.wantURI, "file:") {
 				c.wantURI, c.wantText = "", markdownDestination(c.m.Text)
-				if c.kind == linkPath {
-					c.wantText = lineSuffix.ReplaceAllString(c.m.Text, "")
+				if c.kind == linkPath || c.kind == linkCode || c.kind == linkRelative {
+					c.wantText = lineSuffix.ReplaceAllString(strings.Trim(c.m.Text, "`"), "")
 				}
 			}
 			c.wantFile = ""
@@ -179,6 +199,29 @@ func TestLinkPatternsSkipBrackets(t *testing.T) {
 		text, kind, _, ok := linkInLines([]string{line}, 200, 10, 0) //nolint:mnd
 		if !ok || kind != linkURL || text != url {
 			t.Errorf("%q: got %q, %v, %v; want %q", line, text, kind, ok, url)
+		}
+	}
+}
+
+// TestLinkPatternOrder checks which pattern a link matches where several could.
+func TestLinkPatternOrder(t *testing.T) {
+	cases := []struct {
+		line string
+		col  int
+		want string
+		kind linkKind
+	}{
+		{"error in ../lib/y.c:3", 13, "../lib/y.c:3", linkPath},
+		{"see `/etc/hosts` here", 8, "/etc/hosts", linkPath},
+		{"see `https://x.org/a.md` here", 10, "https://x.org/a.md", linkURL},
+		{"see `src/a.go` here", 8, "`src/a.go`", linkCode},
+		{"see [a](src/a.go) here", 10, "[a](src/a.go)", linkMarkdown},
+		{"src/a.go:3:1: oops", 2, "src/a.go:3:1", linkRelative},
+	}
+	for _, c := range cases {
+		text, kind, _, ok := linkInLines([]string{c.line}, 200, c.col, 0) //nolint:mnd
+		if !ok || text != c.want || kind != c.kind {
+			t.Errorf("%q at %d: got %q kind %d ok %v, want %q kind %d", c.line, c.col, text, kind, ok, c.want, c.kind)
 		}
 	}
 }

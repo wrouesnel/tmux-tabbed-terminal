@@ -28,6 +28,12 @@ const (
 	// such as /var/log/syslog, ~/notes.md or ./out/a.tar, perhaps with a line and column
 	// after it, as in compilers' messages.
 	linkPath
+	// linkCode is a path in a markdown code span, relative to the current directory unless
+	// it says otherwise, such as `pkg/ui/links.go` or `README.md`.
+	linkCode
+	// linkRelative is a relative path to a file, such as pkg/ui/links.go:12:5 in a
+	// compiler's message.
+	linkRelative
 )
 
 // Link patterns, matched by VTE with PCRE2. They're also valid Go regexps, so the tests
@@ -48,15 +54,27 @@ var linkPatterns = []struct {
 	// a quoted title.
 	{linkMarkdown, `!?\[[^\[\]\n]*\]\((?:<[^<>\n]+>|[^\s()<>]+)(?:\s+"[^"\n]*")?\)`},
 	// A URL may hold balanced parentheses, as Wikipedia's do, but doesn't end in
-	// punctuation, which is usually the sentence's. The group repeats once per
-	// parenthesis, not per character.
-	{linkURL, `\b(?:https?|ftp|file)://(?:[^\s()<>"'\[\]{}]*(?:\([^\s()<>]*\)|[^\s()<>"'\[\]{}.,;:!?]))+`},
+	// punctuation, which is usually the sentence's, or hold a backquote, which ends a code
+	// span. The group repeats once per parenthesis, not per character.
+	{linkURL, `\b(?:https?|ftp|file)://(?:[^\s()<>"'\[\]{}\x60]*(?:\([^\s()<>\x60]*\)|[^\s()<>"'\[\]{}\x60.,;:!?]))+`},
 	// Paths last, so the path part of a URL opens as the URL. A path starts with /, ~/,
 	// ./ or ../, and not straight after a letter or digit, which \B checks, so that and/or
 	// and 10/22 aren't paths. The first character after the slash is a letter, digit, _,
 	// . or ~, so +/- isn't one either. Like a URL, it doesn't end in punctuation. \x60 is
 	// a backquote.
 	{linkPath, `\B(?:~|\.\.?)?/(?:[\w.~][^\s"'<>|;&(){}\[\]\x60]*[^\s"'<>|;&(){}\[\]\x60.,:;!?]|\w)`},
+	// A code span, which the backquotes around it mark as something to take literally,
+	// is a path if it holds a slash, or is a file name with an extension. That includes
+	// some code, such as `os.Exit`, which opens nothing, but a span is still the likeliest
+	// place for a bare file name. The first character isn't a slash: absolute paths match
+	// as paths, inside the backquotes.
+	{linkCode, `\x60(?:[\w.~-][^\s\x60]*/[^\s\x60]*|[\w.~-]*\w\.[a-z]\w*(?::\d+){0,2})\x60`},
+	// Outside a code span, a relative path needs more to tell it from prose: a slash, and
+	// a file name with an extension, starting with a letter, at the end. So and/or, w/o,
+	// TCP/IP and 10/22/2026 aren't paths. It may start with a dot, as .github/ does, but
+	// not after a letter or digit. It matches inside paths too, such as lib/y.c in
+	// ../lib/y.c, but those match as paths first.
+	{linkRelative, `(?:\B\.|\b)[\w-][\w./-]*/[\w-][\w.-]*\.[a-z]\w*(?::\d+){0,2}`},
 }
 
 // linkRegexps are the link patterns compiled with Go's regexps, for finding links in
@@ -222,9 +240,9 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 		dest = trimUnbalancedBrackets(dest)
 	case kind == linkMarkdown:
 		dest = markdownDestination(m.Text)
-	case kind == linkPath:
+	case kind == linkPath || kind == linkCode || kind == linkRelative:
 		// A path is taken as it is, not as a URL, whose ? and # it may hold.
-		dest = lineSuffix.ReplaceAllString(dest, "")
+		dest = lineSuffix.ReplaceAllString(strings.Trim(dest, "\x60"), "")
 		if runtime.GOOS == "windows" && !remote {
 			return link{text: dest}
 		}
