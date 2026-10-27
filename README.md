@@ -134,6 +134,28 @@ RHEL 8's tmux is 2.7, which works. RHEL 10's tmux is a pre-release snapshot (it 
 Scrollback refuses to run against it rather than end every session; everything else
 works.
 
+### Windows 10 and 11
+
+Each release has a per-user installer, which needs no administrator rights and nothing
+else installed: it brings its own GTK and tmux. The installer isn't signed yet, so Windows
+SmartScreen stops it when it's downloaded with a browser. In PowerShell, this downloads the
+latest release's installer, checks it against the release's SHA-256 checksum, and runs it,
+which SmartScreen doesn't stop:
+
+```powershell
+$release = Invoke-RestMethod https://api.github.com/repos/wrouesnel/tmux-tabbed-terminal/releases/latest
+$asset = $release.assets | Where-Object name -Like '*-windows-amd64-setup.exe'
+$installer = Join-Path $env:TEMP $asset.name
+Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $installer
+Invoke-WebRequest -UseBasicParsing "$($asset.browser_download_url).sha256" -OutFile "$installer.sha256"
+$want = (Get-Content "$installer.sha256" -Raw).Split(' ')[0]
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne $want) { throw "Checksum mismatch: $installer" }
+Start-Process -Wait $installer
+```
+
+New sessions run PowerShell; Preferences picks another shell, or a tmux of your own, such
+as MSYS2's.
+
 ### From a release
 
 Each [GitHub release](https://github.com/wrouesnel/tmux-tabbed-terminal/releases) has the
@@ -292,13 +314,8 @@ of that architecture. Cross-compiling needs `CC` and `PKG_CONFIG_LIBDIR` set for
 
 ### Windows
 
-Windows support is in progress. Each release has a per-user installer,
-`tmux-tabbed-terminal-<version>-windows-amd64-setup.exe`, which needs no administrator
-rights and nothing else installed: it brings the GTK runtime and a private MSYS2 tmux, and
-new sessions run PowerShell unless Preferences picks another shell. Preferences can switch
-to a tmux in PATH, such as MSYS2's own, instead.
-
-It builds in an [MSYS2](https://www.msys2.org/) UCRT64 shell, as CI builds it:
+Windows support is newer and less tested than Linux; [Install](#windows-10-and-11) has
+the installer. It builds in an [MSYS2](https://www.msys2.org/) UCRT64 shell, as CI builds it:
 
 ```sh
 pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-go mingw-w64-ucrt-x86_64-gtk3 \
