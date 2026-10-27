@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -118,11 +119,13 @@ func (w *Window) downloadLinkTo(l link, dest string) {
 		name, dir = filepath.Base(dest), filepath.Dir(dest)
 	}
 	log := w.app.log.With(zap.String("host", l.host), zap.String("file", l.file))
-	w.setStatus("Downloading " + name + "…")
 
 	// Downloads can take longer than other commands, so they run until the application
-	// stops rather than for the usual command timeout.
-	ctx := w.app.ctx
+	// stops, or they're cancelled, rather than for the usual command timeout.
+	ctx, cancel := context.WithCancel(w.app.ctx)
+	d := newDownload(name, l.host, cancel)
+	list := w.app.downloadList
+	list.add(d)
 	go func() {
 		saved, err := func() (string, error) {
 			if err := os.MkdirAll(dir, 0o700); err != nil { //nolint:mnd // owner only
@@ -134,7 +137,7 @@ func (w *Window) downloadLinkTo(l link, dest string) {
 				return "", err
 			}
 			defer os.Remove(tmp.Name())
-			copyErr := h.client.SSH.CopyFile(ctx, tmp, l.file)
+			copyErr := h.client.SSH.CopyFileSized(ctx, countingWriter{w: tmp, n: &d.received}, l.file, d.total.Store)
 			if err := tmp.Close(); copyErr == nil {
 				copyErr = err
 			}
@@ -148,14 +151,21 @@ func (w *Window) downloadLinkTo(l link, dest string) {
 			return to, os.Rename(tmp.Name(), to)
 		}()
 		glib.IdleAdd(func() {
-			w.setStatus("")
-			if err != nil {
+			cancel()
+			defer list.changed()
+			switch {
+			case d.cancelled:
+				d.state = downloadCancelled
+				log.Info("Download cancelled")
+			case err != nil:
+				d.state, d.err = downloadFailed, err
 				log.Error("Could not download", zap.Error(err))
 				w.showError("Could not download "+name, err.Error())
-				return
+			default:
+				d.state, d.path = downloadDone, saved
+				log.Info("Downloaded", zap.String("to", saved))
+				w.downloads.show(saved)
 			}
-			log.Info("Downloaded", zap.String("to", saved))
-			w.downloads.show(saved)
 		})
 	}()
 }

@@ -451,6 +451,50 @@ func TestCopyFileThroughSSH(t *testing.T) {
 	}
 }
 
+// TestCopyFileSized checks a copy reports the file's size before its contents, and that
+// the size line, however it's split across writes, isn't part of the file.
+func TestCopyFileSized(t *testing.T) {
+	fake, err := filepath.Abs("testdata/fake-ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssh := &tmux.SSH{Destination: "test-host", Binary: fake, ControlDir: t.TempDir()}
+	dir := t.TempDir()
+	for _, content := range [][]byte{[]byte("12345\n67890"), {}} {
+		name := filepath.Join(dir, "f")
+		if err := os.WriteFile(name, content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var out bytes.Buffer
+		size := int64(-1)
+		err := ssh.CopyFileSized(context.Background(), &out, name, func(n int64) {
+			if out.Len() != 0 {
+				t.Error("the size came after some of the file")
+			}
+			size = n
+		})
+		if err != nil || size != int64(len(content)) || !bytes.Equal(out.Bytes(), content) {
+			t.Errorf("%q: size %d, copied %q, %v", content, size, out.Bytes(), err)
+		}
+	}
+
+	// One byte at a time, as a slow connection might deliver it.
+	var out bytes.Buffer
+	size := int64(-1)
+	sw := tmux.NewSizeWriter(&out, func(n int64) { size = n })
+	for _, b := range []byte("   42\nabc") {
+		if _, err := sw.Write([]byte{b}); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	if size != 42 || out.String() != "abc" {
+		t.Errorf("byte at a time: size %d, file %q", size, out.String())
+	}
+	if _, err := tmux.NewSizeWriter(&out, nil).Write([]byte("not a size\n")); err == nil {
+		t.Error("a bad size line was taken")
+	}
+}
+
 // TestRemoteThroughHops runs tmux through three nested ssh hops, each a fake ssh which
 // runs its command through a shell, as each real hop's sshd would. The quoting has to
 // survive a shell per hop.

@@ -46,8 +46,12 @@ or split the window to watch several sessions side by side.
 * **Downloads.** A path in a remote session names a file on that host: Ctrl+click it, or
   right-click it and pick Save, to copy it into your Downloads folder over the host's
   ssh connection. A file already there of the same name is kept, and the new one gets a
-  number. Save As… asks where to put it instead, and asks before replacing a file. When it's done, a notice at the bottom of the window offers to open the file or
-  its folder. Only files can be downloaded, not directories.
+  number. Save As… asks where to put it instead, and asks before replacing a file. While
+  a download runs, its progress shows in the title bar, beside the downloads button.
+  The button lists every download, with progress bars for those running, which can be
+  cancelled, and Open and Show in Folder for those done; Clear Finished empties the
+  list. When a download is done, a notice at the bottom of the window offers to open the
+  file or its folder too. Only files can be downloaded, not directories.
 * **Image previews.** Rest the pointer on a link to an image file, local or on a remote
   host, and a preview of it pops up, scaled to fit 360×270 pixels. Remote images are read
   over the host's ssh connection, and files over 32 MiB are skipped. Images on the web

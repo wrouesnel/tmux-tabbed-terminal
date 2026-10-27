@@ -1,12 +1,14 @@
 package tmux
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -345,17 +347,74 @@ func (s *SSH) Stream(ctx context.Context, w io.Writer, remote ...string) error {
 	return nil
 }
 
-// fileScript writes the file named by its first argument to standard output, refusing
-// anything that isn't a regular file, such as a directory. A name starting with ~/ is in
-// the home directory.
+// fileScript writes the size of the file named by its first argument, on a line of its
+// own, and then the file, to standard output. It refuses anything that isn't a regular
+// file, such as a directory. A name starting with ~/ is in the home directory.
 const fileScript = `case $1 in "~/"*) set -- "$HOME/${1#"~/"}" ;; esac
 [ -f "$1" ] || { echo "$1 isn't a file" >&2; exit 1; }
+wc -c < "$1" || exit 1
 exec cat -- "$1"`
 
 // CopyFile copies a file on the destination to w. A name starting with ~/ is in the home
 // directory there.
 func (s *SSH) CopyFile(ctx context.Context, w io.Writer, name string) error {
-	return s.Stream(ctx, w, "sh", "-c", fileScript, "sh", name)
+	return s.CopyFileSized(ctx, w, name, nil)
+}
+
+// CopyFileSized is CopyFile, calling size, if it isn't nil, with the file's size in bytes
+// before any of it is written to w.
+func (s *SSH) CopyFileSized(ctx context.Context, w io.Writer, name string, size func(int64)) error {
+	sw := &sizeWriter{w: w, size: size}
+	if err := s.Stream(ctx, sw, "sh", "-c", fileScript, "sh", name); err != nil {
+		return err
+	}
+	if !sw.sized {
+		return errors.Errorf("%s: no size came before the file", name)
+	}
+	return nil
+}
+
+// sizeWriter takes the line with a file's size off the front of what's written to it, and
+// passes the rest, the file, on to w.
+type sizeWriter struct {
+	w      io.Writer
+	size   func(int64)
+	header []byte
+	sized  bool
+}
+
+// maxSizeLine is the longest the size line can be: wc pads it with spaces on some
+// systems, but not by much.
+const maxSizeLine = 64
+
+func (sw *sizeWriter) Write(p []byte) (int, error) {
+	if sw.sized {
+		return sw.w.Write(p)
+	}
+	n := len(p)
+	i := bytes.IndexByte(p, '\n')
+	if i < 0 {
+		sw.header = append(sw.header, p...)
+		if len(sw.header) > maxSizeLine {
+			return 0, errors.New("the file's size is missing")
+		}
+		return n, nil
+	}
+	sw.header = append(sw.header, p[:i]...)
+	size, err := strconv.ParseInt(strings.TrimSpace(string(sw.header)), 10, 64)
+	if err != nil {
+		return 0, errors.Wrap(err, "reading the file's size")
+	}
+	sw.sized = true
+	if sw.size != nil {
+		sw.size(size)
+	}
+	if rest := p[i+1:]; len(rest) > 0 {
+		if _, err := sw.w.Write(rest); err != nil {
+			return 0, err
+		}
+	}
+	return n, nil
 }
 
 // Name describes the route to the destination, such as "db via bastion".

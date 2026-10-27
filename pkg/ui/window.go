@@ -45,8 +45,10 @@ type Window struct {
 	activePane *Pane
 	// contextLink is the link the terminal menu was last opened on, if any.
 	contextLink link
-	// downloads tells of finished downloads.
-	downloads *downloadBar
+	// downloads tells of finished downloads, and downloadsView, in the title bar, shows
+	// them all, with the progress of those running.
+	downloads     *downloadBar
+	downloadsView *downloadsView
 
 	actions       map[string]*glib.SimpleAction
 	sidebarAction *glib.SimpleAction
@@ -127,6 +129,9 @@ func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 	splitBtn.SetActionName("win.split-right")
 	splitBtn.SetTooltipText("Split Right (Ctrl+Shift+E)")
 	hb.PackEnd(splitBtn)
+
+	w.downloadsView = newDownloadsView(w)
+	hb.PackEnd(w.downloadsView.button)
 	return hb
 }
 

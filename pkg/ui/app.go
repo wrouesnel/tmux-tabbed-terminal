@@ -65,6 +65,8 @@ type App struct {
 	askpassEnv  []string
 	passphrases *askpass.Memory
 	prompts     []prompt
+	// downloadList is every download, shown in each window's title bar.
+	downloadList *downloadList
 
 	ctx     context.Context
 	log     *zap.Logger
@@ -142,6 +144,7 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		showTabs:     true,
 		tabsBottom:   cfg.TabBar.Position == "bottom",
 	}
+	app.downloadList = &downloadList{app: app}
 	if st, err := loadState(stateFile()); err != nil {
 		app.log.Warn("Could not read UI state", zap.Error(err))
 	} else {

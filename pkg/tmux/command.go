@@ -4,7 +4,15 @@ import (
 	"context"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// waitDelay is how long a command's output is still read once it has been killed, as
+// when its context ends, or after it exits. A command run over an ssh master hands its
+// output pipe to the master, which keeps writing to it, and holding it open, after the
+// command itself is gone: without a limit, cancelling a download would wait for the
+// whole file.
+const waitDelay = 2 * time.Second
 
 // Command is exec.CommandContext for tmux and ssh. On Windows, it quotes every argument
 // on the command line the program is given. A Cygwin or MSYS2 program, such as their
@@ -12,6 +20,7 @@ import (
 // and so would make tmux's #{format} strings into #format, but leaves quoted ones alone.
 func Command(ctx context.Context, argv []string) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // tmux and ssh are configured by the user
+	cmd.WaitDelay = waitDelay
 	quoteArgs(cmd)
 	return cmd
 }
