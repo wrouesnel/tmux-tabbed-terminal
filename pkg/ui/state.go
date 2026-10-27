@@ -27,6 +27,9 @@ type uiState struct {
 	HideTabBar bool `yaml:"hide-tab-bar,omitempty"`
 	// TabBarBottom puts the tab bar below the panes rather than above them.
 	TabBarBottom *bool `yaml:"tab-bar-bottom,omitempty"`
+	// SSHConfigFile is the ssh configuration file chosen in Preferences, "" for
+	// ~/.ssh/config.
+	SSHConfigFile *string `yaml:"ssh-config-file,omitempty"`
 	// UseSystemTmux and DefaultShell are the tmux choices made in Preferences.
 	UseSystemTmux *bool   `yaml:"use-system-tmux,omitempty"`
 	DefaultShell  *string `yaml:"default-shell,omitempty"`

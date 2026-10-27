@@ -82,9 +82,25 @@ func Load(path string) ([]Host, error) {
 	return LoadFrom(localSource{}, path)
 }
 
+// LoadUser reads the hosts of a user configuration at path, as ssh -F reads it: Include
+// paths which aren't absolute are under ~/.ssh, wherever the file is.
+func LoadUser(configPath string) ([]Host, error) {
+	dir := path.Dir(configPath)
+	if home, err := os.UserHomeDir(); err == nil {
+		dir = filepath.Join(home, ".ssh")
+	}
+	return loadFrom(localSource{}, configPath, dir)
+}
+
 // LoadFrom reads the hosts of the configuration at path from a source, as Load does.
 func LoadFrom(src Source, configPath string) ([]Host, error) {
-	p := &parser{src: src, sshDir: path.Dir(configPath), index: map[string]int{}, seen: map[string]bool{}}
+	return loadFrom(src, configPath, path.Dir(configPath))
+}
+
+// loadFrom reads the hosts of the configuration at path from a source, with relative
+// Include paths under sshDir.
+func loadFrom(src Source, configPath, sshDir string) ([]Host, error) {
+	p := &parser{src: src, sshDir: sshDir, index: map[string]int{}, seen: map[string]bool{}}
 	if err := p.file(configPath, 0); err != nil {
 		return nil, err
 	}

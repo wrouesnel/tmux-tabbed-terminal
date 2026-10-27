@@ -208,6 +208,41 @@ func newPreferences(a *App) *preferences {
 	})
 	add("Window tabs", p.tabBar)
 
+	// The ssh configuration, which hosts are listed from and connected with.
+	sshFile, _ := gtk.FileChooserButtonNew("SSH Configuration File", gtk.FILE_CHOOSER_ACTION_OPEN)
+	sshFile.SetHExpand(true)
+	// ~/.ssh is hidden. gotk3 has no setter for the property.
+	_ = sshFile.SetProperty("show-hidden", true)
+	sshFile.SetTooltipText("The ssh client configuration remote hosts are reached with, as with ssh -F, " +
+		"and which Add Host lists this machine's hosts from")
+	_ = sshFile.SetFilename(a.sshHostsFile())
+	sshDefault, _ := gtk.ButtonNewWithLabel("Default")
+	sshDefault.SetTooltipText("Use ~/.ssh/config, with the system's configuration, as ssh does on its own")
+	sshDefault.SetSensitive(a.sshConfigFile() != "")
+	sshFile.Connect("file-set", func() {
+		if p.loading {
+			return
+		}
+		a.setSSHConfigFile(sshFile.GetFilename())
+		sshDefault.SetSensitive(true)
+	})
+	sshDefault.Connect("clicked", func() {
+		a.setSSHConfigFile("")
+		_ = sshFile.SetFilename(a.sshHostsFile())
+		sshDefault.SetSensitive(false)
+	})
+	sshRow, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, prefsSpacing/2) //nolint:mnd // half spacing
+	sshRow.PackStart(sshFile, true, true, 0)
+	sshRow.PackStart(sshDefault, false, false, 0)
+	add("SSH config", sshRow)
+	sshHint, _ := gtk.LabelNew("Remote hosts use it from their next connection. Another file than " +
+		"~/.ssh/config replaces the system's ssh configuration too, as ssh -F does.")
+	sshHint.SetLineWrap(true)
+	sshHint.SetXAlign(0)
+	sshHint.SetMaxWidthChars(50) //nolint:mnd // a readable line
+	addClass(sshHint, "dim-label")
+	add("", sshHint)
+
 	// tmux. Not appearance preferences either.
 	p.shell, _ = gtk.ComboBoxTextNewWithEntry()
 	for _, shell := range shellChoices() {

@@ -14,3 +14,7 @@ import (
 func quoteArgs(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CmdLine: QuotedCommandLine(cmd.Args), HideWindow: true}
 }
+
+// withoutTerminal does nothing: a Windows program has a console, not a controlling
+// terminal, and SSH_ASKPASS_REQUIRE=force makes ssh use SSH_ASKPASS regardless.
+func withoutTerminal(*exec.Cmd) {}

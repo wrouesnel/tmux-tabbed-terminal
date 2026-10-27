@@ -103,7 +103,11 @@ var errNoOrigin = errors.New("origin host is not listed")
 // newRemoteHost makes a remote host from its configuration. Its origin, if any, must
 // already be listed: the host's ssh runs there.
 func (a *App) newRemoteHost(cfg HostConfig) (*Host, error) {
-	ssh := &tmux.SSH{Destination: cfg.Destination, Options: cfg.SSHOptions, ForwardAgent: cfg.ForwardAgent}
+	ssh := &tmux.SSH{
+		Destination: cfg.Destination, Options: cfg.SSHOptions, ForwardAgent: cfg.ForwardAgent,
+		AskpassEnv: a.askpassEnv,
+	}
+	ssh.SetConfigFile(a.sshConfigFile())
 	if cfg.Via != "" && cfg.Via != LocalHost {
 		via := a.host(cfg.Via)
 		if via == nil {

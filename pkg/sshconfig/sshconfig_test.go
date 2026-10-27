@@ -68,3 +68,23 @@ func TestLoadMissing(t *testing.T) {
 		t.Fatalf("missing file: %v, %v", hosts, err)
 	}
 }
+
+// TestLoadUser reads a configuration outside ~/.ssh, whose relative Include is under
+// ~/.ssh, as ssh -F resolves it.
+func TestLoadUser(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	write(t, filepath.Join(home, ".ssh", "work.d", "hosts"), "Host from-ssh-dir\n")
+	alt := filepath.Join(t.TempDir(), "alt_config")
+	write(t, alt, "Include work.d/*\nHost alt-host\n  HostName alt.example.com\n")
+
+	hosts, err := sshconfig.LoadUser(alt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []sshconfig.Host{{Alias: "from-ssh-dir"}, {Alias: "alt-host", HostName: "alt.example.com"}}
+	if !reflect.DeepEqual(hosts, want) {
+		t.Fatalf("got  %+v\nwant %+v", hosts, want)
+	}
+}

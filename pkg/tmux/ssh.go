@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 )
@@ -21,7 +23,8 @@ import (
 // the stdio it started with, which would hold a command's output pipe, or a terminal's
 // pty, open. Background commands run with BatchMode, so they fail rather than wait for a
 // password; the host needs key or agent authentication. Interactive attaches don't, so ssh
-// can ask the user in the terminal if there's no master.
+// can ask the user in the terminal if there's no master. With AskpassEnv, masters run
+// from this machine ask the user through SSH_ASKPASS instead, as for a key's passphrase.
 //
 // A host can be reached through another (Via): its ssh then runs on that host, so its
 // destination is resolved with that host's ssh configuration and keys. Hops nest to any
@@ -42,6 +45,15 @@ type SSH struct {
 	// ForwardAgent forwards this machine's ssh agent to Via's host for this hop, so the
 	// ssh run there can use the user's keys. Every session on the way forwards it.
 	ForwardAgent bool
+	// AskpassEnv, if set, is the environment which points ssh's SSH_ASKPASS at a program
+	// asking the user. A master run from this machine then asks for what it needs, such
+	// as a key's passphrase, rather than failing in BatchMode. It mustn't change once the
+	// hop is in use.
+	AskpassEnv []string
+
+	// configFile is the ssh configuration file of a hop run from this machine, or "" for
+	// ssh's own choice. It may change while the hop is in use: see SetConfigFile.
+	configFile atomic.Pointer[string]
 
 	// masterMu stops two commands starting a master at once.
 	masterMu sync.Mutex
@@ -52,6 +64,52 @@ type SSH struct {
 
 // controlPersist is how long a master connection stays up after its last use.
 const controlPersist = "10m"
+
+// promptTimeout is how long a master asking the user has to connect: the user may take a
+// while to type a passphrase.
+const promptTimeout = 3 * time.Minute
+
+// SetConfigFile sets the ssh configuration file this hop uses if it runs from this
+// machine, as with ssh -F, or "" for ssh's own, ~/.ssh/config and the system's. Commands
+// started afterwards use it, through a new master.
+func (s *SSH) SetConfigFile(path string) {
+	s.configFile.Store(&path)
+}
+
+// ConfigFile returns the ssh configuration file set with SetConfigFile.
+func (s *SSH) ConfigFile() string {
+	if p := s.configFile.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
+// prompts reports whether this hop's master asks the user for what it needs.
+func (s *SSH) prompts() bool {
+	return s.Via == nil && len(s.AskpassEnv) > 0
+}
+
+// connect starts the master connections of this hop and those before it, for a command
+// to run with ctx. Where a master asks the user, the time they took to answer may pass
+// ctx's deadline: the command then gets a context with the time it had to begin with.
+func (s *SSH) connect(ctx context.Context) (context.Context, context.CancelFunc, error) {
+	budget, hasDeadline := time.Duration(0), false
+	if deadline, ok := ctx.Deadline(); ok {
+		budget, hasDeadline = time.Until(deadline), true
+	}
+	if err := s.ensureMaster(ctx); err != nil {
+		return ctx, func() {}, err
+	}
+	root := s
+	for root.Via != nil {
+		root = root.Via
+	}
+	if hasDeadline && ctx.Err() != nil && root.prompts() {
+		fresh, cancel := context.WithTimeout(context.WithoutCancel(ctx), budget)
+		return fresh, cancel, nil
+	}
+	return ctx, func() {}, nil
+}
 
 // remoteControlPath is where a hop run from another host keeps its master socket. ssh
 // expands ~ and %C (a hash of the connection) itself.
@@ -82,18 +140,26 @@ func (s *SSH) controlPath() string {
 	if dir == "" {
 		dir = DefaultControlDir()
 	}
-	sum := sha256.Sum256([]byte(s.Destination + "\x00" + strings.Join(s.Options, "\x00")))
+	// The configuration file is part of the connection: a different one may reach
+	// another host by the same name.
+	sum := sha256.Sum256([]byte(s.Destination + "\x00" + strings.Join(s.Options, "\x00") + "\x00" + s.ConfigFile()))
 	return filepath.Join(dir, "ssh-"+hex.EncodeToString(sum[:8]))
 }
 
 // commonOptions are the ssh options of every command, before the destination.
 func (s *SSH) commonOptions(master string) []string {
-	opts := []string{
-		"-o", "ControlMaster=" + master,
-		"-o", "ControlPath=" + s.controlPath(),
-		"-o", "ControlPersist=" + controlPersist,
-		"-o", "ServerAliveInterval=15",
+	var opts []string
+	// The configuration file is this machine's: a hop run from another host uses that
+	// host's own.
+	if config := s.ConfigFile(); config != "" && s.Via == nil {
+		opts = append(opts, "-F", config)
 	}
+	opts = append(opts,
+		"-o", "ControlMaster="+master,
+		"-o", "ControlPath="+s.controlPath(),
+		"-o", "ControlPersist="+controlPersist,
+		"-o", "ServerAliveInterval=15",
+	)
 	return append(opts, s.Options...)
 }
 
@@ -102,8 +168,11 @@ func (s *SSH) commonOptions(master string) []string {
 // opens no session of its own, and only sessions asking for the agent (ForwardAgent on
 // the hop beyond) get it.
 func (s *SSH) masterArgs() []string {
-	args := append([]string{"-f", "-N", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "ForwardAgent=yes"},
-		s.commonOptions("yes")...)
+	args := []string{"-f", "-N", "-o", "ConnectTimeout=10", "-o", "ForwardAgent=yes"}
+	if !s.prompts() {
+		args = append(args, "-o", "BatchMode=yes")
+	}
+	args = append(args, s.commonOptions("yes")...)
 	return append(args, "--", s.Destination)
 }
 
@@ -142,8 +211,20 @@ func (s *SSH) ensureMaster(ctx context.Context) error {
 	defer os.Remove(stderr.Name())
 	defer stderr.Close()
 
+	if s.prompts() {
+		// The user may take longer to answer than the caller would wait for a command,
+		// so the master gets its own time. Without a terminal, ssh can only ask through
+		// SSH_ASKPASS, even an older one which doesn't know SSH_ASKPASS_REQUIRE.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), promptTimeout)
+		defer cancel()
+	}
 	cmd := Command(ctx, append([]string{s.binary()}, s.masterArgs()...))
 	cmd.Stderr = stderr
+	if s.prompts() {
+		cmd.Env = append(os.Environ(), s.AskpassEnv...)
+		withoutTerminal(cmd)
+	}
 	if err := cmd.Run(); err != nil {
 		msg, _ := os.ReadFile(stderr.Name())
 		return errors.Wrapf(err, "ssh %s: %s", s.Destination, strings.TrimSpace(string(msg)))
@@ -233,7 +314,9 @@ func (s *SSH) outputForwarding(ctx context.Context, forward bool, remote ...stri
 // Output runs a command on the destination, starting master connections as needed, and
 // returns its standard output.
 func (s *SSH) Output(ctx context.Context, remote ...string) (string, error) {
-	if err := s.ensureMaster(ctx); err != nil {
+	ctx, cancel, err := s.connect(ctx)
+	defer cancel()
+	if err != nil {
 		return "", err
 	}
 	out, err := s.output(ctx, remote...)
@@ -246,7 +329,9 @@ func (s *SSH) Output(ctx context.Context, remote ...string) (string, error) {
 // Stream runs a command on the destination, starting master connections as needed, and
 // copies its standard output to w as it comes.
 func (s *SSH) Stream(ctx context.Context, w io.Writer, remote ...string) error {
-	if err := s.ensureMaster(ctx); err != nil {
+	ctx, cancel, err := s.connect(ctx)
+	defer cancel()
+	if err != nil {
 		return err
 	}
 	argv := s.argv(false, remote)

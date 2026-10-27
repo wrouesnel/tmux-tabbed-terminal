@@ -155,7 +155,11 @@ func Environ(env []string) []string {
 // run runs a tmux command and returns its standard output.
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 	if c.SSH != nil {
-		if err := c.SSH.ensureMaster(ctx); err != nil {
+		var cancel context.CancelFunc
+		var err error
+		ctx, cancel, err = c.SSH.connect(ctx)
+		defer cancel()
+		if err != nil {
 			return "", err
 		}
 	}

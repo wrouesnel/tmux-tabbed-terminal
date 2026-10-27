@@ -13,6 +13,7 @@ import (
 
 	"github.com/wrouesnel/ctxstdio"
 	"github.com/wrouesnel/kongutil"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/askpass"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
 
 	"github.com/chigopher/pathlib"
@@ -81,6 +82,13 @@ func nextFreePath(base string) (string, bool) {
 func Entrypoint(ctx context.Context, args []string) (exitCode int) {
 	stdOut := ctxstdio.StdOut(ctx)
 	stdErr := ctxstdio.StdErr(ctx)
+
+	// ssh runs this program as its SSH_ASKPASS, with only its prompt as an argument, to
+	// ask the running application for a passphrase. Its output is the answer, so nothing
+	// else may be written to it.
+	if os.Getenv(askpass.ModeEnv) == "1" {
+		return askpass.Main(ctx, args, stdOut, stdErr)
+	}
 
 	defer func() {
 		if r := recover(); r != nil {

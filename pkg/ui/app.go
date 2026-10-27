@@ -8,6 +8,7 @@ package ui
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -20,7 +21,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/askpass"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sshconfig"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/vte"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
@@ -54,6 +57,15 @@ type Options struct {
 
 // App is the running application.
 type App struct {
+	// askpass answers ssh's requests, as for a key's passphrase, and askpassEnv is the
+	// environment which points ssh at it, or nil if ssh can't ask. passphrases are those
+	// the user chose to remember, and prompts the requests waiting for a dialog, the
+	// first showing.
+	askpass     *askpass.Server
+	askpassEnv  []string
+	passphrases *askpass.Memory
+	prompts     []prompt
+
 	ctx     context.Context
 	log     *zap.Logger
 	cfg     Config
@@ -148,7 +160,10 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 
 	gtkApp.Connect("startup", app.startup)
 	gtkApp.Connect("activate", func() { app.NewWindow() })
-	gtkApp.Connect("shutdown", stopPolling)
+	gtkApp.Connect("shutdown", func() {
+		stopPolling()
+		app.stopAskpass()
+	})
 
 	go func() {
 		<-ctx.Done()
@@ -191,6 +206,8 @@ func (a *App) startup() {
 	}
 	a.startHost(local)
 
+	// Remote hosts' ssh asks the user through this.
+	a.startAskpass()
 	saved, err := loadHosts(hostsFile())
 	if err != nil {
 		a.log.Warn("Could not read saved hosts", zap.Error(err))
@@ -708,6 +725,47 @@ func (a *App) setTabsBottom(bottom bool) {
 	a.saveState()
 	for w := range a.windows {
 		w.placeTabs()
+	}
+}
+
+// sshConfigFile returns the ssh configuration file chosen in Preferences or the
+// configuration, with ~ expanded, or "" for ssh's own, ~/.ssh/config.
+func (a *App) sshConfigFile() string {
+	file := a.cfg.SSH.ConfigFile
+	if a.state.SSHConfigFile != nil {
+		file = *a.state.SSHConfigFile
+	}
+	if rest, ok := strings.CutPrefix(file, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			file = filepath.Join(home, rest)
+		}
+	}
+	return file
+}
+
+// sshHostsFile returns the ssh configuration file the hosts of this machine are listed
+// from: the chosen one, or ~/.ssh/config.
+func (a *App) sshHostsFile() string {
+	if file := a.sshConfigFile(); file != "" {
+		return file
+	}
+	return sshconfig.DefaultPath()
+}
+
+// setSSHConfigFile chooses the ssh configuration file, or "" for ~/.ssh/config, and
+// remembers it. Hosts' ssh run from here uses it from its next connection.
+func (a *App) setSSHConfigFile(file string) {
+	// ~/.ssh/config chosen by name is ssh's own choice: with -F, ssh would leave out the
+	// system's configuration.
+	if file == sshconfig.DefaultPath() {
+		file = ""
+	}
+	a.state.SSHConfigFile = &file
+	a.saveState()
+	for _, h := range a.hosts {
+		if h.client.SSH != nil {
+			h.client.SSH.SetConfigFile(a.sshConfigFile())
+		}
 	}
 }
 

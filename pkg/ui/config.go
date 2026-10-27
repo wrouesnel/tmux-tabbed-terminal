@@ -15,6 +15,7 @@ type Config struct {
 	TabBar     TabBarConfig     `yaml:"tab-bar"`
 	Clipboard  ClipboardConfig  `yaml:"clipboard"`
 	Keyboard   KeyboardConfig   `yaml:"keyboard"`
+	SSH        SSHConfig        `yaml:"ssh"`
 	Links      LinksConfig      `yaml:"links"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
 	// Hosts are remote hosts whose sessions are listed, besides those added in the UI.
@@ -129,6 +130,20 @@ type KeyboardConfig struct {
 	Shortcuts map[string][]string `yaml:"shortcuts"`
 }
 
+// SSHConfig sets how remote hosts are reached with ssh.
+type SSHConfig struct {
+	// ConfigFile is the ssh client configuration this machine's ssh uses, as with ssh -F,
+	// and which "Add Host" lists this machine's hosts from. Empty means ~/.ssh/config,
+	// with the system's configuration too, as ssh reads them on its own. Preferences
+	// changes it, and that choice is remembered.
+	ConfigFile string `yaml:"config-file"`
+	// AskForPassphrases shows a dialog when ssh needs to ask something to connect from
+	// this machine, as for a key's passphrase, which can be remembered while the
+	// application runs. Without it, ssh connects in BatchMode, so it needs keys without
+	// passphrases or an agent holding them.
+	AskForPassphrases bool `yaml:"ask-for-passphrases"`
+}
+
 // BehaviourConfig sets what the application does on its own.
 type BehaviourConfig struct {
 	// CreateSessionOnStart creates a session when a window opens and there are none.
@@ -174,6 +189,9 @@ func DefaultConfig() Config {
 		},
 		Clipboard: ClipboardConfig{
 			FromTmux: true,
+		},
+		SSH: SSHConfig{
+			AskForPassphrases: true,
 		},
 		Links: LinksConfig{
 			ImagePreviews: true,

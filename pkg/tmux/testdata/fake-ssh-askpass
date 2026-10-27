@@ -1,0 +1,33 @@
+#!/bin/sh
+# Stands in for ssh connecting with a key which has a passphrase. A master (-N) asks for
+# it through SSH_ASKPASS, as ssh does without a terminal, and connects if the answer is
+# "right", leaving a file at its ControlPath for -O check to find. Other commands run the
+# remote command locally, as fake-ssh does. Every command's arguments go to $FAKE_SSH_LOG.
+printf '%s\n' "$*" >> "$FAKE_SSH_LOG"
+control="" check="" master=""
+for arg in "$@"; do
+	case "$arg" in
+	ControlPath=*) control="${arg#ControlPath=}" ;;
+	check) check=1 ;;
+	-N) master=1 ;;
+	esac
+done
+if [ -n "$check" ]; then
+	[ -e "$control" ]
+	exit
+fi
+if [ -n "$master" ]; then
+	answer=$("$SSH_ASKPASS" "Enter passphrase for key '/home/u/.ssh/id_test': ") || exit 255
+	[ "$answer" = right ] || exit 255
+	: > "$control"
+	exit 0
+fi
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--) shift; break ;;
+	-o|-p|-l|-i|-F|-O) shift 2 ;;
+	*) shift ;;
+	esac
+done
+shift
+exec sh -c "$*"

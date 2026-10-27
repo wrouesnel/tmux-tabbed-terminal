@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -891,9 +892,10 @@ func (w *Window) AddHostDialog(origin string) {
 	entry.SetPlaceholderText("user@example.com")
 	entry.SetActivatesDefault(true)
 	entry.SetWidthChars(36) //nolint:mnd // room for a typical user@host
-	hint, _ := gtk.LabelNew("An ssh destination or ~/.ssh/config alias, as the origin knows it. ssh " +
-		"runs on the origin, with its configuration and keys. The host needs key or agent " +
-		"authentication, and tmux installed.")
+	hint, _ := gtk.LabelNew("An ssh destination or ssh config alias, as the origin knows it. ssh " +
+		"runs on the origin, with its configuration and keys. The host needs tmux installed. From " +
+		"this computer, ssh asks for a key's passphrase if it needs one; from another origin, the " +
+		"host needs key or agent authentication.")
 	hint.SetLineWrap(true)
 	hint.SetMaxWidthChars(48) //nolint:mnd // dialog width
 	hint.SetXAlign(0)
@@ -971,7 +973,7 @@ func (w *Window) AddHostDialog(origin string) {
 		list.ShowAll()
 		scroller.SetVisible(len(hosts) > 0)
 		status.SetVisible(len(hosts) == 0)
-		status.SetText("No hosts in its ~/.ssh/config.")
+		status.SetText("No hosts in its ssh configuration.")
 	}
 	entry.Connect("changed", func() {
 		if !filling && list != nil {
@@ -986,9 +988,14 @@ func (w *Window) AddHostDialog(origin string) {
 		current = origin
 		generation++
 		gen := generation
-		heading.SetText("From ~/.ssh/config on " + strings.ToLower(originLabel(origin)[:1]) + originLabel(origin)[1:])
+		file := "~/.ssh/config"
 		if origin == LocalHost {
-			hosts, err := sshconfig.Load(sshconfig.DefaultPath())
+			// The file Preferences chose, which this machine's ssh connects with.
+			file = tildePath(w.app.sshHostsFile())
+		}
+		heading.SetText("From " + file + " on " + strings.ToLower(originLabel(origin)[:1]) + originLabel(origin)[1:])
+		if origin == LocalHost {
+			hosts, err := sshconfig.LoadUser(w.app.sshHostsFile())
 			if err != nil {
 				w.app.log.Warn("Could not read the ssh configuration", zap.Error(err))
 			}
@@ -1115,6 +1122,18 @@ func sshHostRow(h sshconfig.Host, added bool) *gtk.ListBoxRow {
 const dialogPadding = 12
 
 // padded gives a dialog's content its margin.
+// tildePath shortens a path in the home directory to start with ~, as people write it.
+func tildePath(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return p
+	}
+	if rel, err := filepath.Rel(home, p); err == nil && !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel) {
+		return "~/" + filepath.ToSlash(rel)
+	}
+	return p
+}
+
 func padded(widget gtk.IWidget) gtk.IWidget {
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	box.SetMarginStart(dialogPadding)

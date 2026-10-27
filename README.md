@@ -20,7 +20,14 @@ or split the window to watch several sessions side by side.
   terminals with Window tabs in Preferences; both choices are remembered.
 * **Other hosts.** "Add Host" under the list connects to another machine over ssh and
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
-  sessions open in panes like local ones.
+  sessions open in panes like local ones. Hosts are listed from `~/.ssh/config`, or
+  another ssh configuration chosen as SSH config in Preferences, which ssh then connects
+  with too (as `ssh -F`).
+* **Key passphrases.** When ssh needs a key's passphrase to connect, a dialog asks for it.
+  With "Remember for this session" ticked, the passphrase is kept in memory, never on
+  disk, until the application quits, so other connections with the key don't ask again;
+  a passphrase the key no longer takes is forgotten and asked for again. Hosts reached
+  through another host use the keys there, or the agent forwarded to it.
 * **Links.** URLs, markdown links and images such as `[docs](docs/README.md)` or
   `![shot](img/a.png)`, file paths, and hyperlinks that programs such as `ls --hyperlink`
   print are underlined under the pointer. Clicking one copies its text as shown, such as
@@ -206,10 +213,19 @@ activity:
 "Add Host" takes an ssh destination: `user@host`, or an alias from `~/.ssh/config`, which
 is the place for ports, jump hosts and keys. The dialog lists the concrete hosts of
 `~/.ssh/config` and the files it includes (wildcard patterns are left out); typing
-filters the list, a click fills in the host and a double click adds it. The host needs tmux installed, and key or
-agent authentication: the session list is polled in the background with ssh's
-`BatchMode`, so it can't prompt for a password. If ssh has never seen the host's key,
-connect to it once by hand to accept it.
+filters the list, a click fills in the host and a double click adds it. SSH config in
+Preferences, or `ssh.config-file` in the configuration file, uses another ssh
+configuration instead, for both the list and connecting, as `ssh -F` does: relative
+`Include`s in it are under `~/.ssh`, and the system's `/etc/ssh/ssh_config` is no longer
+read.
+
+The host needs tmux installed. When ssh, connecting from this machine, needs to ask
+something, a dialog asks: a key's passphrase, which can be remembered until the
+application quits, a password, or whether to trust a host key it hasn't seen before. The
+dialog runs as ssh's `SSH_ASKPASS`. The session list is then polled over that connection.
+With `ssh.ask-for-passphrases: false`, ssh connects in `BatchMode` instead, so the host
+needs key or agent authentication, and a new host's key must be accepted by connecting
+once by hand. A host reached through another always connects so, from that host.
 
 All commands to a host share one ssh master connection (`ControlMaster`), started on first
 use and kept for 10 minutes after the last. Its socket is under
