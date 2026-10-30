@@ -57,6 +57,16 @@ or split the window to watch several sessions side by side.
   over the host's ssh connection, and files over 32 MiB are skipped. Images on the web
   aren't fetched. Turn previews off with `links.image-previews: false` in the
   configuration file.
+* **File previews.** Right-click a link to a markdown file or an image, local or on a
+  remote host, and choose Preview in Split to show it in a pane beside the terminal, as
+  the plans, reports and screenshots a coding agent writes. Markdown is formatted as
+  GitHub formats it: headings, lists and task lists, tables, code, quotes, links, and the
+  images it shows from the same host. An image is scaled to fit the pane. The preview
+  reloads when the file changes, and the next file previewed replaces it. Links to other
+  markdown files and images open in the preview, with a Back button; web links open in
+  the browser. Raw HTML in markdown shows as written, code isn't highlighted, and files
+  over 32 MiB aren't shown. On Windows, only files on remote hosts can be previewed so
+  far, as with other links to paths.
 * **Clipboard.** Text copied in tmux lands on the desktop clipboard, from this machine and
   from remote hosts, so it pastes into other applications: each new tmux paste buffer, as
   copy mode makes, and as programs make with OSC 52 when tmux's `set-clipboard` option is
@@ -173,6 +183,7 @@ In the session list, click a session to show it in the focused pane, or
 drag it onto a pane. Middle-click or Ctrl+click opens it in a new pane to the right. Right-click gives Open in Split Right,
 Open in Split Down, Rename and Kill, and Detach for a session shown in the window, which
 leaves the session running and its panes on the Detached page. In a terminal, right-click gives copy, paste and split,
+and on a link, Open Link, Preview in Split, Save, Save As… and Copy Link,
 even with tmux's `mouse` option on; a program that uses the mouse, such as vim or htop,
 gets the click instead, and Shift+right-click gives the menu there. Copy and Paste are
 also in the main menu.
@@ -419,6 +430,7 @@ MIT: see [LICENSE](LICENSE). The binary links
 | `pkg/termwidget` | A prototype terminal widget for where VTE isn't available: an emulator, a pty (ConPTY on Windows) and a GTK drawing area. Kept free of the rest of the repository, to be split out. |
 | `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
 | `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop). |
+| `pkg/markdown` | Lays out GitHub Flavored Markdown, parsed with goldmark, as blocks of styled text for the file preview to draw. |
 | `pkg/sshconfig` | Lists the concrete hosts of an OpenSSH client configuration, following `Include`. |
 | `pkg/sessionlist` | Groups sessions by application, orders and filters the session list. |
 | `pkg/activity` | Decides which sessions are busy or have unseen output, from successive snapshots. |

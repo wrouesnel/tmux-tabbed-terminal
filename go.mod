@@ -15,6 +15,7 @@ require (
 	github.com/wrouesnel/ctxstdio v0.0.0-20260925000958-306c83092f60
 	github.com/wrouesnel/go.logutil v0.0.0-20260831004131-2c91cc3e879a
 	github.com/wrouesnel/kongutil v0.0.0-20260819130755-29108a76e5f7
+	github.com/yuin/goldmark v1.8.7
 	go.uber.org/zap v1.28.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
 	golang.org/x/mod v0.33.0

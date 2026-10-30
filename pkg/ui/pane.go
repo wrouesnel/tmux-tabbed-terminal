@@ -58,6 +58,8 @@ type Pane struct {
 	hoverSpan  cellSpan
 	hoverTimer glib.SourceHandle
 	hoverGen   int
+	// file shows a file in place of the terminal, when the pane is a preview, or is nil.
+	file *filePreview
 	// dropZone highlights where a dragged session would land.
 	dropZone *gtk.Box
 	// scrollbar shows where the view is in tmux's history, and scrolls it when dragged.
@@ -318,17 +320,59 @@ func (p *Pane) buildEmptyPage() gtk.IWidget {
 
 // showEmpty shows the empty page with a message.
 func (p *Pane) showEmpty(title, hint string, reattach bool) {
+	p.closeFile()
 	p.emptyTitle.SetText(title)
 	p.emptyHint.SetText(hint)
 	p.reattachBtn.SetVisible(reattach)
 	p.stack.SetVisibleChildName(pageEmpty)
 }
 
+// showFile shows a file from a host in the pane, in place of the terminal. The pane
+// mustn't have a tmux client running.
+func (p *Pane) showFile(host, name string) {
+	if p.file == nil {
+		p.file = newFilePreview(p)
+		p.stack.AddNamed(p.file.root, pageFile)
+	}
+	p.stack.SetVisibleChildName(pageFile)
+	p.file.open(host, name, false)
+}
+
+// closeFile stops showing a file, if the pane is.
+func (p *Pane) closeFile() {
+	if p.file == nil {
+		return
+	}
+	p.file.stop()
+	p.stack.Remove(p.file.root)
+	p.file = nil
+}
+
+// copySelection copies what's selected in the pane.
+func (p *Pane) copySelection() {
+	if p.file != nil {
+		p.file.copySelection()
+	} else {
+		p.term.CopyClipboard()
+	}
+}
+
+// hasSelection reports whether anything's selected in the pane to copy.
+func (p *Pane) hasSelection() bool {
+	if p.file != nil {
+		return p.file.hasSelection()
+	}
+	return p.running && p.term.HasSelection()
+}
+
 // Focus moves keyboard focus into the pane.
 func (p *Pane) Focus() {
-	if p.running {
+	switch {
+	case p.file != nil:
+		p.file.focus()
+	case p.running:
 		p.term.GrabFocus()
-	} else {
+	default:
 		p.newSessionBtn.GrabFocus()
 	}
 	p.win.setActivePane(p)
@@ -419,6 +463,7 @@ func (p *Pane) attach(key string) {
 
 	p.cmd, p.tty, p.hostName, p.sessionID, p.running = cmd, tty, hostName, id, true
 	p.win.app.tracker.MarkSeen(key)
+	p.closeFile()
 	p.stack.SetVisibleChildName(pageTerminal)
 	if p.win.activePane == p {
 		p.term.GrabFocus()
@@ -467,6 +512,7 @@ func (p *Pane) detach() {
 func (p *Pane) close() {
 	p.closed = true
 	p.hidePreview()
+	p.closeFile()
 	if p.cmd != nil && p.cmd.Process != nil {
 		_ = p.cmd.Process.Signal(syscall.SIGHUP)
 	}

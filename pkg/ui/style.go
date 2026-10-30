@@ -51,6 +51,39 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-search {
 	margin: 6px;
 }
+.ttt-preview-bar {
+	padding: 2px 4px;
+	border-bottom: 1px solid alpha(@theme_fg_color, 0.15);
+}
+.ttt-markdown, .ttt-markdown text {
+	background-color: @theme_base_color;
+}
+.ttt-md-code {
+	padding: 12px 16px;
+	border-radius: 6px;
+	background-color: alpha(@theme_fg_color, 0.06);
+}
+.ttt-md-code-text {
+	font-family: monospace;
+	font-size: 90%;
+}
+.ttt-md-table {
+	border-top: 1px solid alpha(@theme_fg_color, 0.2);
+}
+.ttt-md-cell {
+	padding: 6px 13px;
+	border-right: 1px solid alpha(@theme_fg_color, 0.2);
+	border-bottom: 1px solid alpha(@theme_fg_color, 0.2);
+}
+.ttt-md-first {
+	border-left: 1px solid alpha(@theme_fg_color, 0.2);
+}
+.ttt-md-header {
+	font-weight: 600;
+}
+.ttt-md-even {
+	background-color: alpha(@theme_fg_color, 0.04);
+}
 .ttt-drop-zone {
 	background-color: alpha(@theme_selected_bg_color, 0.25);
 	border: 2px solid alpha(@theme_selected_bg_color, 0.8);

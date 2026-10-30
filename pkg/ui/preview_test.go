@@ -44,17 +44,17 @@ func TestReadLocalImage(t *testing.T) {
 	if err := os.WriteFile(small, []byte("data"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if data, err := readLocalImage(small); err != nil || string(data) != "data" {
+	if data, err := readLocalFile(small); err != nil || string(data) != "data" {
 		t.Errorf("small file: %q, %v", data, err)
 	}
 	big := sparseFile(t, dir, previewMaxBytes+1)
-	if _, err := readLocalImage(big); !errors.Is(err, errPreviewTooBig) {
+	if _, err := readLocalFile(big); !errors.Is(err, errPreviewTooBig) {
 		t.Errorf("big file: %v", err)
 	}
-	if _, err := readLocalImage(dir); err == nil {
+	if _, err := readLocalFile(dir); err == nil {
 		t.Error("read a directory")
 	}
-	if _, err := readLocalImage(filepath.Join(dir, "gone.png")); err == nil {
+	if _, err := readLocalFile(filepath.Join(dir, "gone.png")); err == nil {
 		t.Error("read a missing file")
 	}
 }
@@ -81,14 +81,14 @@ func TestReadRemoteImage(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	if got, err := readHostImage(ctx, h, name); err != nil || !bytes.Equal(got, want) {
+	if got, err := readHostFile(ctx, h, name); err != nil || !bytes.Equal(got, want) {
 		t.Errorf("got %q, %v, want %q", got, err, want)
 	}
 	big := sparseFile(t, dir, previewMaxBytes+1)
-	if _, err := readHostImage(ctx, h, big); !errors.Is(err, errPreviewTooBig) {
+	if _, err := readHostFile(ctx, h, big); !errors.Is(err, errPreviewTooBig) {
 		t.Errorf("big file: %v", err)
 	}
-	if _, err := readHostImage(ctx, h, filepath.Join(dir, "gone.png")); err == nil {
+	if _, err := readHostFile(ctx, h, filepath.Join(dir, "gone.png")); err == nil {
 		t.Error("read a missing file")
 	}
 }

@@ -22,15 +22,15 @@ import (
 const (
 	// previewDelay is how long the pointer rests on a link before its image is shown.
 	previewDelay = 400 * time.Millisecond
-	// previewMaxBytes is the biggest image file previewed.
+	// previewMaxBytes is the biggest file previewed.
 	previewMaxBytes = 32 << 20
 	// The largest a preview is shown, in pixels. Smaller images aren't enlarged.
 	previewWidth  = 360
 	previewHeight = 270
 )
 
-// errPreviewTooBig is returned for an image file over previewMaxBytes.
-var errPreviewTooBig = errors.New("the image is too big to preview")
+// errPreviewTooBig is returned for a file over previewMaxBytes.
+var errPreviewTooBig = errors.New("the file is too big to preview")
 
 //nolint:gochecknoglobals
 var (
@@ -53,8 +53,8 @@ func isImagePath(p string) bool {
 	return ext != "" && imageExtensions[strings.ToLower(ext)]
 }
 
-// readLocalImage reads an image file on this machine, up to previewMaxBytes.
-func readLocalImage(name string) ([]byte, error) {
+// readLocalFile reads a file on this machine, up to previewMaxBytes.
+func readLocalFile(name string) ([]byte, error) {
 	f, err := os.Open(name)
 	if err != nil {
 		return nil, err
@@ -76,12 +76,12 @@ func readLocalImage(name string) ([]byte, error) {
 	return data, err
 }
 
-// readHostImage reads an image file on a session's host, through its ssh connection if
+// readHostFile reads a file on a session's host, through its ssh connection if
 // it's remote, up to previewMaxBytes. A remote path may start with ~/, for the home
 // directory there, where ssh starts.
-func readHostImage(ctx context.Context, h *Host, name string) ([]byte, error) {
+func readHostFile(ctx context.Context, h *Host, name string) ([]byte, error) {
 	if h.client.SSH == nil {
-		return readLocalImage(name)
+		return readLocalFile(name)
 	}
 	name = strings.TrimPrefix(name, "~/")
 	out, err := h.client.SSH.Output(ctx, "head", "-c", strconv.Itoa(previewMaxBytes+1), "--", name)
@@ -140,7 +140,7 @@ func (p *Pane) loadPreview(l link, gen int, x, y float64) {
 		return
 	}
 	runAsync(p.win.app, func(ctx context.Context) (*gdk.Pixbuf, error) {
-		data, err := readHostImage(ctx, h, l.file)
+		data, err := readHostFile(ctx, h, l.file)
 		if err != nil {
 			return nil, err
 		}

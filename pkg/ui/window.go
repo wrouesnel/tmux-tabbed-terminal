@@ -43,6 +43,11 @@ type Window struct {
 	tabs       *tabBar
 	layout     *layout
 	activePane *Pane
+	// previewPane is the pane which last previewed a file, where the next file previewed
+	// goes too. terminalPane is the last active pane which wasn't a preview: while a
+	// preview is active, the title and tab bar go on showing its session.
+	previewPane  *Pane
+	terminalPane *Pane
 	// contextLink is the link the terminal menu was last opened on, if any.
 	contextLink link
 	// downloads tells of finished downloads, and downloadsView, in the title bar, shows
@@ -74,7 +79,7 @@ func newWindow(app *App) *Window {
 	w.sidebar = newSidebar(w)
 	first := newPane(w)
 	w.layout = newLayout(first)
-	w.activePane = first
+	w.activePane, w.terminalPane = first, first
 	w.tabs = newTabBar(w)
 	w.content, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	w.content.PackStart(w.tabs.root, false, false, 0)
@@ -161,9 +166,10 @@ func (w *Window) installActions() {
 	add("split-right", func() { w.SplitActive(gtk.ORIENTATION_HORIZONTAL) })
 	add("split-down", func() { w.SplitActive(gtk.ORIENTATION_VERTICAL) })
 	add("close-pane", func() { w.ClosePane(w.activePane) })
-	add("copy", func() { w.activePane.term.CopyClipboard() })
+	add("copy", func() { w.activePane.copySelection() })
 	add("paste", func() { w.activePane.term.PasteClipboard() })
 	add("open-link", func() { w.openLink(w.contextLink.uri) })
+	add("preview-link", func() { w.previewFile(w.contextLink.host, w.contextLink.file) })
 	add("download-link", func() { w.downloadLink(w.contextLink) })
 	add("download-link-as", func() { w.downloadLinkAs(w.contextLink) })
 	add("copy-link", func() {
@@ -178,8 +184,8 @@ func (w *Window) installActions() {
 	add("prev-session", func() { w.cycleSession(-1) })
 	add("next-pane", func() { w.cyclePane(1) })
 	add("prev-pane", func() { w.cyclePane(-1) })
-	add("rename-session", func() { w.RenameSession(w.activePane.SessionKey()) })
-	add("kill-session", func() { w.KillSession(w.activePane.SessionKey()) })
+	add("rename-session", func() { w.RenameSession(w.sessionPane().SessionKey()) })
+	add("kill-session", func() { w.KillSession(w.sessionPane().SessionKey()) })
 	add("add-host", func() { w.AddHostDialog(LocalHost) })
 	add("sidebar-other-side", func() { w.app.setSidebarRight(!w.app.sidebarRight) })
 	add("fullscreen", w.toggleFullscreen)
@@ -198,10 +204,10 @@ func (w *Window) installActions() {
 	addStr("session-kill", w.KillSession)
 	addStr("session-save-scrollback", func(key string) { w.SaveScrollback(key, false) })
 	addStr("session-save-scrollback-as", func(key string) { w.SaveScrollback(key, true) })
-	add("save-scrollback", func() { w.SaveScrollback(w.activePane.SessionKey(), false) })
-	add("save-scrollback-as", func() { w.SaveScrollback(w.activePane.SessionKey(), true) })
+	add("save-scrollback", func() { w.SaveScrollback(w.sessionPane().SessionKey(), false) })
+	add("save-scrollback-as", func() { w.SaveScrollback(w.sessionPane().SessionKey(), true) })
 	addStr("session-scrollback-dir", w.OpenScrollbackDir)
-	add("scrollback-dir", func() { w.OpenScrollbackDir(w.activePane.SessionKey()) })
+	add("scrollback-dir", func() { w.OpenScrollbackDir(w.sessionPane().SessionKey()) })
 	addStr("host-new-session", func(host string) { w.NewSessionOn(w.activePane, host) })
 	addStr("session-pin", func(key string) {
 		if pin, ok := w.app.pinOf(key); ok {
@@ -274,13 +280,14 @@ func (w *Window) syncTabsAction() {
 // updateActionState enables the actions which make sense for the active pane.
 func (w *Window) updateActionState() {
 	p := w.activePane
-	w.actions["copy"].SetEnabled(p.running && p.term.HasSelection())
+	w.actions["copy"].SetEnabled(p.hasSelection())
 	w.actions["paste"].SetEnabled(p.running)
 	w.actions["open-link"].SetEnabled(w.contextLink.uri != "")
+	w.actions["preview-link"].SetEnabled(w.contextLink.file != "" && previewable(w.contextLink.file))
 	w.actions["download-link"].SetEnabled(w.contextLink.downloadable())
 	w.actions["download-link-as"].SetEnabled(w.contextLink.downloadable())
 	w.actions["copy-link"].SetEnabled(w.contextLink.text != "")
-	_, s := w.app.lookup(p.SessionKey())
+	_, s := w.app.lookup(w.sessionPane().SessionKey())
 	hasSession := s != nil
 	w.actions["rename-session"].SetEnabled(hasSession)
 	w.actions["kill-session"].SetEnabled(hasSession)
@@ -299,13 +306,27 @@ func (w *Window) setActivePane(p *Pane) {
 		return
 	}
 	w.activePane = p
+	if p.file == nil {
+		w.terminalPane = p
+	}
 	w.refresh()
 }
 
-// ShowSession shows a session in the active pane.
+// ShowSession shows a session in the active pane, or while a preview is active, in the
+// terminal pane whose session the window shows.
 func (w *Window) ShowSession(id string) {
-	w.activePane.Show(id)
-	w.activePane.Focus()
+	p := w.sessionPane()
+	p.Show(id)
+	p.Focus()
+}
+
+// sessionPane is the pane whose session the window's title and tab bar show: the active
+// pane, unless it's a preview.
+func (w *Window) sessionPane() *Pane {
+	if p := w.activePane; p.file != nil && w.terminalPane != nil && !w.terminalPane.closed {
+		return w.terminalPane
+	}
+	return w.activePane
 }
 
 // OpenInSplit opens a session in a new pane next to the active one.
@@ -321,6 +342,32 @@ func (w *Window) SplitActive(orientation gtk.Orientation) {
 	p := w.split(orientation)
 	p.showEmpty("Empty pane", "Choose a session from the list, or start a new one.", false)
 	p.Focus()
+}
+
+// previewFile shows a file from a host in the window's preview pane, or in a new one to
+// the right of the active pane. The keyboard focus stays where it is.
+func (w *Window) previewFile(host, name string) {
+	if name == "" || w.app.host(host) == nil {
+		return
+	}
+	target := w.previewPane
+	if target == nil || target.file == nil || target.closed {
+		target = nil
+		for _, p := range w.panes() {
+			if p.file != nil {
+				target = p
+			}
+		}
+	}
+	active := w.activePane
+	if target == nil {
+		target = newPane(w)
+		w.layout.Split(active, target, gtk.ORIENTATION_HORIZONTAL, false)
+	}
+	w.previewPane = target
+	target.showFile(host, name)
+	active.Focus()
+	w.refresh()
 }
 
 func (w *Window) split(orientation gtk.Orientation) *Pane {
@@ -603,7 +650,7 @@ func (w *Window) cycleSession(delta int) {
 	}
 	current := -1
 	for i, id := range ids {
-		if id == w.activePane.SessionKey() {
+		if id == w.sessionPane().SessionKey() {
 			current = i
 		}
 	}
@@ -647,7 +694,10 @@ func (w *Window) refresh() {
 	for _, p := range panes {
 		name := "Empty"
 		busy := false
-		if p.running {
+		switch {
+		case p.file != nil:
+			name = p.file.title()
+		case p.running:
 			name = w.app.sessionName(p.SessionKey())
 			busy = w.app.tracker.State(p.SessionKey(), now).Active
 		}
@@ -683,9 +733,10 @@ func (w *Window) shownSessions() (map[string]bool, string) {
 			shown[p.SessionKey()] = true
 		}
 	}
+	p := w.sessionPane()
 	selected := ""
-	if w.activePane.running {
-		selected = w.activePane.SessionKey()
+	if p.running {
+		selected = p.SessionKey()
 	}
 	return shown, selected
 }
