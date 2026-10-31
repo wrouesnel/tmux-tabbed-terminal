@@ -1,9 +1,9 @@
 module github.com/wrouesnel/tmux-tabbed-terminal
 
-go 1.24.1
+go 1.26.0
 
 require (
-	github.com/alecthomas/chroma/v2 v2.24.0
+	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/alecthomas/kong v1.16.1
 	github.com/chigopher/pathlib v0.19.1
 	github.com/danielgatis/go-vte v1.0.11
@@ -26,7 +26,7 @@ require (
 
 require (
 	github.com/danielgatis/go-utf8 v1.0.1 // indirect
-	github.com/dlclark/regexp2 v1.12.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/dsnet/compress v0.0.1 // indirect
 	github.com/frankban/quicktest v1.14.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect

@@ -29,14 +29,14 @@ const (
 	rpmSpecIn     = "packaging/rpm/tmux-tabbed-terminal.spec.in"
 	// debGoPackage is the Go build dependency of Ubuntu suites whose default Go is new
 	// enough for go.mod.
-	debGoPackage = "golang-go (>= 2:1.24~)"
+	debGoPackage = "golang-go (>= 2:1.26~)"
 )
 
 // debGoPackages are the Go build dependencies of Ubuntu suites whose default Go is too
 // old: there, a newer Go is packaged beside it. Launchpad only uses the first alternative
 // of a build dependency, so each suite names its own.
 var debGoPackages = map[string]string{
-	"noble": "golang-1.24-go",
+	"noble": "golang-1.26-go",
 }
 
 // pkgVersion converts a git describe version to a package version: v1.2.3-4-gabc-dirty

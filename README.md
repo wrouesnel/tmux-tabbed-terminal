@@ -302,7 +302,7 @@ panes already attached to its sessions running.
 
 ## Building
 
-Building needs Go 1.24.1 or newer, the GTK3 and VTE development headers, and tmux for the
+Building needs Go 1.26 or newer, the GTK3 and VTE development headers, and tmux for the
 tests. On Ubuntu:
 
 ```sh
@@ -362,9 +362,9 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`. It does the following:
    signs and publishes the RHEL 8 and 10 packages.
 
 Both build services build without network access, so the source packages carry the Go
-modules vendored, and use each release's packaged Go: Ubuntu 24.04's `golang-1.24-go`
+modules vendored, and use each release's packaged Go: Ubuntu 24.04's `golang-1.26-go`
 (from noble-updates), and the default Go of Ubuntu 26.04 and RHEL 8 and 10, which are
-newer. That's why `go.mod` targets Go 1.24.1 and dependencies are held to versions that
+newer. That's why `go.mod` targets Go 1.26.0 and dependencies are held to versions that
 build with it. Older GTK libraries, as on RHEL 8, are
 detected by `packaging/gotk3-tags.sh` and selected in gotk3 with build tags.
 
