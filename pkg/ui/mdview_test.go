@@ -97,3 +97,11 @@ func TestRunsMarkup(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
+
+func TestSpansMarkup(t *testing.T) {
+	got := spansMarkup([]markdown.Span{{Text: "if"}, {Text: " a<b", Color: "#cf222e", Bold: true, Italic: true}})
+	want := `if<span foreground="#cf222e"><b><i> a&lt;b</i></b></span>`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}

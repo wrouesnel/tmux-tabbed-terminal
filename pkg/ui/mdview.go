@@ -66,6 +66,10 @@ type mdView struct {
 	// margins are the left margin tags made so far, by name.
 	margins map[string]bool
 	hand    bool
+	// codes color the code blocks' code, for a light or dark theme. dark is the theme they
+	// were colored for.
+	codes []func(dark bool)
+	dark  bool
 }
 
 // mdLink is a link's tag and destination.
@@ -86,6 +90,14 @@ func newMdView(onLink func(string), loadImage func(string, func(*gdk.Pixbuf))) *
 	v.view.SetBottomMargin(mdMargin)
 	addClass(v.view, "ttt-markdown")
 	v.view.Connect("size-allocate", func() { v.queueFit() })
+	v.view.Connect("style-updated", func() {
+		if dark := v.darkTheme(); dark != v.dark {
+			v.dark = dark
+			for _, color := range v.codes {
+				color(dark)
+			}
+		}
+	})
 	v.view.Connect("button-release-event", func(_ interface{}, ev *gdk.Event) bool {
 		return v.onRelease(gdk.EventButtonNewFromEvent(ev))
 	})
@@ -103,6 +115,7 @@ func (v *mdView) show(blocks []markdown.Block) {
 	v.buf, _ = gtk.TextBufferNew(nil)
 	v.view.SetBuffer(v.buf)
 	v.links, v.fits, v.width, v.afterList = nil, nil, 0, false
+	v.codes, v.dark = nil, v.darkTheme()
 	v.margins = map[string]bool{}
 	v.createTags()
 	for i, b := range blocks {
@@ -193,7 +206,7 @@ func (v *mdView) block(b markdown.Block, last bool) {
 			tags = nil
 		}
 	case markdown.CodeBlock:
-		v.codeBlock(b.Code, indent)
+		v.codeBlock(b.Code, b.Lang, indent)
 		tags = append(tags, "block")
 	case markdown.Rule:
 		v.rule(indent, space)
@@ -289,9 +302,13 @@ func (v *mdView) rule(indent int, space string) {
 	v.insert("\n", space)
 }
 
-// codeBlock adds a code block: its text, wrapped, on a box as wide as the text.
-func (v *mdView) codeBlock(code string, indent int) {
-	label, _ := gtk.LabelNew(code)
+// codeBlock adds a code block: its text, wrapped and highlighted by its language, on a box
+// as wide as the text.
+func (v *mdView) codeBlock(code, lang string, indent int) {
+	label, _ := gtk.LabelNew("")
+	color := func(dark bool) { label.SetMarkup(spansMarkup(markdown.Highlight(code, lang, dark))) }
+	color(v.dark)
+	v.codes = append(v.codes, color)
 	label.SetXAlign(0)
 	label.SetSelectable(true)
 	label.SetLineWrap(true)
@@ -453,6 +470,36 @@ func runsMarkup(runs []markdown.Run) string {
 		b.WriteString(text)
 	}
 	return b.String()
+}
+
+// spansMarkup returns highlighted code as Pango markup, for a label.
+func spansMarkup(spans []markdown.Span) string {
+	var b strings.Builder
+	for _, s := range spans {
+		text := html.EscapeString(s.Text)
+		if s.Italic {
+			text = "<i>" + text + "</i>"
+		}
+		if s.Bold {
+			text = "<b>" + text + "</b>"
+		}
+		if s.Color != "" {
+			text = `<span foreground="` + s.Color + `">` + text + "</span>"
+		}
+		b.WriteString(text)
+	}
+	return b.String()
+}
+
+// darkTheme reports whether the view's theme is dark: whether its text is light.
+func (v *mdView) darkTheme() bool {
+	sc, err := v.view.GetStyleContext()
+	if err != nil {
+		return false
+	}
+	c := sc.GetColor(gtk.STATE_FLAG_NORMAL)
+	//nolint:mnd // Rec. 709 luma weights
+	return 0.2126*c.GetRed()+0.7152*c.GetGreen()+0.0722*c.GetBlue() > 0.5
 }
 
 // queueFit fits rules and images to the text's width, once the view has its size.
