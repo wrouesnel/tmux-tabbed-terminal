@@ -86,6 +86,9 @@ type Pane struct {
 	// down, so its release can tell a click on a link from a drag.
 	clickCell [2]int
 	clicking  bool
+	// doubleClicks counts double clicks, so a click's copy, which waits to see whether
+	// the click was the first of a double click, can tell that it was.
+	doubleClicks int
 
 	// Mouse wheel state: lines waiting to be scrolled, whether a scroll command is
 	// running, and the streak of quick wheel events which speeds scrolling up.
@@ -538,14 +541,24 @@ func (p *Pane) updateHeader(name string, busy bool, showHeader bool) {
 }
 
 // onButtonPress opens a link on Ctrl+click, or downloads the file a link on another
-// host names, and shows the context menu on a right click. A plain left click is noted
-// for onButtonRelease, and left to the terminal.
+// host names, opens a link on a double click, and shows the context menu on a right click.
+// A plain left click is noted for onButtonRelease, and left to the terminal.
 // A program in the pane that has asked for mouse events, such as vim or htop, gets the
 // right click instead, unless Shift is held, as in GNOME Terminal. tmux itself doesn't
 // count: with its mouse option on, the menu still shows.
 func (p *Pane) onButtonPress(event *gdk.Event) bool {
 	ev := gdk.EventButtonNewFromEvent(event)
 	p.clicking = false
+	if ev.Type() == gdk.EVENT_2BUTTON_PRESS && ev.Button() == gdk.BUTTON_PRIMARY &&
+		ev.State()&uint(clickModifiers) == 0 && !p.programWantsMouse() {
+		p.doubleClicks++
+		// On a link, the terminal doesn't select the word too.
+		return p.withLinkAt(event, func(l link, ok bool) {
+			if ok {
+				p.win.openLinkDefault(l)
+			}
+		})
+	}
 	if ev.Type() != gdk.EVENT_BUTTON_PRESS {
 		return false
 	}
@@ -599,8 +612,10 @@ func (p *Pane) onButtonPress(event *gdk.Event) bool {
 const clickModifiers = gdk.CONTROL_MASK | gdk.SHIFT_MASK | gdk.MOD1_MASK | gdk.SUPER_MASK
 
 // onButtonRelease copies the text a link shows, rather than where it leads, when a plain
-// left click, which didn't move or select anything, ends on one. A program in the pane
-// that has asked for mouse events has the click instead.
+// left click, which didn't move or select anything, ends on one. It waits for the double
+// click time first, and doesn't copy if the click was the first of a double click, which
+// opens the link. A program in the pane that has asked for mouse events has the click
+// instead.
 func (p *Pane) onButtonRelease(event *gdk.Event) {
 	ev := gdk.EventButtonNewFromEvent(event)
 	if !p.clicking || ev.Button() != gdk.BUTTON_PRIMARY {
@@ -611,18 +626,42 @@ func (p *Pane) onButtonRelease(event *gdk.Event) {
 	if [2]int{col, row} != p.clickCell || p.term.HasSelection() || p.programWantsMouse() {
 		return
 	}
+	clicks := p.doubleClicks
+	copyText := func(text string) {
+		glib.TimeoutAdd(doubleClickTime(), func() bool {
+			if p.doubleClicks == clicks {
+				p.win.copyLinkText(text)
+			}
+			return false
+		})
+	}
 	// An OSC 8 hyperlink's text is in the terminal, which only gives its URI as a match.
 	if m, ok := p.term.MatchAt(event); ok && m.Hyperlink {
 		if text, ok := p.term.HyperlinkText(event); ok && strings.TrimSpace(text) != "" {
-			p.win.copyLinkText(text)
+			copyText(text)
 		}
 		return
 	}
 	p.withLinkAt(event, func(l link, ok bool) {
 		if ok && l.shown != "" {
-			p.win.copyLinkText(l.shown)
+			copyText(l.shown)
 		}
 	})
+}
+
+// doubleClickTime returns the longest time between the clicks of a double click, in
+// milliseconds.
+func doubleClickTime() uint {
+	const fallback = 400
+	settings, err := gtk.SettingsGetDefault()
+	if err != nil {
+		return fallback
+	}
+	v, err := settings.GetProperty("gtk-double-click-time")
+	if ms, ok := v.(int); err == nil && ok && ms > 0 {
+		return uint(ms)
+	}
+	return fallback
 }
 
 // linkResult is a link found in tmux's copy of a pane: its text, the kind of pattern it

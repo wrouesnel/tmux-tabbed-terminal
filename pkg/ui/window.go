@@ -344,6 +344,20 @@ func (w *Window) SplitActive(orientation gtk.Orientation) {
 	p.Focus()
 }
 
+// openLinkDefault opens a link the way a double click does: a markdown file or image in
+// the preview pane, a file on another host by downloading it, and anything else as Open
+// Link does.
+func (w *Window) openLinkDefault(l link) {
+	switch {
+	case l.file != "" && previewable(l.file):
+		w.previewFile(l.host, l.file)
+	case l.uri == "" && l.downloadable():
+		w.downloadLink(l)
+	case l.uri != "":
+		w.openLink(l.uri)
+	}
+}
+
 // previewFile shows a file from a host in the window's preview pane, or in a new one to
 // the right of the active pane. The keyboard focus stays where it is.
 func (w *Window) previewFile(host, name string) {
