@@ -149,6 +149,10 @@ works.
 
 ### Windows 10 and 11
 
+> **Windows support is experimental.** Local tmux sessions work, but connecting to remote
+> hosts over ssh is broken: Windows' ssh can't share one connection between commands, as
+> the application expects. A fix is being worked on.
+
 Each release has a per-user installer, which needs no administrator rights and nothing
 else installed: it brings its own GTK and tmux. The installer isn't signed yet, so Windows
 SmartScreen stops it when it's downloaded with a browser. In PowerShell, this downloads the
