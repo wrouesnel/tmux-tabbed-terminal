@@ -1,0 +1,10 @@
+# Generates the Go code of the protocol buffers, into pkg/. Run by `go run mage.go protos`;
+# the generated code is committed, so building never needs it.
+version: v2
+plugins:
+  - local: protoc-gen-go
+    out: ..
+    opt: module=github.com/wrouesnel/tmux-tabbed-terminal
+  - local: protoc-gen-go-grpc
+    out: ..
+    opt: module=github.com/wrouesnel/tmux-tabbed-terminal

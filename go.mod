@@ -6,6 +6,7 @@ require (
 	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/alecthomas/kong v1.16.1
 	github.com/chigopher/pathlib v0.19.1
+	github.com/creack/pty v1.1.24
 	github.com/danielgatis/go-vte v1.0.11
 	github.com/gotk3/gotk3 v0.6.5-0.20251124190141-e7a9e823ca35
 	github.com/integralist/go-findroot v0.0.0-20160518114804-ac90681525dc
@@ -19,9 +20,11 @@ require (
 	github.com/yuin/goldmark v1.8.7
 	go.uber.org/zap v1.28.0
 	go.yaml.in/yaml/v4 v4.0.0-rc.6
-	golang.org/x/mod v0.33.0
-	golang.org/x/sys v0.41.0
-	golang.org/x/text v0.34.0
+	golang.org/x/mod v0.41.0
+	golang.org/x/sys v0.48.0
+	golang.org/x/text v0.42.0
+	google.golang.org/grpc v1.85.0
+	google.golang.org/protobuf v1.36.12
 )
 
 require (
@@ -39,6 +42,8 @@ require (
 	github.com/xi2/xz v0.0.0-20171230120015-48954b6210f8 // indirect
 	github.com/yuseferi/zax/v2 v2.3.5 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 )
 
 replace go.yaml.in/yaml/v4 => github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd

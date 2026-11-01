@@ -830,6 +830,32 @@ func GithubReleaseMatrix() error {
 	return err
 }
 
+// Protocol buffer tools, at the versions the committed generated code was made with.
+const (
+	bufTool             = "github.com/bufbuild/buf/cmd/buf@v1.75.0"
+	protocGenGoTool     = "google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12"
+	protocGenGoGRPCTool = "google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2"
+)
+
+// Protos lints the protocol buffers in proto/ and regenerates their Go code. The code is
+// committed, so only changing a .proto file needs this.
+func Protos() error {
+	mg.Deps(Tools)
+	for _, tool := range []string{bufTool, protocGenGoTool, protocGenGoGRPCTool} {
+		if err := sh.Run("go", "install", tool); err != nil {
+			return err
+		}
+	}
+	protoDir := path.Join(curDir, "proto")
+	if err := sh.RunV("buf", "lint", protoDir); err != nil {
+		return err
+	}
+	cmd := exec.Command("buf", "generate")
+	cmd.Dir = protoDir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	return cmd.Run()
+}
+
 // GoGenerate runs go generate.
 func GoGenerate() error {
 	return sh.Run("go", "generate", "./...")

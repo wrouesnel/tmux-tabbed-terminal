@@ -1,0 +1,123 @@
+// The agent is a small program the application runs on a remote host, at the far end of a
+// plain ssh connection, which serves this service over its standard input and output. One
+// ssh connection then carries everything the application does on the host: tmux commands,
+// reading files, downloads, and the terminals of panes attached to its sessions.
+syntax = "proto3";
+
+package tmuxtabbedterminal.agent.v1;
+
+option go_package = "github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent/agentpb";
+
+service AgentService {
+  // Hello returns the agent's version and platform. The application calls it first, and
+  // replaces an agent whose version isn't its own.
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  // Run runs a program to completion and returns its output. A program that exits with a
+  // failure status is a response, not an error: errors are for programs that can't start.
+  rpc Run(RunRequest) returns (RunResponse);
+  // Stream runs a program, sending its standard output as it's written, and then how it
+  // exited. Cancelling the call kills the program.
+  rpc Stream(StreamRequest) returns (stream StreamResponse);
+  // Attach runs a program on a new pseudo-terminal. The first request starts it; later
+  // ones type into it and resize it. Responses say it started, carry what it writes, and
+  // end with how it exited. Cancelling the call hangs the program up.
+  rpc Attach(stream AttachRequest) returns (stream AttachResponse);
+}
+
+message HelloRequest {
+  // The application's version.
+  string client_version = 1;
+}
+
+message HelloResponse {
+  // The agent's version, which is the version of the application it was built with.
+  string version = 1;
+  // The platform, as Go names it: GOOS and GOARCH, such as linux and amd64.
+  string os = 2;
+  string arch = 3;
+  // The home directory of the user it runs as.
+  string home = 4;
+}
+
+// Command is a program to run, without a shell: argv[0] is looked up in the agent's PATH,
+// which is the PATH of the ssh session that started it.
+message Command {
+  repeated string argv = 1;
+}
+
+message RunRequest {
+  Command command = 1;
+  // What to write to its standard input, which is then closed.
+  bytes stdin = 2;
+}
+
+message RunResponse {
+  bytes stdout = 1;
+  bytes stderr = 2;
+  Exit exit = 3;
+}
+
+// Exit is how a program ended.
+message Exit {
+  // The exit status, or -1 if it was killed by a signal.
+  int32 code = 1;
+  // The signal that killed it, such as "killed", if one did.
+  string signal = 2;
+}
+
+message StreamRequest {
+  Command command = 1;
+}
+
+message StreamResponse {
+  oneof event {
+    // Some of its standard output.
+    bytes stdout = 1;
+    // How it ended, with its standard error. This is the last response.
+    StreamExit exit = 2;
+  }
+}
+
+message StreamExit {
+  Exit exit = 1;
+  bytes stderr = 2;
+}
+
+message AttachRequest {
+  oneof event {
+    // Start the program: the first request, and only the first.
+    AttachStart start = 1;
+    // Type into it.
+    bytes input = 2;
+    // Resize its terminal.
+    TerminalSize resize = 3;
+  }
+}
+
+message AttachStart {
+  Command command = 1;
+  TerminalSize size = 2;
+  // Environment variables to set, beyond the agent's own, such as TERM.
+  map<string, string> env = 3;
+}
+
+message TerminalSize {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message AttachResponse {
+  oneof event {
+    // It started, on the terminal device named, such as /dev/pts/3. This is the first
+    // response.
+    AttachStarted started = 1;
+    // Some of what it wrote.
+    bytes output = 2;
+    // How it ended. This is the last response.
+    Exit exit = 3;
+  }
+}
+
+message AttachStarted {
+  string tty = 1;
+}
