@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -163,13 +164,18 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 			return "", err
 		}
 	}
-	argv := c.Argv(args...)
-	cmd := Command(ctx, argv)
-	cmd.Env = Environ(os.Environ())
 	stdout, stderr := new(bytes.Buffer), new(bytes.Buffer)
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
-	if err := cmd.Run(); err != nil {
+	var err error
+	if ran, agentErr := c.runThroughAgent(ctx, stdout, stderr, args); ran {
+		err = agentErr
+	} else {
+		cmd := Command(ctx, c.Argv(args...))
+		cmd.Env = Environ(os.Environ())
+		cmd.Stdout = stdout
+		cmd.Stderr = stderr
+		err = cmd.Run()
+	}
+	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
 		if c.SSH != nil && !isNoServerError(msg) && !isNoSessionError(msg) {
 			// Maybe a connection on the way dropped: check the masters next time.
@@ -181,6 +187,26 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 		return "", errors.Wrapf(err, "tmux %s: %s", strings.Join(args, " "), msg)
 	}
 	return stdout.String(), nil
+}
+
+// runThroughAgent runs a tmux command through the agent of a remote server's route, if it
+// has one running, writing its output to stdout and stderr. It reports whether it did.
+func (c *Client) runThroughAgent(ctx context.Context, stdout, stderr io.Writer, args []string) (bool, error) {
+	if c.SSH == nil {
+		return false, nil
+	}
+	root, ac := c.SSH.agentClient()
+	if ac == nil {
+		return false, nil
+	}
+	res, err := ac.Run(ctx, c.SSH.innerArgv(false, false, c.tmuxArgv(args...)), nil)
+	if err != nil {
+		root.agentFailed(ac, err)
+		return true, errors.Wrap(err, "running tmux through the agent")
+	}
+	_, _ = stdout.Write(res.Stdout)
+	_, _ = stderr.Write(res.Stderr)
+	return true, res.Err()
 }
 
 // isNoServerError reports whether tmux's stderr says no server is running. That means

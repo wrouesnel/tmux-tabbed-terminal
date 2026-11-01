@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 )
 
 // SSH runs tmux on another host through ssh.
@@ -52,6 +54,17 @@ type SSH struct {
 	// as a key's passphrase, rather than failing in BatchMode. It mustn't change once the
 	// hop is in use.
 	AskpassEnv []string
+	// NoConnectionSharing, on a hop run from this machine, runs ssh without connection
+	// sharing (ControlMaster), which Windows' ssh doesn't support: each command then makes
+	// a connection of its own, unless the hop has an agent.
+	NoConnectionSharing bool
+	// Agents, on a hop run from this machine, are the agents to run on its destination,
+	// and AgentVersion the version they must be. Commands to the destination, and to hosts
+	// reached through it, then go through the agent, over one ssh connection, rather than
+	// through a master. A destination there's no agent for falls back to masters, or to a
+	// connection per command without connection sharing.
+	Agents       *agent.Binaries
+	AgentVersion string
 
 	// configFile is the ssh configuration file of a hop run from this machine, or "" for
 	// ssh's own choice. It may change while the hop is in use: see SetConfigFile.
@@ -62,6 +75,12 @@ type SSH struct {
 	// remoteMasterUp is set once a hop run from another host has a master. Checking it
 	// takes a round trip, so it's only checked again after a command fails.
 	remoteMasterUp bool
+
+	// agentMu guards the agent of a hop run from this machine: the client talking to it,
+	// and whether there's none for the destination.
+	agentMu          sync.Mutex
+	agent            *agent.Client
+	agentUnsupported bool
 }
 
 // controlPersist is how long a master connection stays up after its last use.
@@ -156,12 +175,14 @@ func (s *SSH) commonOptions(master string) []string {
 	if config := s.ConfigFile(); config != "" && s.Via == nil {
 		opts = append(opts, "-F", config)
 	}
-	opts = append(opts,
-		"-o", "ControlMaster="+master,
-		"-o", "ControlPath="+s.controlPath(),
-		"-o", "ControlPersist="+controlPersist,
-		"-o", "ServerAliveInterval=15",
-	)
+	if s.sharesConnections() {
+		opts = append(opts,
+			"-o", "ControlMaster="+master,
+			"-o", "ControlPath="+s.controlPath(),
+			"-o", "ControlPersist="+controlPersist,
+		)
+	}
+	opts = append(opts, "-o", "ServerAliveInterval=15")
 	return append(opts, s.Options...)
 }
 
@@ -196,6 +217,9 @@ func (s *SSH) ensureMaster(ctx context.Context) error {
 	defer s.masterMu.Unlock()
 	if s.Via != nil {
 		return s.ensureRemoteMaster(ctx)
+	}
+	if !s.sharesConnections() {
+		return s.ensureAgent(ctx)
 	}
 
 	if Command(ctx, append([]string{s.binary()}, s.checkArgs()...)).Run() == nil {
@@ -303,6 +327,17 @@ func (s *SSH) output(ctx context.Context, remote ...string) (string, error) {
 
 // outputForwarding is output, forwarding the agent into the destination if forward is set.
 func (s *SSH) outputForwarding(ctx context.Context, forward bool, remote ...string) (string, error) {
+	if root, c := s.agentClient(); c != nil {
+		res, err := c.Run(ctx, s.innerArgv(false, forward, remote), nil)
+		if err != nil {
+			root.agentFailed(c, err)
+			return "", errors.Wrap(err, "running a command through the agent")
+		}
+		if err := res.Err(); err != nil {
+			return "", errors.Wrapf(err, "%s", strings.TrimSpace(string(res.Stderr)))
+		}
+		return string(res.Stdout), nil
+	}
 	argv := s.chainArgv(false, forward, remote)
 	cmd := Command(ctx, argv)
 	stdout, stderr := new(strings.Builder), new(strings.Builder)
@@ -334,6 +369,17 @@ func (s *SSH) Stream(ctx context.Context, w io.Writer, remote ...string) error {
 	ctx, cancel, err := s.connect(ctx)
 	defer cancel()
 	if err != nil {
+		return err
+	}
+	if root, c := s.agentClient(); c != nil {
+		err := c.Stream(ctx, w, s.innerArgv(false, false, remote))
+		var exitErr *agent.ExitError
+		if errors.As(err, &exitErr) {
+			return errors.Wrapf(err, "%s", strings.TrimSpace(exitErr.Stderr))
+		}
+		if err != nil && ctx.Err() == nil {
+			root.agentFailed(c, err)
+		}
 		return err
 	}
 	argv := s.argv(false, remote)

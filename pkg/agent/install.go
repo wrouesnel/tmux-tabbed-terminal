@@ -169,9 +169,10 @@ func Connect(ctx context.Context, launch Launcher, binaries *Binaries, version s
 }
 
 // start runs startScript. If the agent started, it returns a client talking to it; if it's
-// missing, it returns no client and the host's uname -s and uname -m.
+// missing, it returns no client and the host's uname -s and uname -m. The agent outlives
+// ctx, which only limits how long it has to start.
 func start(ctx context.Context, launch Launcher, id string) (*Client, [2]string, error) {
-	cmd := launch(ctx, []string{"sh", "-c", startScript, "sh", id})
+	cmd := launch(context.WithoutCancel(ctx), []string{"sh", "-c", startScript, "sh", id})
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, [2]string{}, err
@@ -187,7 +188,13 @@ func start(ctx context.Context, launch Launcher, id string) (*Client, [2]string,
 	}
 	proc := &process{cmd: cmd, stdin: stdin}
 	r := bufio.NewReaderSize(stdout, maxPreamble)
+	// Ending the command ends the read.
+	stop := context.AfterFunc(ctx, func() { _ = proc.Close() })
 	line, err := readMarker(r)
+	if !stop() {
+		_ = proc.Close()
+		return nil, [2]string{}, errors.Wrap(ctx.Err(), "starting the agent")
+	}
 	if err != nil {
 		_ = proc.Close()
 		return nil, [2]string{}, errors.Wrapf(err, "starting the agent: %s", strings.TrimSpace(stderr.String()))

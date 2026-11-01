@@ -173,3 +173,15 @@ func TestAttach(t *testing.T) {
 		t.Error("closing didn't hang the program up")
 	}
 }
+
+func TestGoPlatform(t *testing.T) {
+	for in, want := range map[[2]string][2]string{
+		{"Linux", "x86_64"}: {"linux", "amd64"}, {"Linux", "aarch64"}: {"linux", "arm64"},
+		{"Darwin", "arm64"}: {"darwin", "arm64"}, {"Linux", "armv7l"}: {}, {"SunOS", "i86pc"}: {},
+	} {
+		goos, goarch, ok := goPlatform(in[0], in[1])
+		if ok != (want != [2]string{}) || (ok && [2]string{goos, goarch} != want) {
+			t.Errorf("%v: %s %s %v", in, goos, goarch, ok)
+		}
+	}
+}
