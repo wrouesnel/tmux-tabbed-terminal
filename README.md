@@ -149,9 +149,8 @@ works.
 
 ### Windows 10 and 11
 
-> **Windows support is experimental.** Local tmux sessions work, but connecting to remote
-> hosts over ssh is broken: Windows' ssh can't share one connection between commands, as
-> the application expects. A fix is being worked on.
+> **Windows support is experimental.** It's less tested than Linux. Remote hosts are
+> reached with Windows' own ssh, through the [agent](#the-agent).
 
 Each release has a per-user installer, which needs no administrator rights and nothing
 else installed: it brings its own GTK and tmux. The installer isn't signed yet, so Windows
@@ -271,9 +270,10 @@ With `ssh.ask-for-passphrases: false`, ssh connects in `BatchMode` instead, so t
 needs key or agent authentication, and a new host's key must be accepted by connecting
 once by hand. A host reached through another always connects so, from that host.
 
-All commands to a host share one ssh master connection (`ControlMaster`), started on first
-use and kept for 10 minutes after the last. Its socket is under
-`$XDG_RUNTIME_DIR/tmux-tabbed-terminal/`. Hosts added in the UI are saved to
+On Linux, all commands to a host share one ssh master connection (`ControlMaster`),
+started on first use and kept for 10 minutes after the last. Its socket is under
+`$XDG_RUNTIME_DIR/tmux-tabbed-terminal/`. On Windows, they go through the
+[agent](#the-agent) instead. Hosts added in the UI are saved to
 `~/.config/tmux-tabbed-terminal/hosts.yml`, and the configuration file's `hosts:` key can
 list more:
 
@@ -307,6 +307,24 @@ With more than one host, New Session asks which host to start it on. The "+" bes
 host starts one there directly, and its ⋯ menu also removes the host. Removing a host leaves
 panes already attached to its sessions running.
 
+### The agent
+
+Windows' ssh can't share one connection between commands, so on Windows the application
+reaches a host through its agent, `ttt-agent`: a small static program it installs on the
+host, in `~/.cache/tmux-tabbed-terminal/agent/`, and runs over one ssh connection, which
+then carries everything: polling, previews, downloads, and the terminals of panes. The
+first connection to a host uploads the agent for the host's platform, about 4 MB, and
+checks its SHA-256 checksum; later ones just start it. Agents are built for Linux and
+macOS, on amd64 and arm64, and the application only talks to one of its own version, so
+an upgrade installs a new one; agents unused for a month are removed. Hosts reached
+through another run their ssh on the first host, through its agent.
+
+`ssh.agent` chooses: `auto`, the default, uses the agent on Windows, and `always` uses it
+on Linux too, for remote commands and previews (panes there keep their own ssh, as VTE
+reads only its own pty). On a host there's no agent for, Windows connects once per
+command. The protocol is gRPC, defined in
+[`proto/`](proto/tmuxtabbedterminal/agent/v1/agent.proto).
+
 ## Building
 
 Building needs Go 1.26 or newer, the GTK3 and VTE development headers, and tmux for the
@@ -323,6 +341,8 @@ go run mage.go binary
 | `go run mage.go binary` | Builds into `bin/` and symlinks the binary into the repository root. |
 | `go run mage.go test` | Runs the tests. The GUI test runs under `xvfb-run` and is skipped without it. |
 | `go run mage.go lint` / `style` | golangci-lint and formatting checks, as CI runs them. |
+| `go run mage.go agents` | Builds the [agent](#the-agent) for each platform into `bin/agent`; run the application with `TTT_AGENT_DIR=bin/agent` to use them. `TTT_TEST_SSH_HOST=<host> go test ./pkg/tmux` tests reaching a real host through it. |
+| `go run mage.go protos` | Lints `proto/` and regenerates its committed Go code with buf. |
 | `go run mage.go source` | Builds the vendored source tarball and its checksum in `release/source/`. |
 | `go run mage.go srpm` | Builds the source RPM for COPR in `release/srpm/`. `rpmbuild --rebuild` it on RHEL, after `dnf builddep`, to build the package. |
 | `go run mage.go debSource noble` | Builds the source package for an Ubuntu suite (`noble`, `resolute`) in `release/ppa/<suite>/`; `DEB_SIGNING_KEY` signs it. `dpkg-buildpackage -b` it to build the package. |
@@ -436,6 +456,7 @@ MIT: see [LICENSE](LICENSE). The binary links
 | `pkg/vte` | cgo bindings for the parts of VTE the UI uses, or on Windows the same API over `pkg/termwidget`. |
 | `pkg/termwidget` | A prototype terminal widget for where VTE isn't available: an emulator, a pty (ConPTY on Windows) and a GTK drawing area. Kept free of the rest of the repository, to be split out. |
 | `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
+| `pkg/agent`, `cmd/ttt-agent` | The agent run on remote hosts, serving the gRPC service in `proto/` over its standard input and output, and the application's side: installing it over ssh, and running commands and terminals through it. |
 | `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop). |
 | `pkg/markdown` | Lays out GitHub Flavored Markdown, parsed with goldmark, as blocks of styled text for the file preview to draw. |
 | `pkg/sshconfig` | Lists the concrete hosts of an OpenSSH client configuration, following `Include`. |
