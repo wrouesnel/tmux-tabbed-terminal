@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -112,8 +113,9 @@ fi
 echo "` + markerMissing + ` $(uname -s) $(uname -m)"`
 
 // installScript writes the gzipped agent on its standard input to where startScript looks
-// for it, checking it against a SHA-256 checksum. Its arguments are the agents' ID and the
-// checksum.
+// for it, checking it against a SHA-256 checksum. Its arguments are the agents' ID, the
+// checksum, and the gzipped agent's size: it reads exactly that much, rather than to the
+// end of its input, as Windows' ssh doesn't pass the end of its own on.
 const installScript = `set -e
 d="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-tabbed-terminal/agent"
 p="$d/$1/ttt-agent-$(uname -s)-$(uname -m)"
@@ -121,7 +123,7 @@ mkdir -p "$d/$1"
 chmod 700 "$d"
 t="$p.$$.tmp"
 trap 'rm -f "$t"' EXIT
-gzip -dc > "$t"
+head -c "$3" | gzip -dc > "$t"
 sum=$( (sha256sum "$t" 2>/dev/null || shasum -a 256 "$t") | cut -d ' ' -f 1)
 if [ "$sum" != "$2" ]; then
 	echo "the agent's checksum is $sum, not $2" >&2
@@ -255,7 +257,7 @@ func install(ctx context.Context, launch Launcher, binaries *Binaries, id string
 	if _, err := io.Copy(h, zr); err != nil { //nolint:gosec // our own build output
 		return errors.Wrap(err, "reading the agent")
 	}
-	cmd := launch(ctx, []string{"sh", "-c", installScript, "sh", id, hex.EncodeToString(h.Sum(nil))})
+	cmd := launch(ctx, []string{"sh", "-c", installScript, "sh", id, hex.EncodeToString(h.Sum(nil)), strconv.Itoa(len(gz))})
 	cmd.Stdin = bytes.NewReader(gz)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
