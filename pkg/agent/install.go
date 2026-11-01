@@ -195,7 +195,7 @@ func start(ctx context.Context, launch Launcher, id string) (*Client, [2]string,
 	line, err := readMarker(r)
 	if !stop() {
 		_ = proc.Close()
-		return nil, [2]string{}, errors.Wrap(ctx.Err(), "starting the agent")
+		return nil, [2]string{}, errors.Wrapf(ctx.Err(), "starting the agent: %s", strings.TrimSpace(stderr.String()))
 	}
 	if err != nil {
 		_ = proc.Close()
