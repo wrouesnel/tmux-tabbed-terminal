@@ -44,6 +44,10 @@ copy_deps() {
 	-o "$out/bin/tmux-tabbed-terminal.exe" ./cmd/tmux-tabbed-terminal)
 copy_deps "$out/bin" /ucrt64/ "$out/bin/tmux-tabbed-terminal.exe"
 
+# The agents the application runs on remote hosts, so one ssh connection, without the
+# connection sharing Windows' ssh lacks, carries everything.
+sh "$root/packaging/build-agents.sh" "$out/lib/tmux-tabbed-terminal/agent" "$version"
+
 # GTK's image loaders, for icons and image previews. The cache's paths are relative to the
 # installation, so the system's, cut down to these loaders, serves.
 loaders=lib/gdk-pixbuf-2.0/2.10.0/loaders

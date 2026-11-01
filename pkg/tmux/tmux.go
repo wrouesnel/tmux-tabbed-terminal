@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 )
 
 // ErrNoSession is returned when a session that was asked for doesn't exist.
@@ -114,14 +116,44 @@ func (c *Client) Argv(args ...string) []string {
 // client's terminal though its TERM doesn't say so. tmux before 3.2 has no -T for them:
 // pass none there.
 func (c *Client) AttachArgv(session string, features ...string) []string {
-	args := []string{"attach-session", "-t", session}
-	if len(features) > 0 {
-		args = append([]string{"-T", strings.Join(features, ",")}, args...)
-	}
+	args := attachArgs(session, features)
 	if c.SSH != nil {
 		return c.SSH.argv(true, c.tmuxArgv(args...))
 	}
 	return c.tmuxArgv(args...)
+}
+
+// attachArgs are the tmux arguments of a client attached to session, with features.
+func attachArgs(session string, features []string) []string {
+	args := []string{"attach-session", "-t", session}
+	if len(features) > 0 {
+		args = append([]string{"-T", strings.Join(features, ",")}, args...)
+	}
+	return args
+}
+
+// AttachThroughAgent starts a tmux client attached to session on a terminal on the remote
+// server's route's first host, through its agent: the client itself there, or the ssh of
+// the hops after it. It returns nil, and no error, if the route has no agent, when the
+// caller runs AttachArgv's command instead. env is the terminal's environment, such as
+// TERM.
+func (c *Client) AttachThroughAgent(ctx context.Context, session string, features []string,
+	env map[string]string) (*agent.Terminal, error) {
+	if c.SSH == nil {
+		return nil, nil
+	}
+	ctx, cancel, err := c.SSH.connect(ctx)
+	defer cancel()
+	if err != nil {
+		return nil, err
+	}
+	_, ac := c.SSH.agentClient()
+	if ac == nil {
+		return nil, nil
+	}
+	argv := c.SSH.innerArgv(true, false, c.tmuxArgv(attachArgs(session, features)...))
+	// The terminal outlives ctx, which only limits how long it has to start.
+	return ac.Attach(context.WithoutCancel(ctx), argv, agent.TerminalOptions{Cols: 80, Rows: 24, Env: env}) //nolint:mnd // until the widget says
 }
 
 // SupportsHyperlinks reports whether a tmux version, as ServerVersion returns it, passes

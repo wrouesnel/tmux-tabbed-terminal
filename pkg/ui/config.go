@@ -142,7 +142,20 @@ type SSHConfig struct {
 	// application runs. Without it, ssh connects in BatchMode, so it needs keys without
 	// passphrases or an agent holding them.
 	AskForPassphrases bool `yaml:"ask-for-passphrases"`
+	// Agent says whether remote hosts are reached through the application's agent, a
+	// program it runs on the host over one ssh connection, which then carries every
+	// command and terminal: "auto" uses it where ssh can't share one connection between
+	// commands, as on Windows; "always" and "never" choose either way. Without it, ssh
+	// shares one connection with ControlMaster where it can.
+	Agent string `yaml:"agent"`
 }
+
+// Values of SSHConfig.Agent.
+const (
+	agentAuto   = "auto"
+	agentAlways = "always"
+	agentNever  = "never"
+)
 
 // BehaviourConfig sets what the application does on its own.
 type BehaviourConfig struct {
@@ -192,6 +205,7 @@ func DefaultConfig() Config {
 		},
 		SSH: SSHConfig{
 			AskForPassphrases: true,
+			Agent:             agentAuto,
 		},
 		Links: LinksConfig{
 			ImagePreviews: true,

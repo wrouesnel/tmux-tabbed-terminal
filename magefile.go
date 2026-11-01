@@ -501,8 +501,9 @@ func init() {
 			panic(err)
 		}
 		for _, finfo := range finfos {
-			// Each binary is a directory - skip files such as README.md
-			if !finfo.IsDir() {
+			// Each binary is a directory - skip files such as README.md. The agent is built
+			// for the hosts it runs on, by Agents.
+			if !finfo.IsDir() || finfo.Name() == agentCmd {
 				continue
 			}
 			results = append(results, finfo.Name())
@@ -828,6 +829,15 @@ func GithubReleaseMatrix() error {
 	defer f.Close()
 	_, err = f.WriteString(line)
 	return err
+}
+
+// agentCmd is the agent the application runs on remote hosts, built by Agents.
+const agentCmd = "ttt-agent"
+
+// Agents builds the agent for every platform it supports into bin/agent, where
+// TTT_AGENT_DIR=bin/agent points a development build of the application.
+func Agents() error {
+	return sh.RunV("sh", path.Join(curDir, "packaging", "build-agents.sh"), path.Join(binDir, "agent"), version)
 }
 
 // Protocol buffer tools, at the versions the committed generated code was made with.

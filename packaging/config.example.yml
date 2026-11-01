@@ -79,6 +79,12 @@ ssh:
   # Without it, ssh connects in BatchMode: keys need no passphrase, or an agent holding
   # them.
   ask-for-passphrases: true
+  # Whether remote hosts are reached through the application's agent, a small program it
+  # installs on the host, in ~/.cache/tmux-tabbed-terminal, and runs over one ssh
+  # connection, which then carries every command and terminal. auto uses it where ssh
+  # can't share one connection between commands, as on Windows; always and never choose.
+  # Without it, ssh shares a connection with ControlMaster where it can.
+  agent: auto
 
 keyboard:
   # Shortcuts in place of the defaults, by action. Actions with a default shortcut go by

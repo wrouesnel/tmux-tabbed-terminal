@@ -194,6 +194,11 @@ func takeError(gerr *C.GError) error {
 	return errors.New(C.GoString(gerr.message))
 }
 
+// StartPty can't attach VTE to a program on another pty: VTE reads its own pty.
+func (t *Terminal) StartPty(Pty) (string, error) {
+	return "", ErrStartPtyUnsupported
+}
+
 // Start runs cmd on a new pty attached to the terminal, as the session leader with the
 // pty as its controlling terminal. It returns the path of the pty's tty. The caller
 // waits for the process.
@@ -427,3 +432,6 @@ func (t *Terminal) PasteClipboard() {
 func (t *Terminal) Size() (int, int) {
 	return int(C.vte_terminal_get_column_count(t.native())), int(C.vte_terminal_get_row_count(t.native()))
 }
+
+// StartPtySupported says StartPty doesn't work: VTE reads its own pty.
+const StartPtySupported = false

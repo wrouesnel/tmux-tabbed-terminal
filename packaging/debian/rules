@@ -24,12 +24,15 @@ override_dh_auto_configure:
 override_dh_auto_build:
 	go build -ldflags "-s -w -X github.com/wrouesnel/tmux-tabbed-terminal/version.Version=v$(VERSION)" \
 		-o debian/build/tmux-tabbed-terminal ./cmd/tmux-tabbed-terminal
+	sh packaging/build-agents.sh debian/build/agent v$(VERSION)
 
 # The tests need a tmux server and an X server, which package builders don't have.
 override_dh_auto_test:
 
 override_dh_auto_install:
 	install -D -m0755 debian/build/tmux-tabbed-terminal $(DEST)/usr/bin/tmux-tabbed-terminal
+	install -d $(DEST)/usr/lib/tmux-tabbed-terminal/agent
+	install -m0644 debian/build/agent/*.gz $(DEST)/usr/lib/tmux-tabbed-terminal/agent/
 	install -D -m0644 packaging/linux/$(APP_ID).desktop $(DEST)/usr/share/applications/$(APP_ID).desktop
 	install -D -m0644 packaging/linux/$(APP_ID).svg $(DEST)/usr/share/icons/hicolor/scalable/apps/$(APP_ID).svg
 	install -D -m0644 packaging/linux/$(APP_ID).metainfo.xml $(DEST)/usr/share/metainfo/$(APP_ID).metainfo.xml

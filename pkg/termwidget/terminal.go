@@ -113,6 +113,16 @@ func (t *Terminal) Start(cmd *exec.Cmd) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	t.StartPty(p)
+	return p.Name(), nil
+}
+
+// StartPty attaches the terminal to a program already running on p, such as one on
+// another host, closing any it was running on, and tells it the terminal's size.
+func (t *Terminal) StartPty(p pty.Pty) {
+	t.closePty()
+	cols, rows := t.emu.Size()
+	_ = p.Resize(cols, rows)
 	t.mu.Lock()
 	t.generation++
 	generation := t.generation
@@ -120,7 +130,6 @@ func (t *Terminal) Start(cmd *exec.Cmd) (string, error) {
 	t.mu.Unlock()
 	t.pty, t.out = p, newWriter(p)
 	go t.read(p, generation)
-	return p.Name(), nil
 }
 
 // Close hangs up the running program, if any.

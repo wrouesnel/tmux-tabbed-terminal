@@ -27,6 +27,13 @@ func New() *Terminal {
 	return &Terminal{Widget: &t.Widget, t: t}
 }
 
+// StartPty attaches the widget to a program already running on p, such as one on another
+// host, closing any it was running on. It returns p's terminal device.
+func (t *Terminal) StartPty(p Pty) (string, error) {
+	t.t.StartPty(p)
+	return p.Name(), nil
+}
+
 // Start runs cmd on a new terminal attached to the widget, closing any it was running
 // on. It returns the path of the terminal device, which is "" on Windows. The caller
 // waits for the process.
@@ -128,3 +135,6 @@ func (t *Terminal) PasteClipboard() { t.t.PasteClipboard() }
 
 // Size returns the terminal size in cells.
 func (t *Terminal) Size() (int, int) { return t.t.Size() }
+
+// StartPtySupported says StartPty works: the widget reads any pty.
+const StartPtySupported = true

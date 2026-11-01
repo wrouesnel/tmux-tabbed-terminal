@@ -108,6 +108,10 @@ func (a *App) newRemoteHost(cfg HostConfig) (*Host, error) {
 		AskpassEnv: a.askpassEnv,
 	}
 	ssh.SetConfigFile(a.sshConfigFile())
+	ssh.NoConnectionSharing = noConnectionSharing()
+	if a.useAgent() {
+		ssh.Agents, ssh.AgentVersion = a.agents(), version.Version
+	}
 	if cfg.Via != "" && cfg.Via != LocalHost {
 		via := a.host(cfg.Via)
 		if via == nil {

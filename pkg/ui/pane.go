@@ -14,6 +14,7 @@ import (
 	"github.com/gotk3/gotk3/pango"
 	"go.uber.org/zap"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/vte"
@@ -75,7 +76,7 @@ type Pane struct {
 	hostName  string
 	sessionID string
 	tty       string
-	cmd       *exec.Cmd
+	client    paneClient
 	running   bool
 	// generation increases with every client started, so the exit of a replaced client
 	// is ignored.
@@ -445,26 +446,101 @@ func (p *Pane) attach(key string) {
 		return
 	}
 
-	argv := h.client.AttachArgv(id, h.features...)
-	cmd := tmux.Command(context.Background(), argv)
+	// Starting on a new pty closes the old one, which hangs up the old client.
+	p.generation++
+	generation := p.generation
+	if h.client.Remote() && h.client.SSH.HasAgents() && vte.StartPtySupported {
+		// The agent's terminal takes round trips to start, off the main loop.
+		env := map[string]string{"TERM": terminalTerm, "COLORTERM": terminalColorTerm}
+		runAsync(p.win.app, func(ctx context.Context) (*agent.Terminal, error) {
+			return h.client.AttachThroughAgent(ctx, id, h.features, env)
+		}, func(term *agent.Terminal, err error) {
+			if p.closed || generation != p.generation {
+				if term != nil {
+					_ = term.Close()
+				}
+				return
+			}
+			switch {
+			case err != nil:
+				p.startFailed(log, err)
+			case term == nil:
+				// No agent for the host: its own ssh.
+				p.startProcess(log, h, key, generation)
+			default:
+				p.startAgentTerminal(log, term, key, generation)
+			}
+		})
+		return
+	}
+	p.startProcess(log, h, key, generation)
+}
+
+// paneClient is a pane's running tmux client: a process here, such as tmux or the ssh
+// running it on another host, or a terminal on another host through its agent.
+type paneClient interface {
+	// Wait waits for the client to exit.
+	Wait() error
+	// Hangup hangs the client up, which tmux takes as it detaching.
+	Hangup()
+}
+
+type processClient struct{ cmd *exec.Cmd }
+
+func (c processClient) Wait() error { return c.cmd.Wait() }
+
+func (c processClient) Hangup() {
+	if c.cmd.Process != nil {
+		_ = c.cmd.Process.Signal(syscall.SIGHUP)
+	}
+}
+
+type agentClient struct{ term *agent.Terminal }
+
+func (c agentClient) Wait() error { return c.term.Wait() }
+func (c agentClient) Hangup()     { _ = c.term.Close() }
+
+// startProcess starts a tmux client for a session as a process on the pane's pty: tmux
+// itself, or ssh running it on the session's host.
+func (p *Pane) startProcess(log *zap.Logger, h *Host, key string, generation int) {
+	_, id := splitKey(key)
+	cmd := tmux.Command(context.Background(), h.client.AttachArgv(id, h.features...))
 	cmd.Env = terminalEnv(os.Environ())
 	if home, err := os.UserHomeDir(); err == nil {
 		cmd.Dir = home
 	}
-
-	// Starting on a new pty closes the old one, which hangs up the old client.
-	p.generation++
-	generation := p.generation
 	tty, err := p.term.Start(cmd)
 	if err != nil {
-		log.Error("Could not start tmux client", zap.Error(err))
-		p.running = false
-		p.showEmpty("Could not start tmux", err.Error(), true)
+		p.startFailed(log, err)
 		return
 	}
 	log.Debug("Started tmux client", zap.String("tty", tty), zap.Int("pid", cmd.Process.Pid))
+	p.started(processClient{cmd}, tty, key, generation)
+}
 
-	p.cmd, p.tty, p.hostName, p.sessionID, p.running = cmd, tty, hostName, id, true
+// startAgentTerminal shows a tmux client started on another host through its agent.
+func (p *Pane) startAgentTerminal(log *zap.Logger, term *agent.Terminal, key string, generation int) {
+	tty, err := p.term.StartPty(term)
+	if err != nil {
+		_ = term.Close()
+		p.startFailed(log, err)
+		return
+	}
+	log.Debug("Started tmux client through the agent", zap.String("tty", tty))
+	p.started(agentClient{term}, tty, key, generation)
+}
+
+// startFailed shows that a tmux client couldn't start.
+func (p *Pane) startFailed(log *zap.Logger, err error) {
+	log.Error("Could not start tmux client", zap.Error(err))
+	p.running = false
+	p.showEmpty("Could not start tmux", err.Error(), true)
+}
+
+// started shows a tmux client which has started, and waits for it to exit.
+func (p *Pane) started(client paneClient, tty, key string, generation int) {
+	hostName, id := splitKey(key)
+	p.client, p.tty, p.hostName, p.sessionID, p.running = client, tty, hostName, id, true
 	p.win.app.tracker.MarkSeen(key)
 	p.closeFile()
 	p.stack.SetVisibleChildName(pageTerminal)
@@ -473,7 +549,7 @@ func (p *Pane) attach(key string) {
 	}
 
 	go func() {
-		err := cmd.Wait()
+		err := client.Wait()
 		glib.IdleAdd(func() { p.exited(generation, err) })
 	}()
 	p.win.refresh()
@@ -485,7 +561,7 @@ func (p *Pane) exited(generation int, err error) {
 		return
 	}
 	p.win.app.log.Debug("tmux client exited", zap.String("session", p.sessionID), zap.Error(err))
-	p.running, p.tty, p.cmd = false, "", nil
+	p.running, p.tty, p.client = false, "", nil
 	p.hidePreview()
 	p.win.paneExited(p)
 }
@@ -499,15 +575,21 @@ func terminalEnv(env []string) []string {
 		}
 		result = append(result, kv)
 	}
-	return append(result, "TERM=xterm-256color", "COLORTERM=truecolor")
+	return append(result, "TERM="+terminalTerm, "COLORTERM="+terminalColorTerm)
 }
+
+// The terminal type of tmux clients.
+const (
+	terminalTerm      = "xterm-256color"
+	terminalColorTerm = "truecolor"
+)
 
 // detach hangs up the pane's client, which tmux takes as the client detaching. Unlike
 // close, the pane stays: it sees its client exit, and shows that the session was
 // detached. A remote client is hung up with its ssh connection.
 func (p *Pane) detach() {
-	if p.running && p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Signal(syscall.SIGHUP)
+	if p.running && p.client != nil {
+		p.client.Hangup()
 	}
 }
 
@@ -516,8 +598,8 @@ func (p *Pane) close() {
 	p.closed = true
 	p.hidePreview()
 	p.closeFile()
-	if p.cmd != nil && p.cmd.Process != nil {
-		_ = p.cmd.Process.Signal(syscall.SIGHUP)
+	if p.client != nil {
+		p.client.Hangup()
 	}
 }
 

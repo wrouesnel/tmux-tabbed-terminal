@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gotk3/gotk3/gdk"
@@ -21,6 +22,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/askpass"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sshconfig"
@@ -57,6 +59,10 @@ type Options struct {
 
 // App is the running application.
 type App struct {
+	// agentBinaries are the agents to install on remote hosts, found once by agents.
+	agentsOnce    sync.Once
+	agentBinaries *agent.Binaries
+
 	// askpass answers ssh's requests, as for a key's passphrase, and askpassEnv is the
 	// environment which points ssh at it, or nil if ssh can't ask. passphrases are those
 	// the user chose to remember, and prompts the requests waiting for a dialog, the

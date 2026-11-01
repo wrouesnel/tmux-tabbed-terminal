@@ -11,6 +11,12 @@ import (
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 )
 
+// HasAgents reports whether the route's first hop has agents to run, so its commands, and
+// terminals, can go through one.
+func (s *SSH) HasAgents() bool {
+	return s.root().Agents != nil
+}
+
 // root returns the hop run from this machine, at the start of the route.
 func (s *SSH) root() *SSH {
 	for s.Via != nil {

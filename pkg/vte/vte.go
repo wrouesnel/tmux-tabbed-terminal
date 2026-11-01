@@ -10,10 +10,27 @@
 package vte
 
 import (
+	"errors"
+	"io"
 	"strings"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/termwidget/emulator"
 )
+
+// Pty is a program's terminal, such as one on another host, for StartPty: reading it
+// returns what the program writes, writing it types into the program, and closing it
+// hangs the program up.
+type Pty interface {
+	io.ReadWriteCloser
+	// Resize tells the program the terminal's new size in cells.
+	Resize(cols, rows int) error
+	// Name is the terminal device, such as /dev/pts/3, or "" where there's none.
+	Name() string
+}
+
+// ErrStartPtyUnsupported is StartPty's error where the widget can only show a program on
+// a pty of its own, as VTE does.
+var ErrStartPtyUnsupported = errors.New("the terminal can't show a program on another pty")
 
 // Color is an RGBA color with components from 0 to 1.
 type Color struct {
