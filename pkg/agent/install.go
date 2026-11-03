@@ -33,6 +33,8 @@ type Binaries struct {
 	once sync.Once
 	id   string
 	err  error
+	// sums are the SHA-256 checksums of the files the ID was made from, by name.
+	sums map[string][sha256.Size]byte
 }
 
 // ErrUnsupported is the error of a host there's no agent for, such as one whose platform
@@ -55,6 +57,7 @@ func (b *Binaries) ID(version string) (string, error) {
 		}
 		sort.Strings(files)
 		h := sha256.New()
+		b.sums = map[string][sha256.Size]byte{}
 		for _, f := range files {
 			data, err := os.ReadFile(f)
 			if err != nil {
@@ -62,6 +65,7 @@ func (b *Binaries) ID(version string) (string, error) {
 				return
 			}
 			sum := sha256.Sum256(data)
+			b.sums[filepath.Base(f)] = sum
 			h.Write([]byte(filepath.Base(f)))
 			h.Write(sum[:])
 		}
@@ -238,12 +242,20 @@ func install(w io.Writer, binaries *Binaries, system, machine string) error {
 	if !ok {
 		return errors.Wrapf(ErrUnsupported, "%s %s", system, machine)
 	}
-	gz, err := os.ReadFile(filepath.Join(binaries.Dir, binaryName(goos, goarch)))
-	if errors.Is(err, os.ErrNotExist) {
+	name := binaryName(goos, goarch)
+	want, ok := binaries.sums[name]
+	if !ok {
 		return errors.Wrapf(ErrUnsupported, "%s/%s", goos, goarch)
 	}
+	gz, err := os.ReadFile(filepath.Join(binaries.Dir, name))
 	if err != nil {
 		return err
+	}
+	// An upgrade may have replaced the agents since the ID was made from them: installing
+	// another version's agent under this ID would leave the host with one this application
+	// can't talk to.
+	if sha256.Sum256(gz) != want {
+		return errors.Errorf("the agents in %s have changed since the application started: restart it", binaries.Dir)
 	}
 	zr, err := gzip.NewReader(bytes.NewReader(gz))
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -77,6 +78,26 @@ func TestConnectUnsupported(t *testing.T) {
 	var launches atomic.Int32
 	_, err := agent.Connect(context.Background(), localLauncher(t, &launches), &agent.Binaries{Dir: dir}, testVersion)
 	if !errors.Is(err, agent.ErrUnsupported) {
+		t.Errorf("err %v", err)
+	}
+}
+
+// An agent replaced after the application started, as by an upgrade, isn't installed under
+// the old one's ID.
+func TestConnectChangedAgents(t *testing.T) {
+	binaries := agenttest.Build(t, testVersion)
+	if _, err := binaries.ID(testVersion); err != nil {
+		t.Fatal(err)
+	}
+	gzs, _ := filepath.Glob(filepath.Join(binaries.Dir, "*.gz"))
+	for _, gz := range gzs {
+		if err := os.WriteFile(gz, []byte("a newer agent"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var launches atomic.Int32
+	_, err := agent.Connect(context.Background(), localLauncher(t, &launches), binaries, testVersion)
+	if err == nil || !strings.Contains(err.Error(), "restart") {
 		t.Errorf("err %v", err)
 	}
 }
