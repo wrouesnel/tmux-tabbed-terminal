@@ -121,6 +121,10 @@ func (a *App) newRemoteHost(cfg HostConfig) (*Host, error) {
 			ssh.Via = via.client.SSH
 		}
 	}
+	if ssh.Via == nil {
+		// Only the first hop's ssh runs here: the others run on the host before them.
+		ssh.Binary = systemSSH()
+	}
 	client := tmux.NewClient()
 	client.SocketName = cfg.SocketName
 	client.SSH = ssh

@@ -20,6 +20,18 @@ func bundledTmux() string {
 	return tmux
 }
 
+// systemSSH returns Windows' own OpenSSH client, if it's installed, or "" to use the ssh
+// on the PATH. An ssh which comes earlier on the PATH, such as MSYS2's or Git's, reads its
+// configuration from another home, so the hosts listed from ~/.ssh/config wouldn't be the
+// ones it knows, and the agent's connections need Windows' ssh in any case.
+func systemSSH() string {
+	ssh := filepath.Join(systemRoot(), "System32", "OpenSSH", "ssh.exe")
+	if _, err := os.Stat(ssh); err != nil {
+		return ""
+	}
+	return ssh
+}
+
 // powerShell returns PowerShell 7 if it's installed, and otherwise Windows PowerShell,
 // which always is.
 func powerShell() string {

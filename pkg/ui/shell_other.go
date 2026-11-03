@@ -11,6 +11,9 @@ import (
 // bundledTmux returns "": tmux comes from the system here.
 func bundledTmux() string { return "" }
 
+// systemSSH returns "": the ssh on the PATH is the system's here.
+func systemSSH() string { return "" }
+
 // powerShell is only needed for a bundled tmux.
 func powerShell() string { return "" }
 
