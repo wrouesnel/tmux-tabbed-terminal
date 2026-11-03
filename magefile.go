@@ -1261,6 +1261,13 @@ func doRelease(OSArch string) func() error {
 		if err := ReleaseBin(OSArch); err != nil {
 			return err
 		}
+		// The agents go beside the application, where it looks for them.
+		if platform.OS != "windows" {
+			if err := sh.RunV("sh", path.Join(curDir, "packaging", "build-agents.sh"),
+				path.Join(platform.PlatformDir(), "agent"), version); err != nil {
+				return err
+			}
+		}
 
 		archiveCmds := map[string]func() error{}
 		if platform.OS == "windows" {

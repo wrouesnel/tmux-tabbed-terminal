@@ -33,7 +33,8 @@ func (a *App) useAgent() bool {
 }
 
 // agents returns the agents to install on remote hosts, or nil if there are none: from
-// TTT_AGENT_DIR, or installed beside the application, in lib/tmux-tabbed-terminal/agent.
+// TTT_AGENT_DIR, or installed with the application: in lib/tmux-tabbed-terminal/agent, as
+// packages install them, or in agent beside it, as in the release archives.
 func (a *App) agents() *agent.Binaries {
 	a.agentsOnce.Do(func() {
 		dirs := []string{os.Getenv(agentDirEnv)}
@@ -41,7 +42,8 @@ func (a *App) agents() *agent.Binaries {
 			if resolved, err := filepath.EvalSymlinks(exe); err == nil {
 				exe = resolved
 			}
-			dirs = append(dirs, filepath.Join(filepath.Dir(exe), "..", "lib", "tmux-tabbed-terminal", "agent"))
+			dirs = append(dirs, filepath.Join(filepath.Dir(exe), "..", "lib", "tmux-tabbed-terminal", "agent"),
+				filepath.Join(filepath.Dir(exe), "agent"))
 		}
 		for _, dir := range dirs {
 			if dir == "" {

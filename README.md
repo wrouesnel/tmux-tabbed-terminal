@@ -177,7 +177,8 @@ as MSYS2's.
 Each [GitHub release](https://github.com/wrouesnel/tmux-tabbed-terminal/releases) has the
 source, as a tarball with the Go modules vendored, and binary archives for amd64 and
 arm64, each with a SHA-256 checksum. The binaries link GTK3 and VTE dynamically and are
-built on Ubuntu 24.04.
+built on Ubuntu 24.04. Each archive has the [agents](#the-agent) in `agent/`, beside the
+binary, where it looks for them: keep them together.
 
 ## Usage
 
