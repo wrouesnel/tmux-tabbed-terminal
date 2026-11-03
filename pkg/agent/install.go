@@ -7,12 +7,12 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,8 +94,9 @@ func goPlatform(system, machine string) (string, string, bool) {
 	return goos, goarch, goos != "" && goarch != ""
 }
 
-// Markers the start script writes on a line of its own, so the client can find them after
-// anything the host's shell startup files print.
+// Markers which start lines of their own, so the client can find them after anything the
+// host's shell startup files print: the start script's, saying the agent is missing and
+// what platform the host is, and the agent's, saying it's ready and its version.
 const (
 	markerStart   = "ttt-agent-start"
 	markerMissing = "ttt-agent-missing"
@@ -103,127 +104,121 @@ const (
 	maxPreamble = 64 << 10
 )
 
-// startScript runs the agent if it's installed, saying so first, or says it's missing and
-// what platform the host is. Its arguments are the agents' ID.
-const startScript = `p="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-tabbed-terminal/agent/$1/ttt-agent-$(uname -s)-$(uname -m)"
-if [ -x "$p" ]; then
-	echo ` + markerStart + `
-	exec "$p" serve
-fi
-echo "` + markerMissing + ` $(uname -s) $(uname -m)"`
-
-// installScript writes the gzipped agent on its standard input to where startScript looks
-// for it, checking it against a SHA-256 checksum. Its arguments are the agents' ID, the
-// checksum, and the gzipped agent's size: it reads exactly that much, rather than to the
-// end of its input, as Windows' ssh doesn't pass the end of its own on.
-const installScript = `set -e
+// startScript runs the agent, installing it first if it isn't there. Its argument is the
+// agents' ID. If it's missing, the script says so and what platform the host is, and reads
+// a line with the gzipped agent's size and SHA-256 checksum, then the agent itself: it
+// reads exactly that much, rather than to the end of its input, which is the connection
+// the agent then serves. The agent is checked against the checksum before it's put where
+// it's looked for.
+const startScript = `set -e
 d="${XDG_CACHE_HOME:-$HOME/.cache}/tmux-tabbed-terminal/agent"
 p="$d/$1/ttt-agent-$(uname -s)-$(uname -m)"
-mkdir -p "$d/$1"
-chmod 700 "$d"
-t="$p.$$.tmp"
-trap 'rm -f "$t"' EXIT
-head -c "$3" | gzip -dc > "$t"
-sum=$( (sha256sum "$t" 2>/dev/null || shasum -a 256 "$t") | cut -d ' ' -f 1)
-if [ "$sum" != "$2" ]; then
-	echo "the agent's checksum is $sum, not $2" >&2
-	exit 1
+if [ ! -x "$p" ]; then
+	echo "` + markerMissing + ` $(uname -s) $(uname -m)"
+	read -r size sum
+	mkdir -p "$d/$1"
+	chmod 700 "$d"
+	t="$p.$$.tmp"
+	trap 'rm -f "$t"' EXIT
+	head -c "$size" | gzip -dc > "$t"
+	got=$( (sha256sum "$t" 2>/dev/null || shasum -a 256 "$t") | cut -d ' ' -f 1)
+	if [ "$got" != "$sum" ]; then
+		echo "the agent's checksum is $got, not $sum" >&2
+		exit 1
+	fi
+	chmod 700 "$t"
+	mv -f "$t" "$p"
+	trap - EXIT
+	# Agents of other versions, unused for a month, are removed.
+	find "$d" -mindepth 1 -maxdepth 1 ! -name "$1" -mtime +30 -exec rm -rf {} + 2>/dev/null || true
 fi
-chmod 700 "$t"
-mv -f "$t" "$p"
-# Agents of other versions, unused for a month, are removed.
-find "$d" -mindepth 1 -maxdepth 1 ! -name "$1" -mtime +30 -exec rm -rf {} + 2>/dev/null || true`
+exec "$p" serve`
 
 // Connect starts the agent on a host through launch, installing it first if it isn't
-// there, and returns a client talking to it. version is the application's version, which
-// the agent's must match. It returns an error wrapping ErrUnsupported if there's no agent
-// for the host.
+// there, and returns a client talking to it. It takes one command on the host either way.
+// version is the application's version, which the agent's must match. It returns an error
+// wrapping ErrUnsupported if there's no agent for the host. The agent outlives ctx, which
+// only limits how long it has to start.
 func Connect(ctx context.Context, launch Launcher, binaries *Binaries, version string) (*Client, error) {
 	id, err := binaries.ID(version)
 	if err != nil {
 		return nil, err
 	}
-	c, platform, err := start(ctx, launch, id)
-	if err != nil {
-		return nil, err
-	}
-	if c == nil {
-		if err := install(ctx, launch, binaries, id, platform); err != nil {
-			return nil, err
-		}
-		if c, _, err = start(ctx, launch, id); err != nil {
-			return nil, err
-		}
-		if c == nil {
-			return nil, errors.New("the agent was installed but isn't there")
-		}
-	}
-	hello, err := c.Hello(ctx, version)
-	if err != nil {
-		_ = c.Close()
-		return nil, errors.Wrap(err, "greeting the agent")
-	}
-	if hello.GetVersion() != version {
-		_ = c.Close()
-		return nil, errors.Errorf("the agent is version %s, not %s", hello.GetVersion(), version)
-	}
-	return c, nil
-}
-
-// start runs startScript. If the agent started, it returns a client talking to it; if it's
-// missing, it returns no client and the host's uname -s and uname -m. The agent outlives
-// ctx, which only limits how long it has to start.
-func start(ctx context.Context, launch Launcher, id string) (*Client, [2]string, error) {
 	cmd := launch(context.WithoutCancel(ctx), []string{"sh", "-c", startScript, "sh", id})
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, [2]string{}, err
+		return nil, err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, [2]string{}, err
+		return nil, err
 	}
 	stderr := &lockedWriter{w: &limitedBuffer{max: maxStderr}}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
-		return nil, [2]string{}, err
+		return nil, err
 	}
 	proc := &process{cmd: cmd, stdin: stdin}
 	r := bufio.NewReaderSize(stdout, maxPreamble)
-	// Ending the command ends the read.
+	// Ending the command ends a read or write waiting on it.
 	stop := context.AfterFunc(ctx, func() { _ = proc.Close() })
-	line, err := readMarker(r)
+	err = handshake(r, stdin, binaries, version)
 	if !stop() {
 		_ = proc.Close()
-		return nil, [2]string{}, errors.Wrapf(ctx.Err(), "starting the agent: %s", strings.TrimSpace(stderr.String()))
+		return nil, errors.Wrapf(ctx.Err(), "starting the agent: %s", strings.TrimSpace(stderr.String()))
 	}
 	if err != nil {
 		_ = proc.Close()
-		return nil, [2]string{}, errors.Wrapf(err, "starting the agent: %s", strings.TrimSpace(stderr.String()))
-	}
-	if fields := strings.Fields(line); fields[0] == markerMissing {
-		_ = proc.Close()
-		if len(fields) != 3 { //nolint:mnd // the marker and two names
-			return nil, [2]string{}, errors.Errorf("unexpected platform %q", line)
+		if errors.Is(err, ErrUnsupported) {
+			return nil, err
 		}
-		return nil, [2]string{fields[1], fields[2]}, nil
+		return nil, errors.Wrapf(err, "starting the agent: %s", strings.TrimSpace(stderr.String()))
 	}
 	c, err := NewClient(r, stdin, proc)
 	if err != nil {
 		_ = proc.Close()
-		return nil, [2]string{}, err
+		return nil, err
 	}
-	return c, [2]string{}, nil
+	return c, nil
 }
 
-// readMarker reads lines until one of the start script's markers, and returns it.
+// handshake reads the start script's output until the agent says it's ready, sending it
+// the agent if it says it's missing, and checks the agent's version.
+func handshake(r *bufio.Reader, w io.Writer, binaries *Binaries, version string) error {
+	installed := false
+	for {
+		line, err := readMarker(r)
+		if err != nil {
+			return err
+		}
+		fields := strings.Fields(line)
+		if fields[0] == markerStart {
+			if len(fields) != 2 || fields[1] != version { //nolint:mnd // the marker and the version
+				return errors.Errorf("the agent is %q, not version %s", line, version)
+			}
+			return nil
+		}
+		if installed {
+			return errors.New("the agent was installed but isn't there")
+		}
+		if len(fields) != 3 { //nolint:mnd // the marker and two names
+			return errors.Errorf("unexpected platform %q", line)
+		}
+		if err := install(w, binaries, fields[1], fields[2]); err != nil {
+			return err
+		}
+		installed = true
+	}
+}
+
+// readMarker reads lines until one of the markers, and returns it.
 func readMarker(r *bufio.Reader) (string, error) {
 	read := 0
 	for read < maxPreamble {
 		line, err := r.ReadString('\n')
 		read += len(line)
 		line = strings.TrimSpace(line)
-		if line == markerStart || strings.HasPrefix(line, markerMissing+" ") {
+		if strings.HasPrefix(line, markerStart+" ") || strings.HasPrefix(line, markerMissing+" ") {
 			return line, nil
 		}
 		if err != nil {
@@ -236,11 +231,12 @@ func readMarker(r *bufio.Reader) (string, error) {
 	return "", errors.New("the host's shell printed too much before the agent")
 }
 
-// install uploads the agent for a host's platform, given as uname -s and uname -m.
-func install(ctx context.Context, launch Launcher, binaries *Binaries, id string, platform [2]string) error {
-	goos, goarch, ok := goPlatform(platform[0], platform[1])
+// install sends the start script the agent for a host's platform, given as uname -s and
+// uname -m: its size and checksum, then the agent.
+func install(w io.Writer, binaries *Binaries, system, machine string) error {
+	goos, goarch, ok := goPlatform(system, machine)
 	if !ok {
-		return errors.Wrapf(ErrUnsupported, "%s %s", platform[0], platform[1])
+		return errors.Wrapf(ErrUnsupported, "%s %s", system, machine)
 	}
 	gz, err := os.ReadFile(filepath.Join(binaries.Dir, binaryName(goos, goarch)))
 	if errors.Is(err, os.ErrNotExist) {
@@ -257,12 +253,11 @@ func install(ctx context.Context, launch Launcher, binaries *Binaries, id string
 	if _, err := io.Copy(h, zr); err != nil { //nolint:gosec // our own build output
 		return errors.Wrap(err, "reading the agent")
 	}
-	cmd := launch(ctx, []string{"sh", "-c", installScript, "sh", id, hex.EncodeToString(h.Sum(nil)), strconv.Itoa(len(gz))})
-	cmd.Stdin = bytes.NewReader(gz)
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return errors.Wrapf(err, "installing the agent: %s", strings.TrimSpace(stderr.String()))
+	if _, err := fmt.Fprintf(w, "%d %s\n", len(gz), hex.EncodeToString(h.Sum(nil))); err != nil {
+		return errors.Wrap(err, "installing the agent")
+	}
+	if _, err := w.Write(gz); err != nil {
+		return errors.Wrap(err, "installing the agent")
 	}
 	return nil
 }

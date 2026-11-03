@@ -314,8 +314,8 @@ Windows' ssh can't share one connection between commands, so on Windows the appl
 reaches a host through its agent, `ttt-agent`: a small static program it installs on the
 host, in `~/.cache/tmux-tabbed-terminal/agent/`, and runs over one ssh connection, which
 then carries everything: polling, previews, downloads, and the terminals of panes. The
-first connection to a host uploads the agent for the host's platform, about 4 MB, and
-checks its SHA-256 checksum; later ones just start it. Agents are built for Linux and
+first connection to a host uploads the agent for the host's platform, about 3 MB, over
+the same connection, and checks its SHA-256 checksum; later ones just start it. Agents are built for Linux and
 macOS, on amd64 and arm64, and the application only talks to one of its own version, so
 an upgrade installs a new one; agents unused for a month are removed. Hosts reached
 through another run their ssh on the first host, through its agent.

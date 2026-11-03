@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -23,7 +24,11 @@ func startPair(t *testing.T) *Client {
 		served <- Serve(ctx, toAgent, fromAgent, "v1.2.3")
 		_ = fromAgent.Close()
 	}()
-	c, err := NewClient(toClient, fromClient, fromClient, toClient)
+	r := bufio.NewReader(toClient)
+	if line, err := readMarker(r); err != nil || line != markerStart+" v1.2.3" {
+		t.Fatalf("the agent said %q, %v", line, err)
+	}
+	c, err := NewClient(r, fromClient, fromClient, toClient)
 	if err != nil {
 		t.Fatal(err)
 	}

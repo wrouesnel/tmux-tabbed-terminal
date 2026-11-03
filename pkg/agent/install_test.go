@@ -39,8 +39,8 @@ func TestConnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := launches.Load(); n != 3 { //nolint:mnd // start, install, start
-		t.Errorf("the first connection took %d commands", n)
+	if n := launches.Load(); n != 1 {
+		t.Errorf("installing and connecting took %d commands", n)
 	}
 	res, err := c.Run(ctx, []string{"echo", "hi"}, nil)
 	if err != nil || string(res.Stdout) != "hi\n" {

@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -98,7 +99,11 @@ func benchPairRate(b *testing.B, delay time.Duration, rate float64) *Client {
 		_ = toClient.Close()
 		close(served)
 	}()
-	c, err := NewClient(toClient.r, toAgent, toAgent)
+	r := bufio.NewReader(toClient.r)
+	if _, err := readMarker(r); err != nil {
+		b.Fatal(err)
+	}
+	c, err := NewClient(r, toAgent, toAgent)
 	if err != nil {
 		b.Fatal(err)
 	}

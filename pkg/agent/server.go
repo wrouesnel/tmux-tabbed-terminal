@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -27,8 +28,12 @@ const streamChunk = 32 << 10
 const maxStderr = 64 << 10
 
 // Serve serves the agent over r and w, such as standard input and output, until r ends or
-// ctx is done. version is the application version the agent was built with.
+// ctx is done. version is the application version the agent was built with. It first
+// writes a line saying it's ready, and its version, for Connect to find.
 func Serve(ctx context.Context, r io.Reader, w io.Writer, version string) error {
+	if _, err := fmt.Fprintf(w, "%s %s\n", markerStart, version); err != nil {
+		return err
+	}
 	conn := newPipeConn(r, w)
 	l := newOneConnListener(conn)
 	s := grpc.NewServer(grpc.MaxRecvMsgSize(maxMessage), grpc.MaxSendMsgSize(maxMessage))
