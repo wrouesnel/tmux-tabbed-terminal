@@ -31,7 +31,7 @@ func BuildFor(t testing.TB, version, goos, goarch string) *agent.Binaries {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "ttt-agent")
 	// As packaging/build-agents.sh builds it, so it's the size it is on a host.
-	build := exec.Command("go", "build", "-trimpath", "-o", bin,
+	build := exec.Command("go", "build", "-trimpath", "-tags", "grpcnotrace", "-o", bin,
 		"-ldflags=-s -w -X github.com/wrouesnel/tmux-tabbed-terminal/version.Version="+version,
 		"github.com/wrouesnel/tmux-tabbed-terminal/cmd/ttt-agent")
 	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS="+goos, "GOARCH="+goarch)

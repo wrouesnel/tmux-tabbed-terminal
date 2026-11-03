@@ -4,7 +4,8 @@
 # VERSION must be the version the application is built with, as the -X of version.Version:
 # the application only talks to an agent of its own version. The agents are static, with
 # no cgo, so they run whatever the host's C library, and are gzipped without names or
-# times, so builds are reproducible.
+# times, so builds are reproducible. grpcnotrace leaves out gRPC's debugging pages, which
+# the agent doesn't serve, and which are nearly a third of its size.
 set -eu
 out=$1
 version=$2
@@ -14,7 +15,7 @@ for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64; do
 	goos=${platform%/*}
 	goarch=${platform#*/}
 	bin="$out/ttt-agent-$goos-$goarch"
-	(cd "$root" && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath \
+	(cd "$root" && CGO_ENABLED=0 GOOS=$goos GOARCH=$goarch go build -trimpath -tags grpcnotrace \
 		-ldflags "-s -w -buildid= -X github.com/wrouesnel/tmux-tabbed-terminal/version.Version=$version" \
 		-o "$bin" ./cmd/ttt-agent)
 	gzip -9nf "$bin"
