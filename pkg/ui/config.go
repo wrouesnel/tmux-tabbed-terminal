@@ -146,7 +146,8 @@ type SSHConfig struct {
 	// program it runs on the host over one ssh connection, which then carries every
 	// command and terminal: "auto" uses it where ssh can't share one connection between
 	// commands, as on Windows; "always" and "never" choose either way. Without it, ssh
-	// shares one connection with ControlMaster where it can.
+	// shares one connection with ControlMaster where it can. Preferences changes it, and
+	// that choice is remembered.
 	Agent string `yaml:"agent"`
 }
 

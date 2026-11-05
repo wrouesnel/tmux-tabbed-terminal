@@ -20,8 +20,12 @@ func noConnectionSharing() bool {
 	return runtime.GOOS == "windows"
 }
 
-// useAgent reports whether remote hosts are reached through the agent.
+// useAgent reports whether remote hosts are reached through the agent: as chosen in
+// Preferences, or the configuration.
 func (a *App) useAgent() bool {
+	if a.state.UseAgent != nil {
+		return *a.state.UseAgent
+	}
 	switch a.cfg.SSH.Agent {
 	case agentAlways:
 		return true
@@ -30,6 +34,14 @@ func (a *App) useAgent() bool {
 	default:
 		return noConnectionSharing()
 	}
+}
+
+// setUseAgent remembers whether remote hosts are reached through the agent. Hosts use it
+// from the next start: their connections, and the panes on them, are made one way or the
+// other.
+func (a *App) setUseAgent(use bool) {
+	a.state.UseAgent = &use
+	a.saveState()
 }
 
 // agents returns the agents to install on remote hosts, or nil if there are none: from

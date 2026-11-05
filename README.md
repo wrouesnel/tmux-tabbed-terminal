@@ -322,7 +322,8 @@ through another run their ssh on the first host, through its agent.
 
 `ssh.agent` chooses: `auto`, the default, uses the agent on Windows, and `always` uses it
 on Linux too, for remote commands and previews (panes there keep their own ssh, as VTE
-reads only its own pty). On a host there's no agent for, Windows connects once per
+reads only its own pty). On Linux, "Reach remote hosts through the agent" in Preferences
+chooses too, from the next start. On a host there's no agent for, Windows connects once per
 command. The protocol is gRPC, defined in
 [`proto/`](proto/tmuxtabbedterminal/agent/v1/agent.proto).
 

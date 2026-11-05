@@ -33,6 +33,9 @@ type uiState struct {
 	// UseSystemTmux and DefaultShell are the tmux choices made in Preferences.
 	UseSystemTmux *bool   `yaml:"use-system-tmux,omitempty"`
 	DefaultShell  *string `yaml:"default-shell,omitempty"`
+	// UseAgent is whether remote hosts are reached through the agent, as chosen in
+	// Preferences.
+	UseAgent *bool `yaml:"use-agent,omitempty"`
 }
 
 // PinnedSession is a session pinned to the top of the list. It's pinned by name rather

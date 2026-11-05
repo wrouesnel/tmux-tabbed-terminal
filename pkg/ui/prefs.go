@@ -40,6 +40,7 @@ type preferences struct {
 	tabBar     *gtk.ComboBoxText
 	shell      *gtk.ComboBoxText
 	systemTmux *gtk.CheckButton
+	useAgent   *gtk.CheckButton
 	// loading is set while the widgets are filled in, so their signals don't apply.
 	loading bool
 }
@@ -242,6 +243,25 @@ func newPreferences(a *App) *preferences {
 	sshHint.SetMaxWidthChars(50) //nolint:mnd // a readable line
 	addClass(sshHint, "dim-label")
 	add("", sshHint)
+
+	// Windows always needs the agent: its ssh can't share a connection between commands.
+	if !noConnectionSharing() {
+		p.useAgent, _ = gtk.CheckButtonNewWithLabel("Reach remote hosts through the agent (after restarting)")
+		p.useAgent.SetActive(a.useAgent())
+		p.useAgent.SetTooltipText("Run the application's agent on each remote host, over one ssh " +
+			"connection which carries its commands and previews, rather than sharing a connection " +
+			"with ssh's ControlMaster.")
+		if a.agents() == nil {
+			p.useAgent.SetSensitive(false)
+			p.useAgent.SetTooltipText("No agents are installed with this application.")
+		}
+		p.useAgent.Connect("toggled", func() {
+			if !p.loading {
+				a.setUseAgent(p.useAgent.GetActive())
+			}
+		})
+		add("Agent", p.useAgent)
+	}
 
 	// tmux. Not appearance preferences either.
 	p.shell, _ = gtk.ComboBoxTextNewWithEntry()
