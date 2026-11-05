@@ -325,10 +325,15 @@ func (f *filePreview) fitImage() bool {
 }
 
 // resolve returns the path a link in the shown file names on its host: relative to the
-// file's directory unless it's absolute or in the home directory. It returns "" for a
-// link with a scheme, such as a web page, or to a place in the same file.
+// file's directory unless it's absolute or in the home directory. A file URI names a file
+// on the file's host too, wherever it says, if that's another host. It returns "" for
+// other links with a scheme, such as a web page, or to a place in the same file.
 func (f *filePreview) resolve(dest string) string {
 	u, err := url.Parse(dest)
+	if err == nil && strings.EqualFold(u.Scheme, "file") && u.Path != "" &&
+		(f.host != LocalHost || isThisHost(u.Host)) {
+		return u.Path
+	}
 	if err != nil || u.Scheme != "" || u.Host != "" || u.Path == "" {
 		return ""
 	}

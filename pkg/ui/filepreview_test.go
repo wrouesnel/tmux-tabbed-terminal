@@ -38,9 +38,25 @@ func TestPreviewResolve(t *testing.T) {
 			t.Errorf("resolve(%q) = %q, want %q", dest, got, want)
 		}
 	}
-	remote := &filePreview{file: "~/plans/plan.md"}
-	if got := remote.resolve("img/a.png"); got != "~/plans/img/a.png" {
-		t.Errorf("remote resolve = %q", got)
+	remote := &filePreview{file: "~/plans/plan.md", host: "far"}
+	for dest, want := range map[string]string{
+		"img/a.png": "~/plans/img/a.png",
+		// The remote host's own file, not this machine's.
+		"file:///srv/a.go":     "/srv/a.go",
+		"file://far/srv/b.png": "/srv/b.png",
+	} {
+		if got := remote.resolve(dest); got != want {
+			t.Errorf("remote resolve(%q) = %q, want %q", dest, got, want)
+		}
+	}
+	local := &filePreview{file: "/work/plan.md", host: LocalHost}
+	for dest, want := range map[string]string{
+		"file:///srv/a.go":                  "/srv/a.go",
+		"file://elsewhere.invalid/srv/a.go": "",
+	} {
+		if got := local.resolve(dest); got != want {
+			t.Errorf("local resolve(%q) = %q, want %q", dest, got, want)
+		}
 	}
 }
 

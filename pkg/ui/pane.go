@@ -653,7 +653,7 @@ func (p *Pane) onButtonPress(event *gdk.Event) bool {
 		return p.withLinkAt(event, func(l link, ok bool) {
 			switch {
 			case !ok:
-			case l.uri == "" && l.downloadable():
+			case l.downloadable():
 				p.win.downloadLink(l)
 			default:
 				p.win.openLink(l.uri)

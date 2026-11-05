@@ -351,7 +351,7 @@ func (w *Window) openLinkDefault(l link) {
 	switch {
 	case l.file != "" && previewable(l.file):
 		w.previewFile(l.host, l.file)
-	case l.uri == "" && l.downloadable():
+	case l.downloadable():
 		w.downloadLink(l)
 	case l.uri != "":
 		w.openLink(l.uri)

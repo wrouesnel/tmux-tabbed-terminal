@@ -172,7 +172,12 @@ func TestResolveLink(t *testing.T) {
 		{"other host's file", vte.Match{Text: "file://elsewhere.invalid/tmp/c.png", Hyperlink: true}, linkURL, "", false,
 			"file://elsewhere.invalid/tmp/c.png", "file://elsewhere.invalid/tmp/c.png", ""},
 		{"remote ls hyperlink", vte.Match{Text: "file://far/tmp/d.png", Hyperlink: true}, linkURL, "", true,
-			"file://far/tmp/d.png", "file://far/tmp/d.png", "/tmp/d.png"},
+			"", "file://far/tmp/d.png", "/tmp/d.png"},
+		// On another host, even a file URI naming this one is that host's file.
+		{"remote hyperlink to this host", vte.Match{Text: "file://" + hostname + "/tmp/e.go", Hyperlink: true}, linkURL, "", true,
+			"", "file://" + hostname + "/tmp/e.go", "/tmp/e.go"},
+		{"remote file url", vte.Match{Text: "[f](file:///w/a.txt)"}, linkMarkdown, "/w", true,
+			"", "file:///w/a.txt", "/w/a.txt"},
 	}
 	for _, c := range cases {
 		if runtime.GOOS == "windows" && !c.remote {

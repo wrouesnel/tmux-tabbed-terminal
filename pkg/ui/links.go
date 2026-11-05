@@ -257,8 +257,17 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 		if linkSchemes[strings.ToLower(u.Scheme)] {
 			l.uri = dest
 		}
-		// ls --hyperlink names the host the file is on.
-		if strings.EqualFold(u.Scheme, "file") && (remote || (runtime.GOOS != "windows" && isThisHost(u.Host))) {
+		if !strings.EqualFold(u.Scheme, "file") {
+			return l
+		}
+		// A file on another host is that host's, whatever host the URI names, as ls
+		// --hyperlink and Claude Code name the host they run on: it's downloaded, not
+		// opened here, where a file of the same name may be another one.
+		if remote {
+			l.uri, l.file = "", u.Path
+			return l
+		}
+		if runtime.GOOS != "windows" && isThisHost(u.Host) {
 			l.file = u.Path
 		}
 		return l
