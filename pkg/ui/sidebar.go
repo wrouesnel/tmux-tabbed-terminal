@@ -477,7 +477,7 @@ func newSessionRow(key string) *sessionRow {
 	r.indicator.SetVAlign(gtk.ALIGN_CENTER)
 	none, _ := gtk.LabelNew("")
 	busy, _ := gtk.LabelNew(dot)
-	addClass(busy, "ttt-busy-dot")
+	pulse(&busy.Widget)
 	unseen, _ := gtk.LabelNew(dot)
 	addClass(unseen, "ttt-unseen-dot")
 	r.indicator.AddNamed(none, indicatorNone)

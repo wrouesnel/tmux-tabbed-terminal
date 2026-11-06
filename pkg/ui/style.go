@@ -28,13 +28,8 @@ const stylesheet = `
 .ttt-session-subtitle {
 	font-size: smaller;
 }
-@keyframes ttt-pulse {
-	from { opacity: 1; }
-	to { opacity: 0.2; }
-}
 .ttt-busy-dot {
 	color: @theme_selected_bg_color;
-	animation: ttt-pulse 1.1s ease-in-out infinite alternate;
 }
 .ttt-unseen-dot {
 	color: @theme_selected_bg_color;

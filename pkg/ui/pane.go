@@ -137,7 +137,7 @@ func newPane(w *Window) *Pane {
 	p.header, _ = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, headerSpacing)
 	addClass(p.header, "ttt-pane-header")
 	p.headerDot, _ = gtk.LabelNew(dot)
-	addClass(p.headerDot, "ttt-busy-dot")
+	pulse(&p.headerDot.Widget)
 	p.headerDot.SetNoShowAll(true)
 	p.headerLabel, _ = gtk.LabelNew("")
 	p.headerLabel.SetEllipsize(pango.ELLIPSIZE_END)

@@ -101,7 +101,7 @@ func newTab(tb *tabBar, id string) *tab {
 	t.indicator.SetVAlign(gtk.ALIGN_CENTER)
 	none, _ := gtk.LabelNew("")
 	busy, _ := gtk.LabelNew(dot)
-	addClass(busy, "ttt-busy-dot")
+	pulse(&busy.Widget)
 	unseen, _ := gtk.LabelNew(dot)
 	addClass(unseen, "ttt-unseen-dot")
 	t.indicator.AddNamed(none, indicatorNone)
