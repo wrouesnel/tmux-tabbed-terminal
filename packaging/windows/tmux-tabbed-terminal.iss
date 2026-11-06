@@ -47,6 +47,8 @@ Name: "{autoprograms}\tmux-tabbed-terminal"; Filename: "{app}\bin\tmux-tabbed-te
 Name: "{autodesktop}\tmux-tabbed-terminal"; Filename: "{app}\bin\tmux-tabbed-terminal.exe"; Tasks: desktopicon
 
 [Run]
+; fontconfig finds the fonts, the bundled ones and Windows', now rather than at the first start.
+Filename: "{app}\bin\fc-cache.exe"; Flags: runhidden; StatusMsg: "Finding fonts..."
 Filename: "{app}\bin\tmux-tabbed-terminal.exe"; Description: "{cm:LaunchProgram,tmux-tabbed-terminal}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]

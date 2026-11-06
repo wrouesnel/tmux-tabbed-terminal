@@ -70,6 +70,26 @@ cp -r /ucrt64/share/icons/Adwaita "$out/share/icons/"
 echo /ucrt64/share/icons/Adwaita/index.theme >>"$sources"
 take "$out/share/icons/hicolor" /ucrt64/share/icons/hicolor/index.theme
 
+# Fonts, drawn with fontconfig and FreeType, as on GNOME: Ubuntu Sans Mono, GNOME
+# Terminal's font on Ubuntu, for terminals. The application uses fontconfig when its
+# configuration is here. fc-cache lets the installer find the fonts, so the first start
+# doesn't have to.
+fonts_url=https://raw.githubusercontent.com/canonical/Ubuntu-Sans-Mono-fonts/v1.100
+mkdir -p "$out/etc/fonts" "$out/share/fonts" "$out/licenses"
+cp "$root/packaging/windows/fonts.conf" "$out/etc/fonts/"
+while read -r sum file dest; do
+	curl -fsSL --retry 3 -o "$out/$dest" "$fonts_url/$file"
+	echo "$sum  $out/$dest" | sha256sum -c --quiet
+done <<'FONTS'
+535bee02748d1e396eb22766f6443d450b65b3413b9bd8217cc386d885548103 fonts/ttf/UbuntuSansMono-Regular.ttf share/fonts/UbuntuSansMono-Regular.ttf
+e7bc04f57eea16d5dc78ce967ab3fe8075c7f6ab36f5b60f1ba6e94e2c5b13e8 fonts/ttf/UbuntuSansMono-Bold.ttf share/fonts/UbuntuSansMono-Bold.ttf
+30600af06cbd461449ad1805b8ef30767ab1ddde79a74cc2261f77be0196084e fonts/ttf/UbuntuSansMono-Italic.ttf share/fonts/UbuntuSansMono-Italic.ttf
+91d41504ddca5aa91636078dd9bf547d6e52ffd22fa422eb888329017bddd6c3 fonts/ttf/UbuntuSansMono-BoldItalic.ttf share/fonts/UbuntuSansMono-BoldItalic.ttf
+2f0015108d68627bd788d313f529c21ff4da2c2c42a5e1f3883acc83480f9002 LICENCE.txt licenses/ubuntu-sans-mono.txt
+FONTS
+take "$out/bin" /ucrt64/bin/fc-cache.exe
+copy_deps "$out/bin" /ucrt64/ "$out/bin/fc-cache.exe"
+
 # tmux, and what the terminal widget runs it with on a Cygwin pty: script, stty and tty,
 # under sh, and cygpath for paths. bash is a shell to choose. Without the console helper,
 # the runtime opens a visible console window where it needs a hidden one.
@@ -102,12 +122,15 @@ db_gecos: cygwin desc
 EOF
 
 # The licenses and versions of what's bundled, with where their source is.
-mkdir -p "$out/licenses"
 {
 	echo "tmux-tabbed-terminal $version bundles these MSYS2 packages, unmodified."
 	echo "Their sources are at https://github.com/msys2/MSYS2-packages (msys) and"
 	echo "https://github.com/msys2/MINGW-packages (mingw-w64-ucrt-x86_64), by package name,"
 	echo "and the source archives at https://repo.msys2.org/."
+	echo
+	echo "It also bundles the Ubuntu Sans Mono fonts, v1.100, unmodified, under the Ubuntu"
+	echo "Font Licence in ubuntu-sans-mono.txt. They're from"
+	echo "https://github.com/canonical/Ubuntu-Sans-Mono-fonts."
 	echo
 	sort -u "$sources" | xargs pacman -Qqo | sort -u | while read -r pkg; do
 		pacman -Qi "$pkg" | awk -F' *: ' '/^(Name|Version|Licenses|URL) /{ printf "%s: %s\n", $1, $2 }'

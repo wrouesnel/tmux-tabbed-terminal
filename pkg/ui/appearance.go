@@ -75,12 +75,16 @@ func gnomeTerminalProfile(uuid string) *glib.Settings {
 	return glib.SettingsNewWithPath(schemaProfile, fmt.Sprintf(profilePathFormat, uuid))
 }
 
-// systemMonospaceFont returns the desktop's monospace font.
+// systemMonospaceFont returns the desktop's monospace font, or on Windows the one
+// installed with the application.
 func systemMonospaceFont() string {
 	if hasSchema(schemaInterface) {
 		if font := glib.SettingsNew(schemaInterface).GetString("monospace-font-name"); font != "" {
 			return font
 		}
+	}
+	if font := bundledFont(); font != "" {
+		return font
 	}
 	return fallbackFont
 }

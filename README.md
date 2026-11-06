@@ -172,6 +172,12 @@ Start-Process -Wait $installer
 New sessions run PowerShell; Preferences picks another shell, or a tmux of your own, such
 as MSYS2's.
 
+Text is drawn as on GNOME, with fontconfig and FreeType, smoothed in grayscale, rather
+than with Windows' renderer, whose text is thin and, over Remote Desktop, unsmoothed.
+Terminals use Ubuntu Sans Mono, GNOME Terminal's font on Ubuntu, which the installer
+brings; Windows' fonts are still there for the rest of the window and for characters it
+lacks. To use Windows' renderer instead, set `PANGOCAIRO_BACKEND=win32`.
+
 ### From a release
 
 Each [GitHub release](https://github.com/wrouesnel/tmux-tabbed-terminal/releases) has the

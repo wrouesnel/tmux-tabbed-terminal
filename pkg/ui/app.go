@@ -117,6 +117,7 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 	// gotk3 releases GObject references from Go finalizers, which run on another thread.
 	// Do it on the main loop instead.
 	glib.FinalizerStrategy = func(f glib.Finalizer) { glib.IdleAdd(func() { f() }) }
+	setUpFonts()
 
 	if cfg.Activity.PollInterval < minPollInterval {
 		cfg.Activity.PollInterval = minPollInterval
