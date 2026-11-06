@@ -47,6 +47,7 @@ type Terminal struct {
 	generation int
 
 	onContents []func()
+	damage     damage
 	sel        selection
 	matches    matcher
 
@@ -184,7 +185,7 @@ func (t *Terminal) Feed(data []byte) {
 		return
 	}
 	_, _ = t.emu.Write(data)
-	t.QueueDraw()
+	t.queueChanges()
 	for _, fn := range t.onContents {
 		fn()
 	}

@@ -213,8 +213,13 @@ func (t *Terminal) draw(_ interface{}, cr *cairo.Context) bool {
 	cx, cy := t.emu.Cursor()
 	modes := t.emu.Modes()
 	focused := t.HasFocus()
+	// Only the rows in the area being drawn, and one each side, whose text can overhang
+	// into it.
+	_, clipTop, _, clipBottom := cr.ClipExtents()
+	first := max(int(math.Floor(clipTop/f.cellH))-1, 0)
+	last := min(int(math.Ceil(clipBottom/f.cellH))+1, rows)
 
-	for y := range rows {
+	for y := first; y < last; y++ {
 		line := t.emu.Line(y)
 		top := float64(y) * f.cellH
 		// Backgrounds first, so that text overhanging its cell isn't painted over.
