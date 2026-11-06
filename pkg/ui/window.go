@@ -225,6 +225,7 @@ func (w *Window) installActions() {
 		}
 	})
 	addStr("host-remove", w.confirmRemoveHost)
+	addStr("host-key", w.checkHostKey)
 	addStr("host-add-via", w.AddHostDialog)
 
 	add("find-session", func() {
@@ -1106,6 +1107,14 @@ func (w *Window) AddHostDialog(origin string) {
 			load(id)
 		}
 	})
+	// What was last given, if the host couldn't be added, to try again with a change.
+	if d := w.app.addHostDraft; d != nil {
+		entry.SetText(d.destination)
+		forward.SetActive(d.forwardAgent)
+		if origin == LocalHost && w.app.host(d.origin) != nil {
+			origin = d.origin
+		}
+	}
 	originCombo.SetActiveID(origin)
 
 	content, _ := dlg.GetContentArea()

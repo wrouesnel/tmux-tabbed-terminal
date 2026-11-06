@@ -6,6 +6,8 @@ import "io"
 var ProgramName = programName
 
 // MasterArgs exposes masterArgs to the tests.
+var SplitPaths = splitPaths
+
 func (s *SSH) MasterArgs() []string { return s.masterArgs() }
 
 // CheckArgs exposes checkArgs to the tests.

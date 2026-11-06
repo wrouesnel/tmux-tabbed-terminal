@@ -94,6 +94,9 @@ type App struct {
 	state uiState
 	// dragKey is the session being dragged from a session list, or "".
 	dragKey string
+	// addHostDraft is what Add Host was last given, if it couldn't add the host, so the
+	// dialog offers it again.
+	addHostDraft *addHostDraft
 
 	// hosts are the tmux servers listed, the local one first.
 	hosts []*Host
@@ -436,12 +439,18 @@ func (a *App) AddHost(destination, via string, forwardAgent bool, parent *Window
 	if destination == "" {
 		return
 	}
+	draft := &addHostDraft{destination: destination, origin: via, forwardAgent: forwardAgent}
+	if via == "" {
+		draft.origin = LocalHost
+	}
+	retry := func() { a.AddHost(destination, via, forwardAgent, parent) }
 	if via == LocalHost {
 		via = ""
 	}
 	cfg := HostConfig{Destination: destination, Via: via, ForwardAgent: forwardAgent && via != ""}
 	h, err := a.newRemoteHost(cfg)
 	if err != nil {
+		a.addHostDraft = draft
 		parent.showError("Could not add "+destination, err.Error())
 		return
 	}
@@ -454,6 +463,11 @@ func (a *App) AddHost(destination, via string, forwardAgent bool, parent *Window
 	runAsync(a, h.client.Snapshot, func(snap *tmux.Snapshot, err error) {
 		parent.setStatus("")
 		if err != nil {
+			// Offered again, so trying again with a change doesn't mean typing it all.
+			a.addHostDraft = draft
+			if a.offerHostKeyFix(parent, h, err, retry) {
+				return
+			}
 			parent.showError("Could not reach tmux on "+destination,
 				err.Error()+"\n\nThe host needs key or agent authentication for ssh, and tmux installed.")
 			return
@@ -461,6 +475,7 @@ func (a *App) AddHost(destination, via string, forwardAgent bool, parent *Window
 		if a.host(destination) != nil {
 			return
 		}
+		a.addHostDraft = nil
 		h.snapshot, h.polled = snap, true
 		a.startHost(h)
 		a.saveHosts()
@@ -642,6 +657,7 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 		return
 	}
 	h.polled, h.err = true, err
+	a.offerHostKeyFixOnce(h)
 	if err != nil {
 		// The sessions can't be reached, so don't offer them.
 		snap = &tmux.Snapshot{}

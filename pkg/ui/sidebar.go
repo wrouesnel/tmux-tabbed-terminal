@@ -432,7 +432,11 @@ func newHostRow(name string, local bool, newSession func(string)) *hostRow {
 func (r *hostRow) update(h *Host) {
 	switch {
 	case h.err != nil:
-		r.status.SetText("unreachable")
+		status := hostKeyStatus(h.err)
+		if status == "" {
+			status = "unreachable"
+		}
+		r.status.SetText(status)
 		r.row.SetTooltipText(h.err.Error())
 	case !h.polled:
 		r.status.SetText("connecting…")
@@ -460,6 +464,9 @@ func hostMenu(name string, local bool) *glib.MenuModel {
 	addVia.SetActionAndTargetValue("win.host-add-via", target)
 	menu.AppendItem(addVia)
 	if !local {
+		hostKey := glib.MenuItemNewWithLabel("Check Host Key…")
+		hostKey.SetActionAndTargetValue("win.host-key", target)
+		menu.AppendItem(hostKey)
 		remove := glib.MenuItemNewWithLabel("Remove Host…")
 		remove.SetActionAndTargetValue("win.host-remove", target)
 		menu.AppendItem(remove)

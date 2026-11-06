@@ -61,6 +61,9 @@ type Host struct {
 	err error
 	// polled is set once a poll has finished, successfully or not.
 	polled bool
+	// hostKeyOffered is the error that last offered to trust the host's key, so that
+	// polls failing the same way don't ask again.
+	hostKeyOffered string
 	// version is the server's tmux version, and features the terminal features clients
 	// ask it for, once featuresKnown says the version has been read. version is "" if it
 	// couldn't be.

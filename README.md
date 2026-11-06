@@ -28,6 +28,9 @@ or split the window to watch several sessions side by side.
   disk, until the application quits, so other connections with the key don't ask again;
   a passphrase the key no longer takes is forgotten and asked for again. Hosts reached
   through another host use the keys there, or the agent forwarded to it.
+* **Host keys.** When ssh refuses a host because its key has changed, or because no key
+  is known for it, the application says so and shows the key's fingerprint, and can
+  trust the new key for you.
 * **Links.** URLs, markdown links and images such as `[docs](docs/README.md)` or
   `![shot](img/a.png)`, file paths, and hyperlinks that programs such as `ls --hyperlink`
   print are underlined under the pointer. Clicking one copies its text as shown, such as
@@ -274,8 +277,17 @@ something, a dialog asks: a key's passphrase, which can be remembered until the
 application quits, a password, or whether to trust a host key it hasn't seen before. The
 dialog runs as ssh's `SSH_ASKPASS`. The session list is then polled over that connection.
 With `ssh.ask-for-passphrases: false`, ssh connects in `BatchMode` instead, so the host
-needs key or agent authentication, and a new host's key must be accepted by connecting
-once by hand. A host reached through another always connects so, from that host.
+needs key or agent authentication. A host reached through another always connects so,
+from that host. If Add Host can't connect, the dialog offers what was typed again next
+time it opens.
+
+When ssh refuses a host over its key, the host's row says "host key changed" or "unknown
+host key", and a dialog shows the fingerprint of the key the host sends now. A changed
+key could be someone intercepting the connection, so check the fingerprint with whoever
+runs the host first. Trusting it removes the old key from the `known_hosts` file of the
+host ssh runs from (this computer, or the origin) with `ssh-keygen -R`, and adds the new
+one, as long as the host still sends the key that was shown. The host's menu has "Check
+Host Key…" to ask again after a Cancel.
 
 On Linux, all commands to a host share one ssh master connection (`ControlMaster`),
 started on first use and kept for 10 minutes after the last. Its socket is under

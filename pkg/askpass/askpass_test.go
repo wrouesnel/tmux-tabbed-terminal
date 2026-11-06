@@ -122,3 +122,14 @@ func TestMemory(t *testing.T) {
 		t.Error("Forget left a passphrase")
 	}
 }
+
+func TestIsHostKeyQuestion(t *testing.T) {
+	question := askpass.Request{Prompt: "The authenticity of host 'db (10.0.0.1)' can't be established.\n" +
+		"ED25519 key fingerprint is SHA256:abc.\nAre you sure you want to continue connecting (yes/no/[fingerprint])? "}
+	if !askpass.IsHostKeyQuestion(question) {
+		t.Error("a host key question isn't recognised")
+	}
+	if askpass.IsHostKeyQuestion(askpass.Request{Prompt: "Enter passphrase for key '/k': "}) {
+		t.Error("a passphrase prompt is taken for a host key question")
+	}
+}

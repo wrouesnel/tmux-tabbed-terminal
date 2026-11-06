@@ -12,6 +12,13 @@ func IsKeyPassphrase(req Request) bool {
 	return req.Kind == "" && strings.Contains(strings.ToLower(req.Prompt), "passphrase for")
 }
 
+// IsHostKeyQuestion reports whether a prompt asks whether to trust a host's key, as in
+// "Are you sure you want to continue connecting (yes/no/[fingerprint])? ", which is
+// answered by typing yes or no.
+func IsHostKeyQuestion(req Request) bool {
+	return req.Kind == "" && strings.Contains(req.Prompt, "continue connecting (yes/no")
+}
+
 // Memory remembers keys' passphrases, by prompt, so ssh needn't ask the user for one
 // again. It holds them only in memory, for as long as the application runs. It's safe
 // for concurrent use.

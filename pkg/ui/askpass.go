@@ -97,7 +97,10 @@ func (a *App) showPrompt() {
 // promptDialog asks the user what ssh asks, and calls done once they've answered.
 func (a *App) promptDialog(p prompt, done func()) {
 	req := p.req
-	confirm := req.Kind == "confirm"
+	// ssh asks about a host's key as a question to type yes or no to: it's asked
+	// with buttons instead.
+	hostKey := askpass.IsHostKeyQuestion(req)
+	confirm := req.Kind == "confirm" || hostKey
 	passphrase := askpass.IsKeyPassphrase(req)
 
 	dlg, err := gtk.DialogNew()
@@ -107,24 +110,36 @@ func (a *App) promptDialog(p prompt, done func()) {
 		return
 	}
 	title := "SSH"
-	if passphrase {
+	switch {
+	case passphrase:
 		title = "Unlock SSH Key"
+	case hostKey:
+		title = "Unknown SSH Host"
 	}
 	dlg.SetTitle(title)
 	if w := a.activeWindow(); w != nil {
 		dlg.SetTransientFor(w.window)
 		dlg.SetModal(true)
 	}
-	if confirm {
+	switch {
+	case hostKey:
+		_, _ = dlg.AddButton("_Cancel", gtk.RESPONSE_CANCEL)
+		_, _ = dlg.AddButton("_Trust Key", gtk.RESPONSE_ACCEPT)
+	case confirm:
 		_, _ = dlg.AddButton("_No", gtk.RESPONSE_CANCEL)
 		_, _ = dlg.AddButton("_Yes", gtk.RESPONSE_ACCEPT)
-	} else {
+	default:
 		_, _ = dlg.AddButton("_Cancel", gtk.RESPONSE_CANCEL)
 		_, _ = dlg.AddButton("_Unlock", gtk.RESPONSE_ACCEPT)
 	}
-	dlg.SetDefaultResponse(gtk.RESPONSE_ACCEPT)
-	if btn, err := dlg.GetWidgetForResponse(gtk.RESPONSE_ACCEPT); err == nil {
-		addClass(btn.ToWidget(), "suggested-action")
+	if hostKey {
+		// Trusting a key should be a decision, not Enter pressed in passing.
+		dlg.SetDefaultResponse(gtk.RESPONSE_CANCEL)
+	} else {
+		dlg.SetDefaultResponse(gtk.RESPONSE_ACCEPT)
+		if btn, err := dlg.GetWidgetForResponse(gtk.RESPONSE_ACCEPT); err == nil {
+			addClass(btn.ToWidget(), "suggested-action")
+		}
 	}
 
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, prefsSpacing)
@@ -158,6 +173,12 @@ func (a *App) promptDialog(p prompt, done func()) {
 		}
 		answered = true
 		resp := askpass.Response{OK: response == gtk.RESPONSE_ACCEPT}
+		if hostKey {
+			resp = askpass.Response{OK: true, Secret: "no"}
+			if response == gtk.RESPONSE_ACCEPT {
+				resp.Secret = "yes"
+			}
+		}
 		if resp.OK && !confirm {
 			resp.Secret, _ = entry.GetText()
 			if passphrase {
