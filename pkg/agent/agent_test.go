@@ -47,6 +47,38 @@ func startPair(t *testing.T) *Client {
 	return c
 }
 
+// TestServeEndsWhileConnected checks the agent ends when it's told to, as by a signal,
+// while the application is still connected.
+func TestServeEndsWhileConnected(t *testing.T) {
+	toAgent, fromClient := io.Pipe()
+	toClient, fromAgent := io.Pipe()
+	defer fromClient.Close()
+	defer toClient.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	served := make(chan error, 1)
+	go func() { served <- Serve(ctx, toAgent, fromAgent, "v1.2.3") }()
+	r := bufio.NewReader(toClient)
+	if _, err := readMarker(r); err != nil {
+		t.Fatal(err)
+	}
+	c, err := NewClient(r, fromClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Hello(context.Background(), "v1.2.3"); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case err := <-served:
+		if err != nil {
+			t.Errorf("serve: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the agent didn't end")
+	}
+}
+
 func TestHello(t *testing.T) {
 	c := startPair(t)
 	hello, err := c.Hello(context.Background(), "v1.2.3")

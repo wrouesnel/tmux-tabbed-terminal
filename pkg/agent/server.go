@@ -44,6 +44,9 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, version string) error 
 	case <-conn.closed:
 		// The application went away: its end of the pipe closed.
 	case <-ctx.Done():
+		// As for a signal, when the agent is ending. The application's end may still be
+		// open, and gRPC's Stop would wait for a read from it which never returns.
+		return nil
 	case err := <-errs:
 		return err
 	}
