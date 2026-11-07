@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -23,6 +24,10 @@ import (
 const (
 	defaultWindowWidth  = 1100
 	defaultWindowHeight = 680
+	// minMovedWidth and minMovedHeight are the smallest a pane moved to a window of its
+	// own opens.
+	minMovedWidth  = 480
+	minMovedHeight = 320
 	// tabShortcuts is how many tabs have Alt+number shortcuts.
 	tabShortcuts = 9
 )
@@ -454,6 +459,39 @@ func (w *Window) ClosePane(p *Pane) {
 	w.refresh()
 }
 
+// MovePaneToNewWindow moves a pane of a split window to a window of its own, where it is
+// on the screen and as big: a file preview with the same file, or the same session. The
+// new window's session list is hidden, as for a session dragged out of a window.
+func (w *Window) MovePaneToNewWindow(p *Pane) {
+	if p.closed || len(w.panes()) < 2 || (p.file == nil && !p.running) {
+		return
+	}
+	wx, wy := w.window.GetPosition()
+	px, py, _ := p.root.TranslateCoordinates(w.window, 0, 0)
+	width, height := p.root.GetAllocatedWidth(), p.root.GetAllocatedHeight()
+
+	file, key := p.file, p.SessionKey()
+	// Closed first, so a session isn't shown twice at once.
+	w.ClosePane(p)
+
+	nw := w.app.addWindow()
+	nw.setSidebarVisible(false)
+	moved := nw.activePane
+	if file != nil {
+		moved.showFile(file.host, file.file)
+		moved.file.history = slices.Clone(file.history)
+		moved.file.back.SetSensitive(len(file.history) > 0)
+		nw.previewPane = moved
+	} else {
+		moved.Show(key)
+	}
+	nw.refresh()
+	nw.window.Resize(max(width, minMovedWidth), max(height, minMovedHeight))
+	nw.window.Move(wx+px, wy+py)
+	nw.window.Present()
+	moved.Focus()
+}
+
 // showsSession reports whether a session, by key, is in one of the window's panes.
 func (w *Window) showsSession(key string) bool {
 	for _, p := range w.panes() {
@@ -743,6 +781,9 @@ func (w *Window) refresh() {
 		if !h.Local() {
 			subtitle = h.Name + " · " + subtitle
 		}
+	}
+	if p := w.activePane; selected == "" && p != nil && p.file != nil {
+		title, subtitle = p.file.title(), p.file.path.GetLabel()
 	}
 	if w.status != "" {
 		subtitle = w.status

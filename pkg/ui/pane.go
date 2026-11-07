@@ -46,6 +46,8 @@ type Pane struct {
 	header      *gtk.Box
 	headerLabel *gtk.Label
 	headerDot   *gtk.Label
+	// moveOut moves the pane to a window of its own.
+	moveOut *gtk.Button
 	// tabs are the windows of the pane's session, under the header, shown while the
 	// window is split.
 	tabs  *tabBar
@@ -150,13 +152,20 @@ func newPane(w *Window) *Pane {
 	closeBtn.SetFocusOnClick(false)
 	closeBtn.SetTooltipText("Close Pane")
 	closeBtn.Connect("clicked", func() { w.ClosePane(p) })
+	p.moveOut, _ = gtk.ButtonNewFromIconName("window-new-symbolic", gtk.ICON_SIZE_MENU)
+	p.moveOut.SetRelief(gtk.RELIEF_NONE)
+	p.moveOut.SetFocusOnClick(false)
+	p.moveOut.SetTooltipText("Move to New Window")
+	p.moveOut.Connect("clicked", func() { glib.IdleAdd(func() { w.MovePaneToNewWindow(p) }) })
 	p.header.PackStart(p.headerDot, false, false, 0)
 	p.header.PackStart(p.headerLabel, true, true, 0)
 	p.header.PackEnd(closeBtn, false, false, 0)
+	p.header.PackEnd(p.moveOut, false, false, 0)
 	// The header is hidden until the window splits. ShowAll skips it, so show its
 	// children now.
 	p.headerLabel.Show()
 	closeBtn.Show()
+	p.moveOut.SetNoShowAll(true)
 	p.header.SetNoShowAll(true)
 
 	// Clicking anywhere in the header focuses the pane.
@@ -631,6 +640,8 @@ func (p *Pane) syncSession(snap *tmux.Snapshot) {
 func (p *Pane) updateHeader(name string, busy bool, showHeader bool) {
 	p.headerLabel.SetText(name)
 	p.header.SetVisible(showHeader)
+	// An empty pane has nothing to move.
+	p.moveOut.SetVisible(p.file != nil || p.running)
 	p.headerDot.SetVisible(busy && showHeader)
 	setClass(p.root, "ttt-active", p.win.activePane == p)
 }

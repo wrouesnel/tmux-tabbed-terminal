@@ -75,7 +75,8 @@ or split the window to watch several sessions side by side.
   the plans, reports and screenshots a coding agent writes. Markdown is formatted as
   GitHub formats it: headings, lists and task lists, tables, code, quotes, links, and the
   images it shows from the same host. An image is scaled to fit the pane. The preview
-  reloads when the file changes, and the next file previewed replaces it. Links to other
+  reloads when the file changes, and the next file previewed replaces it. Move to New
+  Window, in the preview's header, gives it a window of its own, beside the terminal's. Links to other
   markdown files and images open in the preview, with a Back button; web links open in
   the browser. Raw HTML in markdown shows as written, code isn't highlighted, and files
   over 32 MiB aren't shown. On Windows, only files on remote hosts can be previewed so
@@ -106,7 +107,9 @@ or split the window to watch several sessions side by side.
   edge to split that side, or in the middle to show it in that pane. Drag it out of the
   window to open it in a window of its own, with the session list hidden (on X11; Wayland
   doesn't tell applications where the pointer is outside their windows). Splits nest, and
-  their dividers can be dragged.
+  their dividers can be dragged. The Move to New Window button in a pane's header moves
+  the pane, a session or a file preview, to a window of its own, where it was on the
+  screen, with the session list hidden.
 * **Scrolling.** The mouse wheel scrolls tmux's history, speeding up the faster the wheel
   spins. A scrollbar beside each terminal shows where you are in tmux's history (not
   the terminal's, which tmux redraws in place) and scrolls it when dragged. Both work
