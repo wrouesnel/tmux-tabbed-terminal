@@ -104,6 +104,10 @@ jobs:
       - name: Windows installer checksum
         run: cd release/windows && for f in *.exe; do sha256sum "$f" > "$f.sha256"; done
 
+      # The script the README's one-line install runs, from the latest release.
+      - name: Windows install script
+        run: cp packaging/windows/install.ps1 release/windows/
+
       - name: Release
         uses: softprops/action-gh-release@v3
         with:

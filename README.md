@@ -162,20 +162,16 @@ works.
 
 Each release has a per-user installer, which needs no administrator rights and nothing
 else installed: it brings its own GTK and tmux. The installer isn't signed yet, so Windows
-SmartScreen stops it when it's downloaded with a browser. In PowerShell, this downloads the
-latest release's installer, checks it against the release's SHA-256 checksum, and runs it,
-which SmartScreen doesn't stop:
+SmartScreen stops it when it's downloaded with a browser. Instead, run this in PowerShell:
 
 ```powershell
-$release = Invoke-RestMethod https://api.github.com/repos/wrouesnel/tmux-tabbed-terminal/releases/latest
-$asset = $release.assets | Where-Object name -Like '*-windows-amd64-setup.exe'
-$installer = Join-Path $env:TEMP $asset.name
-Invoke-WebRequest -UseBasicParsing $asset.browser_download_url -OutFile $installer
-Invoke-WebRequest -UseBasicParsing "$($asset.browser_download_url).sha256" -OutFile "$installer.sha256"
-$want = (Get-Content "$installer.sha256" -Raw).Split(' ')[0]
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne $want) { throw "Checksum mismatch: $installer" }
-Start-Process -Wait $installer
+irm https://github.com/wrouesnel/tmux-tabbed-terminal/releases/latest/download/install.ps1 | iex
 ```
+
+It runs [`install.ps1`](packaging/windows/install.ps1), which each release includes: it
+downloads the latest release's installer, checks it against the release's SHA-256
+checksum, and runs it, which SmartScreen doesn't stop. As with any script piped from the
+internet, you can read it first, at that address or in this repository.
 
 New sessions run PowerShell; Preferences picks another shell, or a tmux of your own, such
 as MSYS2's.
