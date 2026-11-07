@@ -9,6 +9,25 @@ package gtkx
 static GdkDragContext *to_drag_context(void *p) { return GDK_DRAG_CONTEXT(p); }
 static GtkWindow *to_window(void *p) { return GTK_WINDOW(p); }
 
+// ttt_release_name gives up the application's D-Bus name, waiting until the bus has, so
+// that a process started next can take it. It does nothing without a session bus.
+static void ttt_release_name(void *p) {
+	GApplication *app = G_APPLICATION(p);
+	if (!g_application_get_is_registered(app) || g_application_get_is_remote(app)) {
+		return;
+	}
+	GDBusConnection *bus = g_application_get_dbus_connection(app);
+	if (bus == NULL) {
+		return;
+	}
+	GVariant *ret = g_dbus_connection_call_sync(bus, "org.freedesktop.DBus", "/org/freedesktop/DBus",
+		"org.freedesktop.DBus", "ReleaseName", g_variant_new("(s)", g_application_get_application_id(app)),
+		NULL, G_DBUS_CALL_FLAGS_NONE, -1, NULL, NULL);
+	if (ret != NULL) {
+		g_variant_unref(ret);
+	}
+}
+
 // ttt_fit_size scales an image's size down to fit a box, keeping its proportions.
 static void ttt_fit_size(int *w, int *h, const int *box) {
 	double s = MIN(1.0, MIN((double)box[0] / *w, (double)box[1] / *h));
@@ -114,6 +133,12 @@ func ShowURI(window *gtk.Window, uri string) error {
 		return errors.New(C.GoString(gerr.message))
 	}
 	return nil
+}
+
+// ReleaseApplicationName gives up a registered application's D-Bus name, so that a new
+// instance started after it is the primary one instead of handing over to this one.
+func ReleaseApplicationName(app *glib.Application) {
+	C.ttt_release_name(unsafe.Pointer(app.GObject))
 }
 
 // PixbufFit decodes an image, scaled down to fit width by height if it's bigger, keeping

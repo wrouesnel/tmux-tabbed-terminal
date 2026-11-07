@@ -204,6 +204,11 @@ Start it from the desktop menu ("Tmux Tabbed Terminal") or run `tmux-tabbed-term
 Running it again opens another window in the same instance. `--separate` starts an
 independent instance instead.
 
+Because of that, an instance left running carries on as the version it started as after
+an upgrade. When a new version is installed over it, the title bar shows **Restart to
+Update**, which starts the new version and opens the windows again on the sessions
+they showed, with their size and place. The sessions themselves carry on in tmux.
+
 In the session list, click a session to show it in the focused pane, or
 drag it onto a pane. Middle-click or Ctrl+click opens it in a new pane to the right. Right-click gives Open in Split Right,
 Open in Split Down, Rename and Kill, and Detach for a session shown in the window, which

@@ -24,6 +24,7 @@ import (
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/askpass"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sshconfig"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
@@ -116,6 +117,16 @@ type App struct {
 	// reloadPending is set while an appearance reload is queued.
 	reloadPending bool
 	windows       map[*Window]struct{}
+
+	// install notices a new version installed over this one, and updateVersion is its
+	// version once it has been read.
+	install         *installWatch
+	checkingInstall bool
+	updateVersion   string
+	// restarting is set when the windows close for a restart into the new version, and
+	// restore holds the windows to open again, before and after it.
+	restarting bool
+	restore    []restoredWindow
 }
 
 // Run runs the application until its last window closes or ctx is cancelled.
@@ -175,11 +186,22 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		}
 	}
 
+	app.takeRestore()
+
 	gtkApp.Connect("startup", app.startup)
-	gtkApp.Connect("activate", func() { app.NewWindow() })
+	gtkApp.Connect("activate", func() {
+		if !app.restoreWindows() {
+			app.NewWindow()
+		}
+		app.checkInstall()
+	})
 	gtkApp.Connect("shutdown", func() {
 		stopPolling()
 		app.stopAskpass()
+		if app.restarting {
+			// While still registered: the new instance must find the name free.
+			gtkx.ReleaseApplicationName(&gtkApp.Application)
+		}
 	})
 
 	go func() {
@@ -190,6 +212,9 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 	// GTK gets no arguments of ours: kong has already parsed them.
 	if code := gtkApp.Run([]string{os.Args[0]}); code != 0 {
 		return errors.Errorf("GTK application exited with status %d", code)
+	}
+	if app.restarting {
+		return relaunch(app.install.path, app.relaunchEnv())
 	}
 	return nil
 }
@@ -209,6 +234,7 @@ func (a *App) startup() {
 		}
 	}
 	a.installActions()
+	a.watchInstall()
 
 	// Fill the local session list before the first window opens. Remote hosts fill in as
 	// their first polls come back.

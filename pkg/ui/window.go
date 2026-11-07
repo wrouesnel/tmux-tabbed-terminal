@@ -59,6 +59,8 @@ type Window struct {
 	// them all, with the progress of those running.
 	downloads     *downloadBar
 	downloadsView *downloadsView
+	// update offers a restart once a new version is installed.
+	update *gtk.Button
 
 	actions       map[string]*glib.SimpleAction
 	sidebarAction *glib.SimpleAction
@@ -104,6 +106,7 @@ func newWindow(app *App) *Window {
 
 	w.installActions()
 	w.window.ShowAll()
+	w.showUpdate()
 	return w
 }
 
@@ -143,6 +146,9 @@ func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 
 	w.downloadsView = newDownloadsView(w)
 	hb.PackEnd(w.downloadsView.button)
+
+	w.update = w.newUpdateButton()
+	hb.PackEnd(w.update)
 	return hb
 }
 
