@@ -30,6 +30,9 @@ or split the window to watch several sessions side by side.
   disk, until the application quits, so other connections with the key don't ask again;
   a passphrase the key no longer takes is forgotten and asked for again. Hosts reached
   through another host use the keys there, or the agent forwarded to it.
+* **SSH keys.** After ssh logs in to a host with a password, the application offers to set
+  up a key so it can log in by itself: it makes one, adds it to the host's authorized keys,
+  and checks it works. See [Remote hosts](#remote-hosts).
 * **Host keys.** When ssh refuses a host because its key has changed, or because no key
   is known for it, the application says so and shows the key's fingerprint, and can
   trust the new key for you.
@@ -282,6 +285,16 @@ With `ssh.ask-for-passphrases: false`, ssh connects in `BatchMode` instead, so t
 needs key or agent authentication. A host reached through another always connects so,
 from that host. If Add Host can't connect, the dialog offers what was typed again next
 time it opens.
+
+When ssh, connecting from this machine, asks for a host's password, the application offers
+a key instead, once the host is connected. With no key ssh would try, from `~/.ssh` or the
+ssh agent, it makes `~/.ssh/id_ed25519`, which ssh then uses for every host. With one, it
+makes a key for that host alone, `~/.ssh/id_ed25519_<host>`, and adds a `Host` block with
+its `IdentityFile` to the end of the ssh configuration (`~/.ssh/config`, or the one chosen in
+Preferences). Either way, the public key goes into `~/.ssh/authorized_keys` on the host,
+over the connection the password opened, and a login without a password checks it works.
+The keys have no passphrase: `ssh-keygen -p -f <key>` adds one. "Keep Using a Password" is
+remembered for the host; the host's menu has "Set Up SSH Key…" for later.
 
 When ssh refuses a host over its key, the host's row says "host key changed" or "unknown
 host key", and a dialog shows the fingerprint of the key the host sends now. A changed

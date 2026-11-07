@@ -35,6 +35,8 @@ const (
 	SocketEnv = "TTT_ASKPASS_SOCKET"
 	// TokenEnv is the token requests must carry.
 	TokenEnv = "TTT_ASKPASS_TOKEN"
+	// HostEnv names the host the ssh asking connects to, as the application knows it.
+	HostEnv = "TTT_ASKPASS_HOST"
 )
 
 // Request is what ssh asks.
@@ -48,6 +50,8 @@ type Request struct {
 	// PID is the process ID of the ssh asking, so a second request from it for the same
 	// key shows the first answer was wrong.
 	PID int `json:"pid"`
+	// Host is the host the ssh asking connects to, from HostEnv, or "".
+	Host string `json:"host,omitempty"`
 }
 
 // Response is the user's answer.
@@ -157,6 +161,7 @@ func Main(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		Prompt: strings.Join(args, " "),
 		Kind:   os.Getenv("SSH_ASKPASS_PROMPT"),
 		PID:    os.Getppid(),
+		Host:   os.Getenv(HostEnv),
 	}
 	resp, err := Ask(ctx, os.Getenv(SocketEnv), req)
 	if err != nil {

@@ -464,6 +464,9 @@ func hostMenu(name string, local bool) *glib.MenuModel {
 	addVia.SetActionAndTargetValue("win.host-add-via", target)
 	menu.AppendItem(addVia)
 	if !local {
+		key := glib.MenuItemNewWithLabel("Set Up SSH Key…")
+		key.SetActionAndTargetValue("win.host-setup-key", target)
+		menu.AppendItem(key)
 		hostKey := glib.MenuItemNewWithLabel("Check Host Key…")
 		hostKey.SetActionAndTargetValue("win.host-key", target)
 		menu.AppendItem(hostKey)

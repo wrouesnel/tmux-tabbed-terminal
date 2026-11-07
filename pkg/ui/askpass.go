@@ -63,7 +63,11 @@ func (a *App) askUser(req askpass.Request) askpass.Response {
 	}
 	answer := make(chan askpass.Response, 1)
 	glib.IdleAdd(func() { a.queuePrompt(prompt{req: req, answer: answer}) })
-	return <-answer
+	resp := <-answer
+	if resp.OK && req.Host != "" && askpass.IsPassword(req) {
+		glib.IdleAdd(func() { a.passwordUsed[req.Host] = true })
+	}
+	return resp
 }
 
 // queuePrompt shows a request's dialog, or queues it behind the one showing.
@@ -115,6 +119,8 @@ func (a *App) promptDialog(p prompt, done func()) {
 		title = "Unlock SSH Key"
 	case hostKey:
 		title = "Unknown SSH Host"
+	case askpass.IsPassword(req):
+		title = "SSH Password"
 	}
 	dlg.SetTitle(title)
 	if w := a.activeWindow(); w != nil {
@@ -128,9 +134,12 @@ func (a *App) promptDialog(p prompt, done func()) {
 	case confirm:
 		_, _ = dlg.AddButton("_No", gtk.RESPONSE_CANCEL)
 		_, _ = dlg.AddButton("_Yes", gtk.RESPONSE_ACCEPT)
-	default:
+	case passphrase:
 		_, _ = dlg.AddButton("_Cancel", gtk.RESPONSE_CANCEL)
 		_, _ = dlg.AddButton("_Unlock", gtk.RESPONSE_ACCEPT)
+	default:
+		_, _ = dlg.AddButton("_Cancel", gtk.RESPONSE_CANCEL)
+		_, _ = dlg.AddButton("_Log In", gtk.RESPONSE_ACCEPT)
 	}
 	if hostKey {
 		// Trusting a key should be a decision, not Enter pressed in passing.

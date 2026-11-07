@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"go.yaml.in/yaml/v4"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/askpass"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
 )
@@ -127,6 +129,11 @@ func (a *App) newRemoteHost(cfg HostConfig) (*Host, error) {
 	if ssh.Via == nil {
 		// Only the first hop's ssh runs here: the others run on the host before them.
 		ssh.Binary = systemSSH()
+		// Its requests say which host they're for, so a password asked for can be
+		// followed by an offer of a key.
+		if len(ssh.AskpassEnv) > 0 {
+			ssh.AskpassEnv = append(slices.Clone(ssh.AskpassEnv), askpass.HostEnv+"="+ssh.Name())
+		}
 	}
 	client := tmux.NewClient()
 	client.SocketName = cfg.SocketName

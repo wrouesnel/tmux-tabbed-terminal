@@ -227,6 +227,7 @@ func (w *Window) installActions() {
 	})
 	addStr("host-remove", w.confirmRemoveHost)
 	addStr("host-key", w.checkHostKey)
+	addStr("host-setup-key", w.setUpHostKey)
 	addStr("host-add-via", w.AddHostDialog)
 
 	add("find-session", func() {

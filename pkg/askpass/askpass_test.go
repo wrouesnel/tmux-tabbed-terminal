@@ -133,3 +133,17 @@ func TestIsHostKeyQuestion(t *testing.T) {
 		t.Error("a passphrase prompt is taken for a host key question")
 	}
 }
+
+func TestIsPassword(t *testing.T) {
+	for prompt, want := range map[string]bool{
+		"tester@db's password: ":          true,
+		"(tester@db) Password: ":          true,
+		"Enter passphrase for key '/k': ": false,
+		"Are you sure you want to continue connecting (yes/no/[fingerprint])? ": false,
+		"Verification code: ": false,
+	} {
+		if got := askpass.IsPassword(askpass.Request{Prompt: prompt}); got != want {
+			t.Errorf("IsPassword(%q) = %v, want %v", prompt, got, want)
+		}
+	}
+}

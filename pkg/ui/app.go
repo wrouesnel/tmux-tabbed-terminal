@@ -94,6 +94,9 @@ type App struct {
 	state uiState
 	// dragKey is the session being dragged from a session list, or "".
 	dragKey string
+	// passwordUsed are the hosts ssh logged in to with a password, which haven't yet been
+	// offered a key instead.
+	passwordUsed map[string]bool
 	// addHostDraft is what Add Host was last given, if it couldn't add the host, so the
 	// dialog offers it again.
 	addHostDraft *addHostDraft
@@ -139,16 +142,17 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 	defer stopPolling()
 
 	app := &App{
-		ctx:     ctx,
-		log:     logutil.FromCtx(ctx),
-		cfg:     cfg,
-		gtkApp:  gtkApp,
-		tracker: activity.NewTracker(cfg.Activity.Timeout),
-		grouper: sessionlist.NewGrouper(cfg.Sidebar.GroupHold),
-		groups:  map[string]string{},
-		grouped: cfg.Sidebar.GroupByApplication,
-		pollCtx: pollCtx,
-		windows: map[*Window]struct{}{},
+		ctx:          ctx,
+		log:          logutil.FromCtx(ctx),
+		cfg:          cfg,
+		gtkApp:       gtkApp,
+		tracker:      activity.NewTracker(cfg.Activity.Timeout),
+		grouper:      sessionlist.NewGrouper(cfg.Sidebar.GroupHold),
+		groups:       map[string]string{},
+		passwordUsed: map[string]bool{},
+		grouped:      cfg.Sidebar.GroupByApplication,
+		pollCtx:      pollCtx,
+		windows:      map[*Window]struct{}{},
 
 		sidebarRight: cfg.Sidebar.Position == "right",
 		showTabs:     true,
@@ -481,6 +485,7 @@ func (a *App) AddHost(destination, via string, forwardAgent bool, parent *Window
 		a.saveHosts()
 		a.updateGroups()
 		a.refreshAll()
+		a.offerKeySetupOnce(h)
 	})
 }
 
@@ -658,6 +663,9 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 	}
 	h.polled, h.err = true, err
 	a.offerHostKeyFixOnce(h)
+	if err == nil {
+		a.offerKeySetupOnce(h)
+	}
 	if err != nil {
 		// The sessions can't be reached, so don't offer them.
 		snap = &tmux.Snapshot{}

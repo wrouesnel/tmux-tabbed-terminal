@@ -36,6 +36,9 @@ type uiState struct {
 	// UseAgent is whether remote hosts are reached through the agent, as chosen in
 	// Preferences.
 	UseAgent *bool `yaml:"use-agent,omitempty"`
+	// KeySetupDeclined are the hosts the user would rather log in to with a password
+	// than be offered an ssh key for again.
+	KeySetupDeclined []string `yaml:"key-setup-declined,omitempty"`
 }
 
 // PinnedSession is a session pinned to the top of the list. It's pinned by name rather

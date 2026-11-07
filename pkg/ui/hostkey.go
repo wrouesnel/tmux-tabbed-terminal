@@ -121,11 +121,7 @@ func (w *Window) checkHostKey(name string) {
 	if w.app.offerHostKeyFix(w, h, h.err, h.requestPoll) {
 		return
 	}
-	dlg := gtk.MessageDialogNew(w.window, gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT, gtk.MESSAGE_INFO,
-		gtk.BUTTONS_CLOSE, "%s", "ssh accepts the key of "+name)
-	defer dlg.Destroy()
-	dlg.FormatSecondaryText("%s", "Its last connection didn't fail over the host's key.")
-	dlg.Run()
+	w.showInfo("ssh accepts the key of "+name, "Its last connection didn't fail over the host's key.")
 }
 
 // originPhrase is how an origin is named in a sentence.
