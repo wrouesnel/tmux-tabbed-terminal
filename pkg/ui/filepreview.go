@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -15,15 +16,25 @@ import (
 	"github.com/gotk3/gotk3/pango"
 	"go.uber.org/zap"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/filewatch"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/markdown"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
 
 // pageFile is the stack page of a pane showing a file.
 const pageFile = "file"
 
-// fileCheckInterval is how often a previewed file is checked for changes.
+// fileCheckInterval is how often a previewed file is checked for changes, when it can't be
+// watched.
 const fileCheckInterval = 2 * time.Second
+
+// fileSettleTime is how long a watched file is left after it changes before it's read
+// again, so a file written in several pieces is read once it's all there.
+const fileSettleTime = 100 * time.Millisecond
+
+// fileWatchRetry is how long after watching a file failed it's tried again.
+const fileWatchRetry = 10 * time.Second
 
 // Stack pages of a file preview.
 const (
@@ -96,6 +107,11 @@ type filePreview struct {
 	checking   bool
 	loading    bool
 	timer      glib.SourceHandle
+	// unwatch stops watching the file, and watching is set while it's watched, which
+	// stands in for checking it. settle waits for a burst of changes to finish.
+	unwatch  context.CancelFunc
+	watching bool
+	settle   glib.SourceHandle
 }
 
 func newFilePreview(p *Pane) *filePreview {
@@ -187,7 +203,86 @@ func (f *filePreview) open(host, name string, remember bool) {
 	f.path.SetTooltipText(shown)
 	f.back.SetSensitive(len(f.history) > 0)
 	f.load(false)
+	f.watch()
 	f.pane.win.refresh()
+}
+
+// watch watches the shown file for changes, through the host's agent for a remote file,
+// and reloads it when it changes. Until it's watching, or if it can't be, the file is
+// checked for changes every fileCheckInterval instead.
+func (f *filePreview) watch() {
+	f.stopWatching()
+	h := f.pane.win.app.host(f.host)
+	if h == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(f.pane.win.app.ctx)
+	f.unwatch = cancel
+	name, log := f.file, f.pane.win.app.log
+	// Each runs on the main loop, unless the watch has been stopped by then.
+	onMain := func(fn func()) func() {
+		return func() {
+			glib.IdleAdd(func() {
+				if ctx.Err() == nil {
+					fn()
+				}
+			})
+		}
+	}
+	started := onMain(func() { f.watching = true })
+	changed := onMain(f.changed)
+	go func() {
+		err := watchHostFile(ctx, h, name, started, changed)
+		onMain(func() {
+			f.watching = false
+			if errors.Is(err, tmux.ErrNoWatch) {
+				return
+			}
+			log.Debug("Stopped watching a previewed file", zap.String("file", name), zap.Error(err))
+			// As when the connection dropped: it's checked meanwhile, and watched again
+			// once it can be.
+			glib.TimeoutAdd(uint(fileWatchRetry/time.Millisecond), func() bool {
+				if ctx.Err() == nil {
+					f.watch()
+				}
+				return false
+			})
+		})()
+	}()
+}
+
+// stopWatching stops watching the file.
+func (f *filePreview) stopWatching() {
+	if f.unwatch != nil {
+		f.unwatch()
+		f.unwatch = nil
+	}
+	f.watching = false
+	if f.settle != 0 {
+		glib.SourceRemove(f.settle)
+		f.settle = 0
+	}
+}
+
+// changed reloads the watched file once it's settled.
+func (f *filePreview) changed() {
+	if f.settle != 0 {
+		glib.SourceRemove(f.settle)
+	}
+	f.settle = glib.TimeoutAdd(uint(fileSettleTime/time.Millisecond), func() bool {
+		f.settle = 0
+		f.load(true)
+		return false
+	})
+}
+
+// watchHostFile watches a file on a host, as filewatch.Watch does: directly on this
+// machine, or through the agent of a remote host.
+func watchHostFile(ctx context.Context, h *Host, name string, started, changed func()) error {
+	if h.client.SSH == nil {
+		return filewatch.Watch(ctx, name, started, changed)
+	}
+	return h.client.SSH.Watch(ctx, name, started, changed)
 }
 
 // goBack shows the file shown before the last link was followed.
@@ -278,7 +373,7 @@ func (f *filePreview) showMessage(msg string) {
 // check reloads the file if it's changed since it was read. Files are only checked
 // while they're shown.
 func (f *filePreview) check() {
-	if f.checking || f.loading || f.file == "" || !f.root.GetMapped() {
+	if f.watching || f.checking || f.loading || f.file == "" || !f.root.GetMapped() {
 		return
 	}
 	h := f.pane.win.app.host(f.host)
@@ -414,6 +509,7 @@ func (f *filePreview) hasSelection() bool {
 // stop stops checking the file for changes.
 func (f *filePreview) stop() {
 	f.generation++
+	f.stopWatching()
 	if f.timer != 0 {
 		glib.SourceRemove(f.timer)
 		f.timer = 0

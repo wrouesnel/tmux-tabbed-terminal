@@ -129,3 +129,34 @@ func (s *SSH) launchAgent(ctx context.Context, remote []string) *exec.Cmd {
 	}
 	return cmd
 }
+
+// ErrNoWatch is Watch's error for a destination it can't watch files on: one not reached
+// through an agent, or reached through another host, whose agent runs there instead.
+var ErrNoWatch = errors.New("files on this host can't be watched")
+
+// Watch watches a file on the destination through its agent, calling started once it's
+// watching and changed whenever the file changes, until ctx is done or the watch fails.
+// A name starting with ~/ is in the home directory. It returns nil once ctx is done, and
+// ErrNoWatch, at once, if the destination has no agent of its own.
+func (s *SSH) Watch(ctx context.Context, name string, started, changed func()) error {
+	if s.Via != nil || s.Agents == nil {
+		return ErrNoWatch
+	}
+	ctx, cancel, err := s.connect(ctx)
+	defer cancel()
+	if err != nil {
+		return err
+	}
+	root, c := s.agentClient()
+	if c == nil {
+		return ErrNoWatch
+	}
+	err = c.Watch(ctx, name, started, changed)
+	if status.Code(err) == codes.Unimplemented {
+		return ErrNoWatch
+	}
+	if err != nil && ctx.Err() == nil {
+		root.agentFailed(c, err)
+	}
+	return err
+}

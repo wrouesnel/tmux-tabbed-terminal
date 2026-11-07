@@ -75,7 +75,10 @@ or split the window to watch several sessions side by side.
   the plans, reports and screenshots a coding agent writes. Markdown is formatted as
   GitHub formats it: headings, lists and task lists, tables, code, quotes, links, and the
   images it shows from the same host. An image is scaled to fit the pane. The preview
-  reloads when the file changes, and the next file previewed replaces it. Move to New
+  reloads as soon as the file changes, as when an agent rewrites its plan: a local file,
+  or one on a host reached through the [agent](#the-agent), is watched, with inotify,
+  kqueue or ReadDirectoryChangesW, and others are checked every two seconds. The next
+  file previewed replaces it. Move to New
   Window, in the preview's header, gives it a window of its own, beside the terminal's. Links to other
   markdown files and images open in the preview, with a Back button; web links open in
   the browser. Raw HTML in markdown shows as written, code isn't highlighted, and files
@@ -347,7 +350,9 @@ panes already attached to its sessions running.
 Windows' ssh can't share one connection between commands, so on Windows the application
 reaches a host through its agent, `ttt-agent`: a small static program it installs on the
 host, in `~/.cache/tmux-tabbed-terminal/agent/`, and runs over one ssh connection, which
-then carries everything: polling, previews, downloads, and the terminals of panes. The
+then carries everything: polling, previews, downloads, and the terminals of panes. It
+also watches previewed files, so they reload as soon as they change instead of being
+checked every two seconds. The
 first connection to a host uploads the agent for the host's platform, about 3 MB, over
 the same connection, and checks its SHA-256 checksum; later ones just start it. Agents are built for Linux and
 macOS, on amd64 and arm64, and the application only talks to one of its own version, so

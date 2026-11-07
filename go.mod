@@ -8,6 +8,7 @@ require (
 	github.com/chigopher/pathlib v0.19.1
 	github.com/creack/pty v1.1.24
 	github.com/danielgatis/go-vte v1.0.11
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gotk3/gotk3 v0.6.5-0.20251124190141-e7a9e823ca35
 	github.com/integralist/go-findroot v0.0.0-20160518114804-ac90681525dc
 	github.com/magefile/mage v1.17.2

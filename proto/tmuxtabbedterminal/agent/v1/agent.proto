@@ -22,6 +22,11 @@ service AgentService {
   // ones type into it and resize it. Responses say it started, carry what it writes, and
   // end with how it exited. Cancelling the call hangs the program up.
   rpc Attach(stream AttachRequest) returns (stream AttachResponse);
+  // Watch watches a file for changes, until the call is cancelled. The first response says
+  // it's watching; each one after says the file has changed: written, made, replaced or
+  // removed. A file replaced by renaming another over it, as editors save, is still
+  // watched, and so is one that doesn't exist yet, if its directory does.
+  rpc Watch(WatchRequest) returns (stream WatchResponse);
 }
 
 message HelloRequest {
@@ -121,3 +126,20 @@ message AttachResponse {
 message AttachStarted {
   string tty = 1;
 }
+
+message WatchRequest {
+  // The file: absolute, in the home directory if it starts with ~/, or relative to the
+  // directory the agent runs in, which is the home directory.
+  string path = 1;
+}
+
+message WatchResponse {
+  oneof event {
+    WatchStarted started = 1;
+    WatchChanged changed = 2;
+  }
+}
+
+message WatchStarted {}
+
+message WatchChanged {}

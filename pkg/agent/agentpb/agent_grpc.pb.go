@@ -28,6 +28,7 @@ const (
 	AgentService_Run_FullMethodName    = "/tmuxtabbedterminal.agent.v1.AgentService/Run"
 	AgentService_Stream_FullMethodName = "/tmuxtabbedterminal.agent.v1.AgentService/Stream"
 	AgentService_Attach_FullMethodName = "/tmuxtabbedterminal.agent.v1.AgentService/Attach"
+	AgentService_Watch_FullMethodName  = "/tmuxtabbedterminal.agent.v1.AgentService/Watch"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -47,6 +48,11 @@ type AgentServiceClient interface {
 	// ones type into it and resize it. Responses say it started, carry what it writes, and
 	// end with how it exited. Cancelling the call hangs the program up.
 	Attach(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[AttachRequest, AttachResponse], error)
+	// Watch watches a file for changes, until the call is cancelled. The first response says
+	// it's watching; each one after says the file has changed: written, made, replaced or
+	// removed. A file replaced by renaming another over it, as editors save, is still
+	// watched, and so is one that doesn't exist yet, if its directory does.
+	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
 }
 
 type agentServiceClient struct {
@@ -109,6 +115,25 @@ func (c *agentServiceClient) Attach(ctx context.Context, opts ...grpc.CallOption
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_AttachClient = grpc.BidiStreamingClient[AttachRequest, AttachResponse]
 
+func (c *agentServiceClient) Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[2], AgentService_Watch_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[WatchRequest, WatchResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_WatchClient = grpc.ServerStreamingClient[WatchResponse]
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -126,6 +151,11 @@ type AgentServiceServer interface {
 	// ones type into it and resize it. Responses say it started, carry what it writes, and
 	// end with how it exited. Cancelling the call hangs the program up.
 	Attach(grpc.BidiStreamingServer[AttachRequest, AttachResponse]) error
+	// Watch watches a file for changes, until the call is cancelled. The first response says
+	// it's watching; each one after says the file has changed: written, made, replaced or
+	// removed. A file replaced by renaming another over it, as editors save, is still
+	// watched, and so is one that doesn't exist yet, if its directory does.
+	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -147,6 +177,9 @@ func (UnimplementedAgentServiceServer) Stream(*StreamRequest, grpc.ServerStreami
 }
 func (UnimplementedAgentServiceServer) Attach(grpc.BidiStreamingServer[AttachRequest, AttachResponse]) error {
 	return status.Error(codes.Unimplemented, "method Attach not implemented")
+}
+func (UnimplementedAgentServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
+	return status.Error(codes.Unimplemented, "method Watch not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -223,6 +256,17 @@ func _AgentService_Attach_Handler(srv interface{}, stream grpc.ServerStream) err
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_AttachServer = grpc.BidiStreamingServer[AttachRequest, AttachResponse]
 
+func _AgentService_Watch_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(WatchRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServiceServer).Watch(m, &grpc.GenericServerStream[WatchRequest, WatchResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_WatchServer = grpc.ServerStreamingServer[WatchResponse]
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -250,6 +294,11 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _AgentService_Attach_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "Watch",
+			Handler:       _AgentService_Watch_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "tmuxtabbedterminal/agent/v1/agent.proto",
