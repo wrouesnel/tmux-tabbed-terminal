@@ -27,7 +27,25 @@ const (
 	// The largest a preview is shown, in pixels. Smaller images aren't enlarged.
 	previewWidth  = 360
 	previewHeight = 270
+	// previewGrownShare is the most of the window's width and height a preview grows to
+	// while the pointer is on it.
+	previewGrownShare = 0.8
+	// previewGrace is how long a preview stays once the pointer leaves its link or it, so
+	// the pointer can cross from one to the other.
+	previewGrace = 500 * time.Millisecond
 )
+
+// hoverPreview is the image preview shown for a link: the popover, and what's needed to
+// grow it or open the file.
+type hoverPreview struct {
+	popover *gtk.Popover
+	image   *gtk.Image
+	link    link
+	data    []byte
+	grown   bool
+	// hideTimer hides it, once the pointer has been off the link and it for previewGrace.
+	hideTimer glib.SourceHandle
+}
 
 // errPreviewTooBig is returned for a file over previewMaxBytes.
 var errPreviewTooBig = errors.New("the file is too big to preview")
@@ -106,6 +124,12 @@ func (p *Pane) onMotion(event *gdk.Event) {
 	x, y := gdk.EventMotionNewFromEvent(event).MotionVal()
 	col, row := p.term.CellAt(x, y)
 	if p.hoverSpan.contains(col, row) || (matched && p.hoverSpan == cellSpan{} && m.Text == p.hoverText) {
+		p.keepPreview()
+		return
+	}
+	// Off the link with its preview showing: the pointer may be on its way to it.
+	if p.preview != nil {
+		p.hidePreviewSoon()
 		return
 	}
 	p.hidePreview()
@@ -139,13 +163,18 @@ func (p *Pane) loadPreview(l link, gen int, x, y float64) {
 	if h == nil {
 		return
 	}
-	runAsync(p.win.app, func(ctx context.Context) (*gdk.Pixbuf, error) {
+	type loaded struct {
+		data []byte
+		pb   *gdk.Pixbuf
+	}
+	runAsync(p.win.app, func(ctx context.Context) (loaded, error) {
 		data, err := readHostFile(ctx, h, l.file)
 		if err != nil {
-			return nil, err
+			return loaded{}, err
 		}
-		return gtkx.PixbufFit(data, previewWidth, previewHeight)
-	}, func(pb *gdk.Pixbuf, err error) {
+		pb, err := gtkx.PixbufFit(data, previewWidth, previewHeight)
+		return loaded{data, pb}, err
+	}, func(img loaded, err error) {
 		if p.closed || gen != p.hoverGen {
 			return
 		}
@@ -153,13 +182,14 @@ func (p *Pane) loadPreview(l link, gen int, x, y float64) {
 			p.win.app.log.Debug("No preview", zap.String("file", l.file), zap.Error(err))
 			return
 		}
-		p.showPreview(pb, x, y)
+		p.showPreview(l, img.data, img.pb, x, y)
 	})
 }
 
 // showPreview shows an image in a popover pointing at x, y of the terminal. It doesn't
-// take the focus, so typing still goes to the terminal.
-func (p *Pane) showPreview(pb *gdk.Pixbuf, x, y float64) {
+// take the focus, so typing still goes to the terminal. With the pointer on it, it grows,
+// and a click opens the file in the preview pane.
+func (p *Pane) showPreview(l link, data []byte, pb *gdk.Pixbuf, x, y float64) {
 	popover, err := gtk.PopoverNew(p.term)
 	if err != nil {
 		return
@@ -171,7 +201,11 @@ func (p *Pane) showPreview(pb *gdk.Pixbuf, x, y float64) {
 	}
 	addClass(popover, "ttt-image-preview")
 	popover.SetModal(false)
-	popover.Add(img)
+	// The image takes the pointer: GtkImage has no window of its own to get events.
+	events, _ := gtk.EventBoxNew()
+	events.Add(img)
+	events.SetTooltipText("Click to open " + path.Base(l.file) + " in the preview pane")
+	popover.Add(events)
 	rect := gdk.Rectangle{}
 	rect.SetX(int(x))
 	rect.SetY(int(y))
@@ -179,9 +213,74 @@ func (p *Pane) showPreview(pb *gdk.Pixbuf, x, y float64) {
 	rect.SetHeight(1)
 	popover.SetPointingTo(rect)
 	popover.SetPosition(gtk.POS_BOTTOM)
-	img.Show()
+
+	hp := &hoverPreview{popover: popover, image: img, link: l, data: data}
+	events.Connect("enter-notify-event", func() bool {
+		p.keepPreview()
+		p.growPreview(hp)
+		return false
+	})
+	events.Connect("leave-notify-event", func() bool {
+		p.hidePreviewSoon()
+		return false
+	})
+	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY {
+			return false
+		}
+		p.hidePreview()
+		p.win.previewFile(l.host, l.file)
+		return true
+	})
+	events.ShowAll()
 	popover.Show()
-	p.preview = popover
+	p.preview = hp
+}
+
+// growPreview shows a preview larger, up to previewGrownShare of the window, once.
+// Images already shown whole stay as they are.
+func (p *Pane) growPreview(hp *hoverPreview) {
+	if hp.grown {
+		return
+	}
+	hp.grown = true
+	width := int(float64(p.win.window.GetAllocatedWidth()) * previewGrownShare)
+	height := int(float64(p.win.window.GetAllocatedHeight()) * previewGrownShare)
+	if width <= previewWidth && height <= previewHeight {
+		return
+	}
+	runAsync(p.win.app, func(context.Context) (*gdk.Pixbuf, error) {
+		return gtkx.PixbufFit(hp.data, width, height)
+	}, func(pb *gdk.Pixbuf, err error) {
+		if err != nil || p.preview != hp {
+			return
+		}
+		hp.image.SetFromPixbuf(pb)
+	})
+}
+
+// keepPreview keeps the preview showing: the pointer is on its link or on it.
+func (p *Pane) keepPreview() {
+	if hp := p.preview; hp != nil && hp.hideTimer != 0 {
+		glib.SourceRemove(hp.hideTimer)
+		hp.hideTimer = 0
+	}
+}
+
+// hidePreviewSoon hides the preview after previewGrace, unless the pointer comes back
+// to its link or to it.
+func (p *Pane) hidePreviewSoon() {
+	hp := p.preview
+	if hp == nil || hp.hideTimer != 0 {
+		return
+	}
+	hp.hideTimer = glib.TimeoutAdd(uint(previewGrace/time.Millisecond), func() bool {
+		hp.hideTimer = 0
+		if p.preview == hp {
+			p.hidePreview()
+		}
+		return false
+	})
 }
 
 // hidePreview hides the image preview, and forgets the link under the pointer, so a
@@ -193,8 +292,11 @@ func (p *Pane) hidePreview() {
 		glib.SourceRemove(p.hoverTimer)
 		p.hoverTimer = 0
 	}
-	if p.preview != nil {
-		p.preview.Destroy()
+	if hp := p.preview; hp != nil {
 		p.preview = nil
+		if hp.hideTimer != 0 {
+			glib.SourceRemove(hp.hideTimer)
+		}
+		hp.popover.Destroy()
 	}
 }

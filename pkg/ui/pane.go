@@ -57,7 +57,7 @@ type Pane struct {
 	// the terminal's match under the pointer, hoverSpan where tmux said the link is, and
 	// hoverTimer waits for the pointer to rest. hoverGen increases whenever the pointer
 	// leaves a link, so a preview on the way for it is dropped.
-	preview    *gtk.Popover
+	preview    *hoverPreview
 	hoverText  string
 	hoverSpan  cellSpan
 	hoverTimer glib.SourceHandle
@@ -193,8 +193,13 @@ func newPane(w *Window) *Pane {
 		p.onMotion(ev)
 		return false
 	})
+	// Leaving the terminal may be for the preview, which is over it.
 	p.term.Connect("leave-notify-event", func() bool {
-		p.hidePreview()
+		if p.preview != nil {
+			p.hidePreviewSoon()
+		} else {
+			p.hidePreview()
+		}
 		return false
 	})
 	p.term.Connect("key-press-event", func() bool {

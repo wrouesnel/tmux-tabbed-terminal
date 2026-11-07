@@ -64,8 +64,10 @@ or split the window to watch several sessions side by side.
   list. When a download is done, a notice at the bottom of the window offers to open the
   file or its folder too. Only files can be downloaded, not directories.
 * **Image previews.** Rest the pointer on a link to an image file, local or on a remote
-  host, and a preview of it pops up, scaled to fit 360×270 pixels. Remote images are read
-  over the host's ssh connection, and files over 32 MiB are skipped. Images on the web
+  host, and a preview of it pops up, scaled to fit 360×270 pixels. Move the pointer onto
+  the preview and it grows, up to most of the window; click it to open the image in the
+  preview pane. Remote images are read over the host's ssh connection, and files over
+  32 MiB are skipped. Images on the web
   aren't fetched. Turn previews off with `links.image-previews: false` in the
   configuration file.
 * **File previews.** Right-click a link to a markdown file or an image, local or on a
