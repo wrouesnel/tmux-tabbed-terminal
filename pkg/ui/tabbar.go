@@ -21,13 +21,21 @@ import (
 // tabMaxChars is the most characters of a window name a tab shows before ellipsizing.
 const tabMaxChars = 24
 
-// tabBar is the strip of tabs above the panes: one per tmux window of the session in the
-// focused pane, in tmux's order, like tmux's own status line. Clicking a tab makes it the
-// session's current window, right-clicking it gives its menu, and the + at the left makes
-// a new window. The tabs scroll sideways when they don't fit.
+// tabBar is a strip of tabs: one per tmux window of a session, in tmux's order, like
+// tmux's own status line. Clicking a tab makes it the session's current window,
+// right-clicking it gives its menu, and the + at the left makes a new window. The tabs
+// scroll sideways when they don't fit.
+//
+// A window has one above or below its panes, for the session in the focused pane, shown
+// while the window isn't split. Once it is, each pane shows one under its header, for its
+// own session.
 type tabBar struct {
 	win  *Window
 	root *gtk.Box
+	// wanted is whether the bar should show, tabs permitting.
+	wanted bool
+	// onClick, if set, is called when a tab or the + is clicked, before it acts.
+	onClick func()
 	// scroller holds the tabs, beside the + button.
 	scroller *gtk.ScrolledWindow
 	box      *gtk.Box
@@ -67,7 +75,10 @@ func newTabBar(w *Window) *tabBar {
 	newBtn.SetCanFocus(false)
 	newBtn.SetTooltipText("New Window")
 	addClass(newBtn, "ttt-tab-new")
-	newBtn.Connect("clicked", func() { tb.newWindow() })
+	newBtn.Connect("clicked", func() {
+		tb.clicked()
+		tb.newWindow()
+	})
 	tb.root.PackStart(newBtn, false, false, 0)
 	newBtn.Show()
 
@@ -124,11 +135,20 @@ func newTab(tb *tabBar, id string) *tab {
 	t.button.ShowAll()
 	t.indicator.SetVisibleChildName(indicatorNone)
 
-	t.button.Connect("clicked", func() { tb.selectWindow(id) })
+	t.button.Connect("clicked", func() {
+		tb.clicked()
+		tb.selectWindow(id)
+	})
 	t.button.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
 		return tb.onButtonPress(t, gdk.EventButtonNewFromEvent(ev))
 	})
 	return t
+}
+
+func (tb *tabBar) clicked() {
+	if tb.onClick != nil {
+		tb.onClick()
+	}
 }
 
 // onButtonPress opens a window's menu on right click.
@@ -340,9 +360,17 @@ func (tb *tabBar) rebuild(session string, ids []string) {
 	tb.syncVisible()
 }
 
-// syncVisible shows the bar if the window wants it and there are tabs to show.
+// setWanted sets whether the bar should show, when tabs are on and it has tabs.
+func (tb *tabBar) setWanted(wanted bool) {
+	if wanted != tb.wanted {
+		tb.wanted = wanted
+		tb.syncVisible()
+	}
+}
+
+// syncVisible shows the bar if it's wanted, tabs are on and there are tabs to show.
 func (tb *tabBar) syncVisible() {
-	tb.root.SetVisible(tb.win.app.showTabs && len(tb.order) > 0)
+	tb.root.SetVisible(tb.wanted && tb.win.app.showTabs && len(tb.order) > 0)
 }
 
 // scrollTo scrolls the strip so a tab is in view.

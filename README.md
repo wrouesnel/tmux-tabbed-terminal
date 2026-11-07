@@ -17,7 +17,9 @@ or split the window to watch several sessions side by side.
   a tab renames its window. Windows made, closed or switched inside tmux show up within a
   second. Tabs show activity dots for their windows, and scroll sideways with the wheel
   when they don't fit. Hide the bar with Show Tab Bar in the menu, and move it below the
-  terminals with Window tabs in Preferences; both choices are remembered.
+  terminals with Window tabs in Preferences; both choices are remembered. When the window
+  is split, each pane has its own tabs instead, under its header, for its own session, so
+  any pane's windows are a click away.
 * **Other hosts.** "Add Host" under the list connects to another machine over ssh and
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones. Hosts are listed from `~/.ssh/config`, or

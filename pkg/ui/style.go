@@ -129,6 +129,17 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 	min-width: 16px;
 	padding: 0;
 }
+/* A split pane's window tabs, under its header: a little tighter than the window's, and
+   faded with the header while the pane isn't focused. */
+.ttt-pane-tabbar .ttt-tab {
+	padding: 1px 10px 1px 6px;
+}
+.ttt-pane-tabbar .ttt-tab-new {
+	padding: 1px 6px;
+}
+.ttt-pane:not(.ttt-active) .ttt-pane-tabbar {
+	opacity: 0.75;
+}
 .ttt-tab {
 	padding: 3px 12px 3px 8px;
 	min-height: 0;

@@ -46,8 +46,11 @@ type Pane struct {
 	header      *gtk.Box
 	headerLabel *gtk.Label
 	headerDot   *gtk.Label
-	stack       *gtk.Stack
-	term        *vte.Terminal
+	// tabs are the windows of the pane's session, under the header, shown while the
+	// window is split.
+	tabs  *tabBar
+	stack *gtk.Stack
+	term  *vte.Terminal
 	// linkTags are the kinds of the terminal's link patterns, by tag.
 	linkTags map[int]linkKind
 	// preview shows the image of the link under the pointer, if there is one. hoverText is
@@ -264,7 +267,12 @@ func newPane(w *Window) *Pane {
 	body.PackStart(overlay, true, true, 0)
 	body.PackStart(p.scrollbar, false, false, 0)
 
+	p.tabs = newTabBar(w)
+	addClass(p.tabs.root, "ttt-pane-tabbar")
+	// A tab acts on this pane's session, so the pane takes the focus too.
+	p.tabs.onClick = p.Focus
 	p.root.PackStart(headerEvents, false, false, 0)
+	p.root.PackStart(p.tabs.root, false, false, 0)
 	p.root.PackStart(body, true, true, 0)
 	p.root.ShowAll()
 	p.showEmpty("No session", "Choose a session from the list, or start a new one.", false)

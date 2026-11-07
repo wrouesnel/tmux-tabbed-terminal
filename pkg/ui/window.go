@@ -81,6 +81,7 @@ func newWindow(app *App) *Window {
 	w.layout = newLayout(first)
 	w.activePane, w.terminalPane = first, first
 	w.tabs = newTabBar(w)
+	w.tabs.wanted = true
 	w.content, _ = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	w.content.PackStart(w.tabs.root, false, false, 0)
 	w.content.PackStart(w.layout.area, true, true, 0)
@@ -276,6 +277,9 @@ func (w *Window) placeTabs() {
 func (w *Window) syncTabsAction() {
 	w.tabsAction.SetState(glib.VariantFromBoolean(w.app.showTabs))
 	w.tabs.syncVisible()
+	for _, p := range w.panes() {
+		p.tabs.syncVisible()
+	}
 }
 
 // updateActionState enables the actions which make sense for the active pane.
@@ -703,7 +707,10 @@ func (w *Window) refresh() {
 
 	shown, selected := w.shownSessions()
 	w.sidebar.update(shown, selected)
+	// Split, each pane shows its own session's windows instead. The window's bar keeps
+	// following the focused pane, for Alt+number.
 	w.tabs.update(selected)
+	w.tabs.setWanted(!split)
 
 	now := timeNow()
 	for _, p := range panes {
@@ -717,6 +724,12 @@ func (w *Window) refresh() {
 			busy = w.app.tracker.State(p.SessionKey(), now).Active
 		}
 		p.updateHeader(name, busy, split)
+		session := ""
+		if p.running && p.file == nil {
+			session = p.SessionKey()
+		}
+		p.tabs.update(session)
+		p.tabs.setWanted(split)
 		p.updateScrollbar()
 	}
 
