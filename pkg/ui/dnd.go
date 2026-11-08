@@ -62,6 +62,9 @@ func (z dropZone) split() (gtk.Orientation, bool) {
 	}
 }
 
+// uriListTarget is the drag type of files dragged from a file manager.
+const uriListTarget = "text/uri-list"
+
 // dragTargets are the drag types sessions are dragged and dropped as.
 func dragTargets() []gtk.TargetEntry {
 	te, err := gtk.TargetEntryNew(dragTarget, gtk.TARGET_SAME_APP, 0)
@@ -69,6 +72,15 @@ func dragTargets() []gtk.TargetEntry {
 		return nil
 	}
 	return []gtk.TargetEntry{*te}
+}
+
+// paneDropTargets are the drag types a pane takes: sessions, and files to upload.
+func paneDropTargets() []gtk.TargetEntry {
+	targets := dragTargets()
+	if te, err := gtk.TargetEntryNew(uriListTarget, 0, 1); err == nil {
+		targets = append(targets, *te)
+	}
+	return targets
 }
 
 // dragResultNoTarget is GTK_DRAG_RESULT_NO_TARGET: a drag released where nothing took it.

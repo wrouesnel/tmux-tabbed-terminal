@@ -451,6 +451,57 @@ func TestCopyFileThroughSSH(t *testing.T) {
 	}
 }
 
+// TestUploadThroughSSH uploads files with awkward names through the fake ssh, which never
+// replace a file already there, and leave nothing behind when they fail.
+func TestUploadThroughSSH(t *testing.T) {
+	fake, err := filepath.Abs("testdata/fake-ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ssh := &tmux.SSH{Destination: "test-host", Binary: fake, ControlDir: t.TempDir()}
+	ctx := context.Background()
+	dir := t.TempDir()
+	content := []byte("binary\x00\xff and text\n")
+	cases := []struct{ name, want string }{
+		{"it's a $file `x`.tar.gz", "it's a $file `x`.tar.gz"},
+		{"it's a $file `x`.tar.gz", "it's a $file `x`.tar-2.gz"},
+		{"it's a $file `x`.tar.gz", "it's a $file `x`.tar-3.gz"},
+		{"-n", "-n"},
+		{".bashrc", ".bashrc"},
+		{".bashrc", ".bashrc-2"},
+		{"README", "README"},
+		{"README", "README-2"},
+	}
+	for _, c := range cases {
+		saved, err := ssh.Upload(ctx, bytes.NewReader(content), dir, c.name)
+		if err != nil || saved != filepath.Join(dir, c.want) {
+			t.Fatalf("Upload %q: %q, %v; want %q", c.name, saved, err, c.want)
+		}
+		if got, _ := os.ReadFile(saved); !bytes.Equal(got, content) {
+			t.Errorf("uploaded %q to %s", got, saved)
+		}
+	}
+	// ~/ is the home directory, wherever ssh starts.
+	t.Setenv("HOME", dir)
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if saved, err := ssh.Upload(ctx, strings.NewReader("x"), "~/sub", "a.txt"); err != nil ||
+		saved != filepath.Join(dir, "sub", "a.txt") {
+		t.Errorf("Upload to the home directory: %q, %v", saved, err)
+	}
+	if _, err := ssh.Upload(ctx, strings.NewReader("x"), filepath.Join(dir, "missing"), "a.txt"); err == nil {
+		t.Error("uploaded to a missing directory")
+	}
+	if _, err := ssh.Upload(ctx, strings.NewReader("x"), dir, "a/b"); err == nil {
+		t.Error("uploaded to a name with a slash")
+	}
+	// The uploads and sub: no hidden part files left behind.
+	if entries, _ := os.ReadDir(dir); len(entries) != len(cases)+1 {
+		t.Errorf("%d files in the directory, want %d", len(entries), len(cases)+1)
+	}
+}
+
 // TestCopyFileSized checks a copy reports the file's size before its contents, and that
 // the size line, however it's split across writes, isn't part of the file.
 func TestCopyFileSized(t *testing.T) {

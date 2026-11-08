@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -122,23 +123,80 @@ func (c *Client) Stream(ctx context.Context, w io.Writer, argv []string) error {
 	if err != nil {
 		return err
 	}
-	for {
+	return receiveOutput(w, func() ([]byte, *agentpb.StreamExit, error) {
 		resp, err := stream.Recv()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				return errors.New("the agent ended the stream without saying how the program exited")
+		return resp.GetStdout(), resp.GetExit(), err
+	})
+}
+
+// Pipe is Stream, with r as the program's standard input.
+func (c *Client) Pipe(ctx context.Context, r io.Reader, w io.Writer, argv []string) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stream, err := c.agent.Pipe(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stream.Send(&agentpb.PipeRequest{Event: &agentpb.PipeRequest_Command{
+		Command: &agentpb.Command{Argv: argv},
+	}}); err != nil {
+		return err
+	}
+	// read is the error reading r, other than its end. An error sending is the call's,
+	// which receiving reports.
+	read := make(chan error, 1)
+	go func() {
+		buf := make([]byte, streamChunk)
+		for {
+			n, rerr := r.Read(buf)
+			if n > 0 {
+				chunk := bytes.Clone(buf[:n])
+				if stream.Send(&agentpb.PipeRequest{Event: &agentpb.PipeRequest_Stdin{Stdin: chunk}}) != nil {
+					read <- nil
+					return
+				}
 			}
-			return err
+			switch {
+			case errors.Is(rerr, io.EOF):
+				_ = stream.CloseSend()
+				read <- nil
+				return
+			case rerr != nil:
+				// Cancelling the call kills the program, so it doesn't take part of the
+				// input for the whole.
+				cancel()
+				read <- rerr
+				return
+			}
 		}
-		switch ev := resp.GetEvent().(type) {
-		case *agentpb.StreamResponse_Stdout:
-			if _, err := w.Write(ev.Stdout); err != nil {
-				// Cancelling the call kills the program.
-				return err
-			}
-		case *agentpb.StreamResponse_Exit:
-			exit := ev.Exit.GetExit()
-			return exitError(int(exit.GetCode()), exit.GetSignal(), ev.Exit.GetStderr())
+	}()
+	err = receiveOutput(w, func() ([]byte, *agentpb.StreamExit, error) {
+		resp, err := stream.Recv()
+		return resp.GetStdout(), resp.GetExit(), err
+	})
+	cancel()
+	if rerr := <-read; rerr != nil {
+		return rerr
+	}
+	return err
+}
+
+// receiveOutput copies the output of a program the agent runs, which recv returns a piece
+// of at a time, to w, and returns how it exited.
+func receiveOutput(w io.Writer, recv func() ([]byte, *agentpb.StreamExit, error)) error {
+	for {
+		stdout, exit, err := recv()
+		switch {
+		case errors.Is(err, io.EOF):
+			return errors.New("the agent ended the stream without saying how the program exited")
+		case err != nil:
+			return err
+		case exit != nil:
+			return exitError(int(exit.GetExit().GetCode()), exit.GetExit().GetSignal(), exit.GetStderr())
+		}
+		if _, err := w.Write(stdout); err != nil {
+			// Cancelling the call kills the program.
+			return err
 		}
 	}
 }

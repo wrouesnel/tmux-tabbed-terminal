@@ -484,6 +484,173 @@ func (*StreamResponse_Stdout) isStreamResponse_Event() {}
 
 func (*StreamResponse_Exit) isStreamResponse_Event() {}
 
+type PipeRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*PipeRequest_Command
+	//	*PipeRequest_Stdin
+	Event         isPipeRequest_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PipeRequest) Reset() {
+	*x = PipeRequest{}
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PipeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PipeRequest) ProtoMessage() {}
+
+func (x *PipeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PipeRequest.ProtoReflect.Descriptor instead.
+func (*PipeRequest) Descriptor() ([]byte, []int) {
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *PipeRequest) GetEvent() isPipeRequest_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *PipeRequest) GetCommand() *Command {
+	if x != nil {
+		if x, ok := x.Event.(*PipeRequest_Command); ok {
+			return x.Command
+		}
+	}
+	return nil
+}
+
+func (x *PipeRequest) GetStdin() []byte {
+	if x != nil {
+		if x, ok := x.Event.(*PipeRequest_Stdin); ok {
+			return x.Stdin
+		}
+	}
+	return nil
+}
+
+type isPipeRequest_Event interface {
+	isPipeRequest_Event()
+}
+
+type PipeRequest_Command struct {
+	// Start the program: the first request, and only the first.
+	Command *Command `protobuf:"bytes,1,opt,name=command,proto3,oneof"`
+}
+
+type PipeRequest_Stdin struct {
+	// Some of its standard input.
+	Stdin []byte `protobuf:"bytes,2,opt,name=stdin,proto3,oneof"`
+}
+
+func (*PipeRequest_Command) isPipeRequest_Event() {}
+
+func (*PipeRequest_Stdin) isPipeRequest_Event() {}
+
+// PipeResponse is as StreamResponse.
+type PipeResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Event:
+	//
+	//	*PipeResponse_Stdout
+	//	*PipeResponse_Exit
+	Event         isPipeResponse_Event `protobuf_oneof:"event"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PipeResponse) Reset() {
+	*x = PipeResponse{}
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PipeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PipeResponse) ProtoMessage() {}
+
+func (x *PipeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PipeResponse.ProtoReflect.Descriptor instead.
+func (*PipeResponse) Descriptor() ([]byte, []int) {
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PipeResponse) GetEvent() isPipeResponse_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *PipeResponse) GetStdout() []byte {
+	if x != nil {
+		if x, ok := x.Event.(*PipeResponse_Stdout); ok {
+			return x.Stdout
+		}
+	}
+	return nil
+}
+
+func (x *PipeResponse) GetExit() *StreamExit {
+	if x != nil {
+		if x, ok := x.Event.(*PipeResponse_Exit); ok {
+			return x.Exit
+		}
+	}
+	return nil
+}
+
+type isPipeResponse_Event interface {
+	isPipeResponse_Event()
+}
+
+type PipeResponse_Stdout struct {
+	Stdout []byte `protobuf:"bytes,1,opt,name=stdout,proto3,oneof"`
+}
+
+type PipeResponse_Exit struct {
+	Exit *StreamExit `protobuf:"bytes,2,opt,name=exit,proto3,oneof"`
+}
+
+func (*PipeResponse_Stdout) isPipeResponse_Event() {}
+
+func (*PipeResponse_Exit) isPipeResponse_Event() {}
+
 type StreamExit struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Exit          *Exit                  `protobuf:"bytes,1,opt,name=exit,proto3" json:"exit,omitempty"`
@@ -494,7 +661,7 @@ type StreamExit struct {
 
 func (x *StreamExit) Reset() {
 	*x = StreamExit{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[8]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -506,7 +673,7 @@ func (x *StreamExit) String() string {
 func (*StreamExit) ProtoMessage() {}
 
 func (x *StreamExit) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[8]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -519,7 +686,7 @@ func (x *StreamExit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StreamExit.ProtoReflect.Descriptor instead.
 func (*StreamExit) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *StreamExit) GetExit() *Exit {
@@ -550,7 +717,7 @@ type AttachRequest struct {
 
 func (x *AttachRequest) Reset() {
 	*x = AttachRequest{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -562,7 +729,7 @@ func (x *AttachRequest) String() string {
 func (*AttachRequest) ProtoMessage() {}
 
 func (x *AttachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[9]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -575,7 +742,7 @@ func (x *AttachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachRequest.ProtoReflect.Descriptor instead.
 func (*AttachRequest) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *AttachRequest) GetEvent() isAttachRequest_Event {
@@ -649,7 +816,7 @@ type AttachStart struct {
 
 func (x *AttachStart) Reset() {
 	*x = AttachStart{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -661,7 +828,7 @@ func (x *AttachStart) String() string {
 func (*AttachStart) ProtoMessage() {}
 
 func (x *AttachStart) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[10]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -674,7 +841,7 @@ func (x *AttachStart) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachStart.ProtoReflect.Descriptor instead.
 func (*AttachStart) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *AttachStart) GetCommand() *Command {
@@ -708,7 +875,7 @@ type TerminalSize struct {
 
 func (x *TerminalSize) Reset() {
 	*x = TerminalSize{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[11]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -720,7 +887,7 @@ func (x *TerminalSize) String() string {
 func (*TerminalSize) ProtoMessage() {}
 
 func (x *TerminalSize) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[11]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -733,7 +900,7 @@ func (x *TerminalSize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TerminalSize.ProtoReflect.Descriptor instead.
 func (*TerminalSize) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *TerminalSize) GetCols() uint32 {
@@ -764,7 +931,7 @@ type AttachResponse struct {
 
 func (x *AttachResponse) Reset() {
 	*x = AttachResponse{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[12]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -776,7 +943,7 @@ func (x *AttachResponse) String() string {
 func (*AttachResponse) ProtoMessage() {}
 
 func (x *AttachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[12]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -789,7 +956,7 @@ func (x *AttachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachResponse.ProtoReflect.Descriptor instead.
 func (*AttachResponse) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{12}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *AttachResponse) GetEvent() isAttachResponse_Event {
@@ -861,7 +1028,7 @@ type AttachStarted struct {
 
 func (x *AttachStarted) Reset() {
 	*x = AttachStarted{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[13]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -873,7 +1040,7 @@ func (x *AttachStarted) String() string {
 func (*AttachStarted) ProtoMessage() {}
 
 func (x *AttachStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[13]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -886,7 +1053,7 @@ func (x *AttachStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachStarted.ProtoReflect.Descriptor instead.
 func (*AttachStarted) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{13}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *AttachStarted) GetTty() string {
@@ -907,7 +1074,7 @@ type WatchRequest struct {
 
 func (x *WatchRequest) Reset() {
 	*x = WatchRequest{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[14]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -919,7 +1086,7 @@ func (x *WatchRequest) String() string {
 func (*WatchRequest) ProtoMessage() {}
 
 func (x *WatchRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[14]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -932,7 +1099,7 @@ func (x *WatchRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchRequest.ProtoReflect.Descriptor instead.
 func (*WatchRequest) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{14}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *WatchRequest) GetPath() string {
@@ -955,7 +1122,7 @@ type WatchResponse struct {
 
 func (x *WatchResponse) Reset() {
 	*x = WatchResponse{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[15]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -967,7 +1134,7 @@ func (x *WatchResponse) String() string {
 func (*WatchResponse) ProtoMessage() {}
 
 func (x *WatchResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[15]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -980,7 +1147,7 @@ func (x *WatchResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchResponse.ProtoReflect.Descriptor instead.
 func (*WatchResponse) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{15}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *WatchResponse) GetEvent() isWatchResponse_Event {
@@ -1032,7 +1199,7 @@ type WatchStarted struct {
 
 func (x *WatchStarted) Reset() {
 	*x = WatchStarted{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[16]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1044,7 +1211,7 @@ func (x *WatchStarted) String() string {
 func (*WatchStarted) ProtoMessage() {}
 
 func (x *WatchStarted) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[16]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1057,7 +1224,7 @@ func (x *WatchStarted) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchStarted.ProtoReflect.Descriptor instead.
 func (*WatchStarted) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{16}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{18}
 }
 
 type WatchChanged struct {
@@ -1068,7 +1235,7 @@ type WatchChanged struct {
 
 func (x *WatchChanged) Reset() {
 	*x = WatchChanged{}
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[17]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1080,7 +1247,7 @@ func (x *WatchChanged) String() string {
 func (*WatchChanged) ProtoMessage() {}
 
 func (x *WatchChanged) ProtoReflect() protoreflect.Message {
-	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[17]
+	mi := &file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1093,7 +1260,7 @@ func (x *WatchChanged) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchChanged.ProtoReflect.Descriptor instead.
 func (*WatchChanged) Descriptor() ([]byte, []int) {
-	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{17}
+	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP(), []int{19}
 }
 
 var File_tmuxtabbedterminal_agent_v1_agent_proto protoreflect.FileDescriptor
@@ -1124,6 +1291,14 @@ const file_tmuxtabbedterminal_agent_v1_agent_proto_rawDesc = "" +
 	"\rStreamRequest\x12>\n" +
 	"\acommand\x18\x01 \x01(\v2$.tmuxtabbedterminal.agent.v1.CommandR\acommand\"r\n" +
 	"\x0eStreamResponse\x12\x18\n" +
+	"\x06stdout\x18\x01 \x01(\fH\x00R\x06stdout\x12=\n" +
+	"\x04exit\x18\x02 \x01(\v2'.tmuxtabbedterminal.agent.v1.StreamExitH\x00R\x04exitB\a\n" +
+	"\x05event\"p\n" +
+	"\vPipeRequest\x12@\n" +
+	"\acommand\x18\x01 \x01(\v2$.tmuxtabbedterminal.agent.v1.CommandH\x00R\acommand\x12\x16\n" +
+	"\x05stdin\x18\x02 \x01(\fH\x00R\x05stdinB\a\n" +
+	"\x05event\"p\n" +
+	"\fPipeResponse\x12\x18\n" +
 	"\x06stdout\x18\x01 \x01(\fH\x00R\x06stdout\x12=\n" +
 	"\x04exit\x18\x02 \x01(\v2'.tmuxtabbedterminal.agent.v1.StreamExitH\x00R\x04exitB\a\n" +
 	"\x05event\"[\n" +
@@ -1160,13 +1335,14 @@ const file_tmuxtabbedterminal_agent_v1_agent_proto_rawDesc = "" +
 	"\achanged\x18\x02 \x01(\v2).tmuxtabbedterminal.agent.v1.WatchChangedH\x00R\achangedB\a\n" +
 	"\x05event\"\x0e\n" +
 	"\fWatchStarted\"\x0e\n" +
-	"\fWatchChanged2\xf6\x03\n" +
+	"\fWatchChanged2\xd7\x04\n" +
 	"\fAgentService\x12^\n" +
 	"\x05Hello\x12).tmuxtabbedterminal.agent.v1.HelloRequest\x1a*.tmuxtabbedterminal.agent.v1.HelloResponse\x12X\n" +
 	"\x03Run\x12'.tmuxtabbedterminal.agent.v1.RunRequest\x1a(.tmuxtabbedterminal.agent.v1.RunResponse\x12c\n" +
 	"\x06Stream\x12*.tmuxtabbedterminal.agent.v1.StreamRequest\x1a+.tmuxtabbedterminal.agent.v1.StreamResponse0\x01\x12e\n" +
 	"\x06Attach\x12*.tmuxtabbedterminal.agent.v1.AttachRequest\x1a+.tmuxtabbedterminal.agent.v1.AttachResponse(\x010\x01\x12`\n" +
-	"\x05Watch\x12).tmuxtabbedterminal.agent.v1.WatchRequest\x1a*.tmuxtabbedterminal.agent.v1.WatchResponse0\x01B=Z;github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent/agentpbb\x06proto3"
+	"\x05Watch\x12).tmuxtabbedterminal.agent.v1.WatchRequest\x1a*.tmuxtabbedterminal.agent.v1.WatchResponse0\x01\x12_\n" +
+	"\x04Pipe\x12(.tmuxtabbedterminal.agent.v1.PipeRequest\x1a).tmuxtabbedterminal.agent.v1.PipeResponse(\x010\x01B=Z;github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent/agentpbb\x06proto3"
 
 var (
 	file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescOnce sync.Once
@@ -1180,7 +1356,7 @@ func file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescGZIP() []byte {
 	return file_tmuxtabbedterminal_agent_v1_agent_proto_rawDescData
 }
 
-var file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_tmuxtabbedterminal_agent_v1_agent_proto_goTypes = []any{
 	(*HelloRequest)(nil),   // 0: tmuxtabbedterminal.agent.v1.HelloRequest
 	(*HelloResponse)(nil),  // 1: tmuxtabbedterminal.agent.v1.HelloResponse
@@ -1190,48 +1366,54 @@ var file_tmuxtabbedterminal_agent_v1_agent_proto_goTypes = []any{
 	(*Exit)(nil),           // 5: tmuxtabbedterminal.agent.v1.Exit
 	(*StreamRequest)(nil),  // 6: tmuxtabbedterminal.agent.v1.StreamRequest
 	(*StreamResponse)(nil), // 7: tmuxtabbedterminal.agent.v1.StreamResponse
-	(*StreamExit)(nil),     // 8: tmuxtabbedterminal.agent.v1.StreamExit
-	(*AttachRequest)(nil),  // 9: tmuxtabbedterminal.agent.v1.AttachRequest
-	(*AttachStart)(nil),    // 10: tmuxtabbedterminal.agent.v1.AttachStart
-	(*TerminalSize)(nil),   // 11: tmuxtabbedterminal.agent.v1.TerminalSize
-	(*AttachResponse)(nil), // 12: tmuxtabbedterminal.agent.v1.AttachResponse
-	(*AttachStarted)(nil),  // 13: tmuxtabbedterminal.agent.v1.AttachStarted
-	(*WatchRequest)(nil),   // 14: tmuxtabbedterminal.agent.v1.WatchRequest
-	(*WatchResponse)(nil),  // 15: tmuxtabbedterminal.agent.v1.WatchResponse
-	(*WatchStarted)(nil),   // 16: tmuxtabbedterminal.agent.v1.WatchStarted
-	(*WatchChanged)(nil),   // 17: tmuxtabbedterminal.agent.v1.WatchChanged
-	nil,                    // 18: tmuxtabbedterminal.agent.v1.AttachStart.EnvEntry
+	(*PipeRequest)(nil),    // 8: tmuxtabbedterminal.agent.v1.PipeRequest
+	(*PipeResponse)(nil),   // 9: tmuxtabbedterminal.agent.v1.PipeResponse
+	(*StreamExit)(nil),     // 10: tmuxtabbedterminal.agent.v1.StreamExit
+	(*AttachRequest)(nil),  // 11: tmuxtabbedterminal.agent.v1.AttachRequest
+	(*AttachStart)(nil),    // 12: tmuxtabbedterminal.agent.v1.AttachStart
+	(*TerminalSize)(nil),   // 13: tmuxtabbedterminal.agent.v1.TerminalSize
+	(*AttachResponse)(nil), // 14: tmuxtabbedterminal.agent.v1.AttachResponse
+	(*AttachStarted)(nil),  // 15: tmuxtabbedterminal.agent.v1.AttachStarted
+	(*WatchRequest)(nil),   // 16: tmuxtabbedterminal.agent.v1.WatchRequest
+	(*WatchResponse)(nil),  // 17: tmuxtabbedterminal.agent.v1.WatchResponse
+	(*WatchStarted)(nil),   // 18: tmuxtabbedterminal.agent.v1.WatchStarted
+	(*WatchChanged)(nil),   // 19: tmuxtabbedterminal.agent.v1.WatchChanged
+	nil,                    // 20: tmuxtabbedterminal.agent.v1.AttachStart.EnvEntry
 }
 var file_tmuxtabbedterminal_agent_v1_agent_proto_depIdxs = []int32{
 	2,  // 0: tmuxtabbedterminal.agent.v1.RunRequest.command:type_name -> tmuxtabbedterminal.agent.v1.Command
 	5,  // 1: tmuxtabbedterminal.agent.v1.RunResponse.exit:type_name -> tmuxtabbedterminal.agent.v1.Exit
 	2,  // 2: tmuxtabbedterminal.agent.v1.StreamRequest.command:type_name -> tmuxtabbedterminal.agent.v1.Command
-	8,  // 3: tmuxtabbedterminal.agent.v1.StreamResponse.exit:type_name -> tmuxtabbedterminal.agent.v1.StreamExit
-	5,  // 4: tmuxtabbedterminal.agent.v1.StreamExit.exit:type_name -> tmuxtabbedterminal.agent.v1.Exit
-	10, // 5: tmuxtabbedterminal.agent.v1.AttachRequest.start:type_name -> tmuxtabbedterminal.agent.v1.AttachStart
-	11, // 6: tmuxtabbedterminal.agent.v1.AttachRequest.resize:type_name -> tmuxtabbedterminal.agent.v1.TerminalSize
-	2,  // 7: tmuxtabbedterminal.agent.v1.AttachStart.command:type_name -> tmuxtabbedterminal.agent.v1.Command
-	11, // 8: tmuxtabbedterminal.agent.v1.AttachStart.size:type_name -> tmuxtabbedterminal.agent.v1.TerminalSize
-	18, // 9: tmuxtabbedterminal.agent.v1.AttachStart.env:type_name -> tmuxtabbedterminal.agent.v1.AttachStart.EnvEntry
-	13, // 10: tmuxtabbedterminal.agent.v1.AttachResponse.started:type_name -> tmuxtabbedterminal.agent.v1.AttachStarted
-	5,  // 11: tmuxtabbedterminal.agent.v1.AttachResponse.exit:type_name -> tmuxtabbedterminal.agent.v1.Exit
-	16, // 12: tmuxtabbedterminal.agent.v1.WatchResponse.started:type_name -> tmuxtabbedterminal.agent.v1.WatchStarted
-	17, // 13: tmuxtabbedterminal.agent.v1.WatchResponse.changed:type_name -> tmuxtabbedterminal.agent.v1.WatchChanged
-	0,  // 14: tmuxtabbedterminal.agent.v1.AgentService.Hello:input_type -> tmuxtabbedterminal.agent.v1.HelloRequest
-	3,  // 15: tmuxtabbedterminal.agent.v1.AgentService.Run:input_type -> tmuxtabbedterminal.agent.v1.RunRequest
-	6,  // 16: tmuxtabbedterminal.agent.v1.AgentService.Stream:input_type -> tmuxtabbedterminal.agent.v1.StreamRequest
-	9,  // 17: tmuxtabbedterminal.agent.v1.AgentService.Attach:input_type -> tmuxtabbedterminal.agent.v1.AttachRequest
-	14, // 18: tmuxtabbedterminal.agent.v1.AgentService.Watch:input_type -> tmuxtabbedterminal.agent.v1.WatchRequest
-	1,  // 19: tmuxtabbedterminal.agent.v1.AgentService.Hello:output_type -> tmuxtabbedterminal.agent.v1.HelloResponse
-	4,  // 20: tmuxtabbedterminal.agent.v1.AgentService.Run:output_type -> tmuxtabbedterminal.agent.v1.RunResponse
-	7,  // 21: tmuxtabbedterminal.agent.v1.AgentService.Stream:output_type -> tmuxtabbedterminal.agent.v1.StreamResponse
-	12, // 22: tmuxtabbedterminal.agent.v1.AgentService.Attach:output_type -> tmuxtabbedterminal.agent.v1.AttachResponse
-	15, // 23: tmuxtabbedterminal.agent.v1.AgentService.Watch:output_type -> tmuxtabbedterminal.agent.v1.WatchResponse
-	19, // [19:24] is the sub-list for method output_type
-	14, // [14:19] is the sub-list for method input_type
-	14, // [14:14] is the sub-list for extension type_name
-	14, // [14:14] is the sub-list for extension extendee
-	0,  // [0:14] is the sub-list for field type_name
+	10, // 3: tmuxtabbedterminal.agent.v1.StreamResponse.exit:type_name -> tmuxtabbedterminal.agent.v1.StreamExit
+	2,  // 4: tmuxtabbedterminal.agent.v1.PipeRequest.command:type_name -> tmuxtabbedterminal.agent.v1.Command
+	10, // 5: tmuxtabbedterminal.agent.v1.PipeResponse.exit:type_name -> tmuxtabbedterminal.agent.v1.StreamExit
+	5,  // 6: tmuxtabbedterminal.agent.v1.StreamExit.exit:type_name -> tmuxtabbedterminal.agent.v1.Exit
+	12, // 7: tmuxtabbedterminal.agent.v1.AttachRequest.start:type_name -> tmuxtabbedterminal.agent.v1.AttachStart
+	13, // 8: tmuxtabbedterminal.agent.v1.AttachRequest.resize:type_name -> tmuxtabbedterminal.agent.v1.TerminalSize
+	2,  // 9: tmuxtabbedterminal.agent.v1.AttachStart.command:type_name -> tmuxtabbedterminal.agent.v1.Command
+	13, // 10: tmuxtabbedterminal.agent.v1.AttachStart.size:type_name -> tmuxtabbedterminal.agent.v1.TerminalSize
+	20, // 11: tmuxtabbedterminal.agent.v1.AttachStart.env:type_name -> tmuxtabbedterminal.agent.v1.AttachStart.EnvEntry
+	15, // 12: tmuxtabbedterminal.agent.v1.AttachResponse.started:type_name -> tmuxtabbedterminal.agent.v1.AttachStarted
+	5,  // 13: tmuxtabbedterminal.agent.v1.AttachResponse.exit:type_name -> tmuxtabbedterminal.agent.v1.Exit
+	18, // 14: tmuxtabbedterminal.agent.v1.WatchResponse.started:type_name -> tmuxtabbedterminal.agent.v1.WatchStarted
+	19, // 15: tmuxtabbedterminal.agent.v1.WatchResponse.changed:type_name -> tmuxtabbedterminal.agent.v1.WatchChanged
+	0,  // 16: tmuxtabbedterminal.agent.v1.AgentService.Hello:input_type -> tmuxtabbedterminal.agent.v1.HelloRequest
+	3,  // 17: tmuxtabbedterminal.agent.v1.AgentService.Run:input_type -> tmuxtabbedterminal.agent.v1.RunRequest
+	6,  // 18: tmuxtabbedterminal.agent.v1.AgentService.Stream:input_type -> tmuxtabbedterminal.agent.v1.StreamRequest
+	11, // 19: tmuxtabbedterminal.agent.v1.AgentService.Attach:input_type -> tmuxtabbedterminal.agent.v1.AttachRequest
+	16, // 20: tmuxtabbedterminal.agent.v1.AgentService.Watch:input_type -> tmuxtabbedterminal.agent.v1.WatchRequest
+	8,  // 21: tmuxtabbedterminal.agent.v1.AgentService.Pipe:input_type -> tmuxtabbedterminal.agent.v1.PipeRequest
+	1,  // 22: tmuxtabbedterminal.agent.v1.AgentService.Hello:output_type -> tmuxtabbedterminal.agent.v1.HelloResponse
+	4,  // 23: tmuxtabbedterminal.agent.v1.AgentService.Run:output_type -> tmuxtabbedterminal.agent.v1.RunResponse
+	7,  // 24: tmuxtabbedterminal.agent.v1.AgentService.Stream:output_type -> tmuxtabbedterminal.agent.v1.StreamResponse
+	14, // 25: tmuxtabbedterminal.agent.v1.AgentService.Attach:output_type -> tmuxtabbedterminal.agent.v1.AttachResponse
+	17, // 26: tmuxtabbedterminal.agent.v1.AgentService.Watch:output_type -> tmuxtabbedterminal.agent.v1.WatchResponse
+	9,  // 27: tmuxtabbedterminal.agent.v1.AgentService.Pipe:output_type -> tmuxtabbedterminal.agent.v1.PipeResponse
+	22, // [22:28] is the sub-list for method output_type
+	16, // [16:22] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_tmuxtabbedterminal_agent_v1_agent_proto_init() }
@@ -1243,17 +1425,25 @@ func file_tmuxtabbedterminal_agent_v1_agent_proto_init() {
 		(*StreamResponse_Stdout)(nil),
 		(*StreamResponse_Exit)(nil),
 	}
+	file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[8].OneofWrappers = []any{
+		(*PipeRequest_Command)(nil),
+		(*PipeRequest_Stdin)(nil),
+	}
 	file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[9].OneofWrappers = []any{
+		(*PipeResponse_Stdout)(nil),
+		(*PipeResponse_Exit)(nil),
+	}
+	file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[11].OneofWrappers = []any{
 		(*AttachRequest_Start)(nil),
 		(*AttachRequest_Input)(nil),
 		(*AttachRequest_Resize)(nil),
 	}
-	file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[12].OneofWrappers = []any{
+	file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[14].OneofWrappers = []any{
 		(*AttachResponse_Started)(nil),
 		(*AttachResponse_Output)(nil),
 		(*AttachResponse_Exit)(nil),
 	}
-	file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[15].OneofWrappers = []any{
+	file_tmuxtabbedterminal_agent_v1_agent_proto_msgTypes[17].OneofWrappers = []any{
 		(*WatchResponse_Started)(nil),
 		(*WatchResponse_Changed)(nil),
 	}
@@ -1263,7 +1453,7 @@ func file_tmuxtabbedterminal_agent_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_tmuxtabbedterminal_agent_v1_agent_proto_rawDesc), len(file_tmuxtabbedterminal_agent_v1_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

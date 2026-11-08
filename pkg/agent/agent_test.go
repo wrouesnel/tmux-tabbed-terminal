@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -145,6 +146,37 @@ func TestStream(t *testing.T) {
 	}
 	if time.Since(began) > 5*time.Second {
 		t.Error("cancelling didn't stop the stream")
+	}
+}
+
+func TestPipe(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the agent runs on Unix hosts")
+	}
+	c := startPair(t)
+	ctx := context.Background()
+	// More than fits in the pipes on the way, so the input has to keep flowing.
+	in := bytes.Repeat([]byte("0123456789"), 500000)
+	var out bytes.Buffer
+	if err := c.Pipe(ctx, bytes.NewReader(in), &out, []string{"wc", "-c"}); err != nil ||
+		strings.TrimSpace(out.String()) != "5000000" {
+		t.Errorf("pipe: %q, %v", out.String(), err)
+	}
+	out.Reset()
+	if err := c.Pipe(ctx, strings.NewReader("hello"), &out, []string{"cat"}); err != nil || out.String() != "hello" {
+		t.Errorf("cat: %q, %v", out.String(), err)
+	}
+	// A program which ends without reading its input still says how it ended.
+	var exitErr *ExitError
+	err := c.Pipe(ctx, bytes.NewReader(in), io.Discard, []string{"sh", "-c", "echo nope >&2; exit 3"})
+	if !errors.As(err, &exitErr) || exitErr.Stderr != "nope\n" {
+		t.Errorf("failing pipe: %v", err)
+	}
+	// An input which fails part way kills the program rather than ending its input.
+	err = c.Pipe(ctx, io.MultiReader(strings.NewReader("part"), iotest.ErrReader(errors.New("unreadable"))),
+		&out, []string{"sh", "-c", "cat >/dev/null; echo finished"})
+	if err == nil || strings.Contains(out.String(), "finished") {
+		t.Errorf("a failed input ended normally: %v", err)
 	}
 }
 

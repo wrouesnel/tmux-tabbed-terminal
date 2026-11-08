@@ -96,6 +96,50 @@ func (s *server) Stream(req *agentpb.StreamRequest, stream grpc.ServerStreamingS
 	if err != nil {
 		return err
 	}
+	return streamOutput(cmd, func(stdout []byte) error {
+		return stream.Send(&agentpb.StreamResponse{Event: &agentpb.StreamResponse_Stdout{Stdout: stdout}})
+	}, func(exit *agentpb.StreamExit) error {
+		return stream.Send(&agentpb.StreamResponse{Event: &agentpb.StreamResponse_Exit{Exit: exit}})
+	})
+}
+
+func (s *server) Pipe(stream grpc.BidiStreamingServer[agentpb.PipeRequest, agentpb.PipeResponse]) error {
+	first, err := stream.Recv()
+	if err != nil {
+		return err
+	}
+	cmd, err := command(stream.Context(), first.GetCommand())
+	if err != nil {
+		return err
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return status.Error(codes.Internal, err.Error())
+	}
+	go func() {
+		defer stdin.Close()
+		for {
+			req, err := stream.Recv()
+			if err != nil {
+				// io.EOF is the end of the input. Anything else cancels the call, which
+				// kills the program.
+				return
+			}
+			if _, err := stdin.Write(req.GetStdin()); err != nil {
+				return
+			}
+		}
+	}()
+	return streamOutput(cmd, func(stdout []byte) error {
+		return stream.Send(&agentpb.PipeResponse{Event: &agentpb.PipeResponse_Stdout{Stdout: stdout}})
+	}, func(exit *agentpb.StreamExit) error {
+		return stream.Send(&agentpb.PipeResponse{Event: &agentpb.PipeResponse_Exit{Exit: exit}})
+	})
+}
+
+// streamOutput starts cmd, sends its standard output as it's written, and then how it
+// exited, with sendStdout and sendExit.
+func streamOutput(cmd *exec.Cmd, sendStdout func([]byte) error, sendExit func(*agentpb.StreamExit) error) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return status.Error(codes.Internal, err.Error())
@@ -110,7 +154,7 @@ func (s *server) Stream(req *agentpb.StreamRequest, stream grpc.ServerStreamingS
 		n, rerr := stdout.Read(buf)
 		if n > 0 {
 			chunk := bytes.Clone(buf[:n])
-			if err := stream.Send(&agentpb.StreamResponse{Event: &agentpb.StreamResponse_Stdout{Stdout: chunk}}); err != nil {
+			if err := sendStdout(chunk); err != nil {
 				_ = cmd.Process.Kill()
 				_ = cmd.Wait()
 				return err
@@ -124,9 +168,7 @@ func (s *server) Stream(req *agentpb.StreamRequest, stream grpc.ServerStreamingS
 	if err != nil {
 		return err
 	}
-	return stream.Send(&agentpb.StreamResponse{Event: &agentpb.StreamResponse_Exit{
-		Exit: &agentpb.StreamExit{Exit: exit, Stderr: stderr.Bytes()},
-	}})
+	return sendExit(&agentpb.StreamExit{Exit: exit, Stderr: stderr.Bytes()})
 }
 
 // runExit turns what running a program returned into how it exited, or the error of a

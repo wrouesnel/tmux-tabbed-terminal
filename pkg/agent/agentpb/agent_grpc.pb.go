@@ -29,6 +29,7 @@ const (
 	AgentService_Stream_FullMethodName = "/tmuxtabbedterminal.agent.v1.AgentService/Stream"
 	AgentService_Attach_FullMethodName = "/tmuxtabbedterminal.agent.v1.AgentService/Attach"
 	AgentService_Watch_FullMethodName  = "/tmuxtabbedterminal.agent.v1.AgentService/Watch"
+	AgentService_Pipe_FullMethodName   = "/tmuxtabbedterminal.agent.v1.AgentService/Pipe"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -53,6 +54,10 @@ type AgentServiceClient interface {
 	// removed. A file replaced by renaming another over it, as editors save, is still
 	// watched, and so is one that doesn't exist yet, if its directory does.
 	Watch(ctx context.Context, in *WatchRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[WatchResponse], error)
+	// Pipe runs a program as Stream does, with what the client sends as its standard input,
+	// as when uploading a file. The first request starts it; later ones carry its input,
+	// which ends when the client closes its side.
+	Pipe(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[PipeRequest, PipeResponse], error)
 }
 
 type agentServiceClient struct {
@@ -134,6 +139,19 @@ func (c *agentServiceClient) Watch(ctx context.Context, in *WatchRequest, opts .
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_WatchClient = grpc.ServerStreamingClient[WatchResponse]
 
+func (c *agentServiceClient) Pipe(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[PipeRequest, PipeResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[3], AgentService_Pipe_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[PipeRequest, PipeResponse]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_PipeClient = grpc.BidiStreamingClient[PipeRequest, PipeResponse]
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -156,6 +174,10 @@ type AgentServiceServer interface {
 	// removed. A file replaced by renaming another over it, as editors save, is still
 	// watched, and so is one that doesn't exist yet, if its directory does.
 	Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error
+	// Pipe runs a program as Stream does, with what the client sends as its standard input,
+	// as when uploading a file. The first request starts it; later ones carry its input,
+	// which ends when the client closes its side.
+	Pipe(grpc.BidiStreamingServer[PipeRequest, PipeResponse]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -180,6 +202,9 @@ func (UnimplementedAgentServiceServer) Attach(grpc.BidiStreamingServer[AttachReq
 }
 func (UnimplementedAgentServiceServer) Watch(*WatchRequest, grpc.ServerStreamingServer[WatchResponse]) error {
 	return status.Error(codes.Unimplemented, "method Watch not implemented")
+}
+func (UnimplementedAgentServiceServer) Pipe(grpc.BidiStreamingServer[PipeRequest, PipeResponse]) error {
+	return status.Error(codes.Unimplemented, "method Pipe not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -267,6 +292,13 @@ func _AgentService_Watch_Handler(srv interface{}, stream grpc.ServerStream) erro
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_WatchServer = grpc.ServerStreamingServer[WatchResponse]
 
+func _AgentService_Pipe_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(AgentServiceServer).Pipe(&grpc.GenericServerStream[PipeRequest, PipeResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_PipeServer = grpc.BidiStreamingServer[PipeRequest, PipeResponse]
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -299,6 +331,12 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			StreamName:    "Watch",
 			Handler:       _AgentService_Watch_Handler,
 			ServerStreams: true,
+		},
+		{
+			StreamName:    "Pipe",
+			Handler:       _AgentService_Pipe_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
 		},
 	},
 	Metadata: "tmuxtabbedterminal/agent/v1/agent.proto",

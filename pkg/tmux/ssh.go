@@ -393,6 +393,70 @@ func (s *SSH) Stream(ctx context.Context, w io.Writer, remote ...string) error {
 	return nil
 }
 
+// Pipe is Stream, with r as the command's standard input.
+func (s *SSH) Pipe(ctx context.Context, r io.Reader, w io.Writer, remote ...string) error {
+	ctx, cancel, err := s.connect(ctx)
+	defer cancel()
+	if err != nil {
+		return err
+	}
+	if root, c := s.agentClient(); c != nil {
+		err := c.Pipe(ctx, r, w, s.innerArgv(false, false, remote))
+		var exitErr *agent.ExitError
+		if errors.As(err, &exitErr) {
+			return errors.Wrapf(err, "%s", strings.TrimSpace(exitErr.Stderr))
+		}
+		if err != nil && ctx.Err() == nil {
+			root.agentFailed(c, err)
+		}
+		return err
+	}
+	argv := s.argv(false, remote)
+	cmd := Command(ctx, argv)
+	stderr := new(strings.Builder)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = r, w, stderr
+	if err := cmd.Run(); err != nil {
+		s.resetMasters()
+		return errors.Wrapf(err, "%s", strings.TrimSpace(stderr.String()))
+	}
+	return nil
+}
+
+// uploadScript saves its standard input in the directory its first argument names, under
+// the name its second gives, or, if a file has that name, the name with -2, -3 and so on
+// before its extension, and writes the path it saved to. The file is written under a
+// hidden name first, so nothing sees half of it. A directory starting with ~/ is in the
+// home directory.
+const uploadScript = `case $1 in "~") set -- "$HOME" "$2" ;; "~/"*) set -- "$HOME/${1#"~/"}" "$2" ;; esac
+cd -- "$1" || exit 1
+tmp=$(mktemp "./.$2.XXXXXX") || exit 1
+trap 'rm -f -- "$tmp"' EXIT
+cat >"$tmp" || exit 1
+chmod "$(printf '%o' $((0666 & ~$(umask))))" "$tmp" || exit 1
+case $2 in ?*.*) stem=${2%.*} ext=.${2##*.} ;; *) stem=$2 ext= ;; esac
+dest=$2 i=2
+while [ -e "$dest" ] || [ -L "$dest" ]; do dest=$stem-$i$ext i=$((i + 1)); done
+mv -- "$tmp" "$dest" || exit 1
+printf '%s/%s\n' "$(pwd)" "$dest"`
+
+// Upload saves what r reads as a new file in dir on the destination, named name, or, if a
+// file there has that name, name with -2, -3 and so on before its extension. It returns
+// the new file's path. A dir starting with ~/ is in the home directory.
+func (s *SSH) Upload(ctx context.Context, r io.Reader, dir, name string) (string, error) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\n") {
+		return "", errors.Errorf("%q can't be a file name", name)
+	}
+	var out strings.Builder
+	if err := s.Pipe(ctx, r, &out, "sh", "-c", uploadScript, "sh", dir, name); err != nil {
+		return "", err
+	}
+	saved := strings.TrimSuffix(out.String(), "\n")
+	if saved == "" {
+		return "", errors.New("the host didn't say where it saved the file")
+	}
+	return saved, nil
+}
+
 // fileScript writes the size of the file named by its first argument, on a line of its
 // own, and then the file, to standard output. It refuses anything that isn't a regular
 // file, such as a directory. A name starting with ~/ is in the home directory.

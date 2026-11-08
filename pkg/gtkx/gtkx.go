@@ -8,6 +8,7 @@ package gtkx
 
 static GdkDragContext *to_drag_context(void *p) { return GDK_DRAG_CONTEXT(p); }
 static GtkWindow *to_window(void *p) { return GTK_WINDOW(p); }
+static GtkWidget *to_widget(void *p) { return GTK_WIDGET(p); }
 
 // ttt_release_name gives up the application's D-Bus name, waiting until the bus has, so
 // that a process started next can take it. It does nothing without a session bus.
@@ -120,6 +121,27 @@ func DragSetIconName(ctx DragContext, name string) {
 	cname := C.CString(name)
 	defer C.free(unsafe.Pointer(cname))
 	C.gtk_drag_set_icon_name(dragContext(ctx), cname, 0, 0)
+}
+
+// DragDestTarget returns the first of a drag destination's targets which the drag offers,
+// or "" if it offers none of them.
+func DragDestTarget(widget *gtk.Widget, ctx DragContext) string {
+	atom := C.gtk_drag_dest_find_target(C.to_widget(unsafe.Pointer(widget.GObject)), dragContext(ctx), nil)
+	if atom == nil {
+		return ""
+	}
+	name := C.gdk_atom_name(atom)
+	defer C.g_free(C.gpointer(name))
+	return C.GoString(name)
+}
+
+// DragGetData asks for a drag's data as target, which arrives in the widget's
+// drag-data-received signal.
+func DragGetData(widget *gtk.Widget, ctx DragContext, target string, time uint) {
+	ctarget := C.CString(target)
+	defer C.free(unsafe.Pointer(ctarget))
+	C.gtk_drag_get_data(C.to_widget(unsafe.Pointer(widget.GObject)), dragContext(ctx),
+		C.gdk_atom_intern(ctarget, C.FALSE), C.guint32(time))
 }
 
 // ShowURI opens a URI, such as a file:// folder, in the user's default application, as a

@@ -176,8 +176,10 @@ type downloadBar struct {
 	w     *Window
 	bar   *gtk.InfoBar
 	label *gtk.Label
-	path  string
-	timer glib.SourceHandle
+	// buttons open the file, and show its folder: a download's, not an upload's.
+	buttons []*gtk.Button
+	path    string
+	timer   glib.SourceHandle
 }
 
 func newDownloadBar(w *Window) *downloadBar {
@@ -185,8 +187,14 @@ func newDownloadBar(w *Window) *downloadBar {
 	d.bar, _ = gtk.InfoBarNew()
 	d.bar.SetMessageType(gtk.MESSAGE_INFO)
 	d.bar.SetShowCloseButton(true)
-	d.bar.AddButton("_Open", responseOpen)
-	d.bar.AddButton("Show in _Folder", responseShowFolder)
+	for _, b := range []struct {
+		label    string
+		response gtk.ResponseType
+	}{{"_Open", responseOpen}, {"Show in _Folder", responseShowFolder}} {
+		button, _ := gtk.ButtonNewWithMnemonic(b.label)
+		d.bar.AddActionWidget(button, b.response)
+		d.buttons = append(d.buttons, button)
+	}
 	d.label, _ = gtk.LabelNew("")
 	d.label.SetEllipsize(pango.ELLIPSIZE_END)
 	d.label.SetXAlign(0)
@@ -215,8 +223,17 @@ func newDownloadBar(w *Window) *downloadBar {
 // show tells of a file just downloaded to path.
 func (d *downloadBar) show(path string) {
 	d.path = path
-	d.label.SetText("Downloaded " + filepath.Base(path) + " to " + filepath.Dir(path))
-	d.label.SetTooltipText(path)
+	d.showMessage("Downloaded "+filepath.Base(path)+" to "+filepath.Dir(path), path, true)
+}
+
+// showMessage shows text, with tip as its tooltip, and the buttons for a download if
+// withButtons is set.
+func (d *downloadBar) showMessage(text, tip string, withButtons bool) {
+	d.label.SetText(text)
+	d.label.SetTooltipText(tip)
+	for _, b := range d.buttons {
+		b.SetVisible(withButtons)
+	}
 	d.label.Show()
 	d.bar.Show()
 	if d.timer != 0 {

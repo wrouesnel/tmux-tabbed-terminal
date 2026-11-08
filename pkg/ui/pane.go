@@ -233,18 +233,31 @@ func newPane(w *Window) *Pane {
 	p.dropZone.SetNoShowAll(true)
 	overlay.AddOverlay(p.dropZone)
 	overlay.SetOverlayPassThrough(p.dropZone, true)
-	overlay.DragDestSet(0, dragTargets(), dropAction)
+	// So do files dragged from a file manager, which are uploaded to the pane's directory.
+	overlay.DragDestSet(0, paneDropTargets(), dropAction)
+	takesFiles := func(ctx interface{}) bool {
+		return w.app.dragKey == "" && p.takesUploads() && gtkx.DragDestTarget(&overlay.Widget, ctx) == uriListTarget
+	}
 	overlay.Connect("drag-motion", func(_ interface{}, ctx interface{}, x, y int, time uint) bool {
-		if w.app.dragKey == "" {
+		switch {
+		case w.app.dragKey != "":
+			p.showDropZone(zoneAt(x, y, overlay.GetAllocatedWidth(), overlay.GetAllocatedHeight()))
+		case takesFiles(ctx):
+			p.showDropZone(zoneCenter)
+		default:
 			gtkx.DragStatus(ctx, 0, time)
 			return false
 		}
-		p.showDropZone(zoneAt(x, y, overlay.GetAllocatedWidth(), overlay.GetAllocatedHeight()))
 		gtkx.DragStatus(ctx, dropAction, time)
 		return true
 	})
 	overlay.Connect("drag-leave", func() { p.hideDropZone() })
 	overlay.Connect("drag-drop", func(_ interface{}, ctx interface{}, x, y int, time uint) bool {
+		if takesFiles(ctx) {
+			// The files' names come in drag-data-received.
+			gtkx.DragGetData(&overlay.Widget, ctx, uriListTarget, time)
+			return true
+		}
 		key := w.app.dragKey
 		zone := zoneAt(x, y, overlay.GetAllocatedWidth(), overlay.GetAllocatedHeight())
 		gtkx.DragFinish(ctx, key != "", time)
@@ -254,6 +267,20 @@ func newPane(w *Window) *Pane {
 			glib.IdleAdd(func() { w.dropSession(p, key, zone) })
 		}
 		return true
+	})
+	overlay.Connect("drag-data-received", func(_ interface{}, ctx interface{}, x, y int, data interface{},
+		_ uint, time uint,
+	) {
+		var files []string
+		if sel, ok := data.(*gtk.SelectionData); ok && sel != nil {
+			// Not sel.GetURIs(), which crashes in gotk3.
+			files = localFiles(parseURIList(sel.GetData()))
+		}
+		gtkx.DragFinish(ctx, len(files) > 0, time)
+		p.hideDropZone()
+		if len(files) > 0 {
+			glib.IdleAdd(func() { p.uploadFiles(files, x, y) })
+		}
 	})
 
 	// The scrollbar follows tmux's history rather than the terminal's, which tmux

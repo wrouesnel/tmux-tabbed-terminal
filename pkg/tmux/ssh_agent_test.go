@@ -87,6 +87,24 @@ func TestRemoteThroughAgent(t *testing.T) {
 	if err != nil || got != "a b $HOME\n" {
 		t.Fatalf("Output through hops: %q, %v", got, err)
 	}
+	// Uploads go through the agent too, and through it to the hosts beyond.
+	updir := filepath.Join(t.TempDir(), "drop here")
+	if err := os.Mkdir(updir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for i, route := range []*tmux.SSH{ssh, third} {
+		saved, err := route.Upload(ctx, bytes.NewReader(content), updir, "it's a $file.bin")
+		want := filepath.Join(updir, "it's a $file.bin")
+		if i > 0 {
+			want = filepath.Join(updir, "it's a $file-2.bin")
+		}
+		if err != nil || saved != want {
+			t.Fatalf("Upload via %s: %q, %v", route.Name(), saved, err)
+		}
+		if got, _ := os.ReadFile(saved); !bytes.Equal(got, content) {
+			t.Errorf("uploaded %q", got)
+		}
+	}
 	if err := remote.KillSession(ctx, id); err != nil {
 		t.Fatalf("KillSession: %v", err)
 	}

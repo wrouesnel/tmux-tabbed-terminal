@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"path"
 	"path/filepath"
 	"sync/atomic"
 	"time"
@@ -29,11 +30,13 @@ const (
 	downloadCancelled
 )
 
-// download is a file being copied, or once copied, from another host.
+// download is a file being copied, or once copied, from another host, or, if upload is
+// set, to one.
 type download struct {
-	name string
-	host string
-	// path is where the file is saved once it's done.
+	name   string
+	host   string
+	upload bool
+	// path is where the file is saved once it's done: on the host, for an upload.
 	path string
 	// total is the file's size, or -1 until it's known, and received how much of it has
 	// arrived. The copy's goroutine sets them.
@@ -70,6 +73,9 @@ func (d *download) fraction() float64 {
 func (d *download) progressText() string {
 	switch d.state {
 	case downloadDone:
+		if d.upload {
+			return formatSize(d.received.Load()) + " · to " + path.Dir(d.path)
+		}
 		return formatSize(d.received.Load()) + " · in " + tildePath(filepath.Dir(d.path))
 	case downloadFailed:
 		return "Failed: " + d.err.Error()
@@ -200,6 +206,7 @@ type downloadRow struct {
 	cancel *gtk.Button
 	open   *gtk.Button
 	folder *gtk.Button
+	copy   *gtk.Button
 	remove *gtk.Button
 }
 
@@ -229,7 +236,7 @@ func middleEllipsis(name string, n int) string {
 func newDownloadsView(w *Window) *downloadsView {
 	v := &downloadsView{w: w, entries: map[*download]*downloadRow{}}
 	v.button, _ = gtk.MenuButtonNew()
-	v.button.SetTooltipText("Downloads")
+	v.button.SetTooltipText("Transfers")
 	v.button.SetNoShowAll(true)
 	icon, _ := gtk.ImageNewFromIconName(firstIcon("folder-download-symbolic", "document-save-symbolic"),
 		gtk.ICON_SIZE_BUTTON)
@@ -252,7 +259,7 @@ func newDownloadsView(w *Window) *downloadsView {
 	content.SetMarginEnd(prefsSpacing)
 	content.SetMarginTop(prefsSpacing)
 	content.SetMarginBottom(prefsSpacing)
-	heading, _ := gtk.LabelNew("Downloads")
+	heading, _ := gtk.LabelNew("Transfers")
 	heading.SetXAlign(0)
 	addClass(heading, "ttt-host-name")
 	content.PackStart(heading, false, false, 0)
@@ -307,7 +314,11 @@ func (v *downloadsView) newRow(d *download) *downloadRow {
 	name.SetEllipsize(pango.ELLIPSIZE_MIDDLE)
 	// Ellipsized, a label asks for no width at all: this keeps most names whole.
 	name.SetWidthChars(downloadNameChars)
-	name.SetTooltipText(d.name + " from " + d.host)
+	if d.upload {
+		name.SetTooltipText(d.name + " to " + d.host)
+	} else {
+		name.SetTooltipText(d.name + " from " + d.host)
+	}
 	addClass(name, "ttt-session-name")
 	host, _ := gtk.LabelNew(d.host)
 	addClass(host, "dim-label")
@@ -335,6 +346,7 @@ func (v *downloadsView) newRow(d *download) *downloadRow {
 			v.w.showError("Could not open the folder", err.Error())
 		}
 	})
+	r.copy = button("edit-copy-symbolic", "Copy Its Path", func() { setClipboard(shellQuote(d.path)) })
 	// Open is a word, not an icon: themes have no icon for it which a folder's isn't
 	// mistaken for.
 	r.open, _ = gtk.ButtonNewWithLabel("Open")
@@ -371,8 +383,9 @@ func (r *downloadRow) update(d *download) {
 	r.status.SetText(d.progressText())
 	r.status.SetTooltipText(d.progressText())
 	r.cancel.SetVisible(running)
-	r.open.SetVisible(d.state == downloadDone)
-	r.folder.SetVisible(d.state == downloadDone)
+	r.open.SetVisible(d.state == downloadDone && !d.upload)
+	r.folder.SetVisible(d.state == downloadDone && !d.upload)
+	r.copy.SetVisible(d.state == downloadDone && d.upload)
 	r.remove.SetVisible(!running)
 }
 
@@ -384,7 +397,7 @@ func (v *downloadsView) refresh() {
 	top := v.w.app.downloadList.top()
 	if top == nil {
 		v.bar.Hide()
-		v.button.SetTooltipText("Downloads")
+		v.button.SetTooltipText("Transfers")
 		return
 	}
 	name := middleEllipsis(top.name, downloadBarChars)
@@ -396,6 +409,10 @@ func (v *downloadsView) refresh() {
 		v.bar.Pulse()
 	}
 	v.bar.SetText(text)
-	v.button.SetTooltipText("Downloading " + top.name + ": " + top.progressText())
+	verb := "Downloading "
+	if top.upload {
+		verb = "Uploading "
+	}
+	v.button.SetTooltipText(verb + top.name + ": " + top.progressText())
 	v.bar.Show()
 }

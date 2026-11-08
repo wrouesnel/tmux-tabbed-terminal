@@ -63,6 +63,14 @@ or split the window to watch several sessions side by side.
   cancelled, and Open and Show in Folder for those done; Clear Finished empties the
   list. When a download is done, a notice at the bottom of the window offers to open the
   file or its folder too. Only files can be downloaded, not directories.
+* **Uploads.** Drag files from a file manager onto a pane to copy them into the working
+  directory of the program there, on the session's host: for a window tmux has split,
+  the tmux pane the files are dropped on. Their new paths go on the clipboard, quoted
+  for a shell, to paste into a command or to a coding agent. A file already there of the
+  same name is kept, and the new one gets a number before its extension, as
+  `notes-2.md`. Uploads go over the host's ssh connection, show their progress with the
+  downloads, and can be cancelled there; a finished one's Copy button copies its path
+  again. A session on this computer gets a copy of the file too.
 * **Image previews.** Rest the pointer on a link to an image file, local or on a remote
   host, and a preview of it pops up, scaled to fit 360×270 pixels. Move the pointer onto
   the preview and it grows, up to most of the window; click it to open the image in the
@@ -355,7 +363,7 @@ panes already attached to its sessions running.
 Windows' ssh can't share one connection between commands, so on Windows the application
 reaches a host through its agent, `ttt-agent`: a small static program it installs on the
 host, in `~/.cache/tmux-tabbed-terminal/agent/`, and runs over one ssh connection, which
-then carries everything: polling, previews, downloads, and the terminals of panes. It
+then carries everything: polling, previews, downloads, uploads, and the terminals of panes. It
 also watches previewed files, so they reload as soon as they change instead of being
 checked every two seconds. The
 first connection to a host uploads the agent for the host's platform, about 3 MB, over

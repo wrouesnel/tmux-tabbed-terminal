@@ -27,6 +27,10 @@ service AgentService {
   // removed. A file replaced by renaming another over it, as editors save, is still
   // watched, and so is one that doesn't exist yet, if its directory does.
   rpc Watch(WatchRequest) returns (stream WatchResponse);
+  // Pipe runs a program as Stream does, with what the client sends as its standard input,
+  // as when uploading a file. The first request starts it; later ones carry its input,
+  // which ends when the client closes its side.
+  rpc Pipe(stream PipeRequest) returns (stream PipeResponse);
 }
 
 message HelloRequest {
@@ -79,6 +83,23 @@ message StreamResponse {
     // Some of its standard output.
     bytes stdout = 1;
     // How it ended, with its standard error. This is the last response.
+    StreamExit exit = 2;
+  }
+}
+
+message PipeRequest {
+  oneof event {
+    // Start the program: the first request, and only the first.
+    Command command = 1;
+    // Some of its standard input.
+    bytes stdin = 2;
+  }
+}
+
+// PipeResponse is as StreamResponse.
+message PipeResponse {
+  oneof event {
+    bytes stdout = 1;
     StreamExit exit = 2;
   }
 }
