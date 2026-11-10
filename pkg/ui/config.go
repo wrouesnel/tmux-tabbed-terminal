@@ -115,8 +115,8 @@ type ClipboardConfig struct {
 
 // LinksConfig sets what links in terminals do.
 type LinksConfig struct {
-	// ImagePreviews shows the image a link names, on this machine or a remote host, when
-	// the pointer rests on the link.
+	// ImagePreviews shows the image, or the start of the markdown or HTML file, a link
+	// names, on this machine or a remote host, when the pointer rests on the link.
 	ImagePreviews bool `yaml:"image-previews"`
 }
 

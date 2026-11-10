@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"bytes"
 	"context"
+	"html"
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,13 +20,17 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/markdown"
 )
 
 const (
-	// previewDelay is how long the pointer rests on a link before its image is shown.
+	// previewDelay is how long the pointer rests on a link before its preview is shown.
 	previewDelay = 400 * time.Millisecond
 	// previewMaxBytes is the biggest file previewed.
 	previewMaxBytes = 32 << 20
+	// previewTextBytes is how much of the start of a markdown or HTML file is read for
+	// its preview, which shows the start of it.
+	previewTextBytes = 64 << 10
 	// The largest a preview is shown, in pixels. Smaller images aren't enlarged.
 	previewWidth  = 360
 	previewHeight = 270
@@ -35,14 +42,16 @@ const (
 	previewGrace = 500 * time.Millisecond
 )
 
-// hoverPreview is the image preview shown for a link: the popover, and what's needed to
-// grow it or open the file.
+// hoverPreview is the preview shown for a link, of an image or the start of a markdown or
+// HTML file: the popover, and what's needed to grow it or open the file.
 type hoverPreview struct {
 	popover *gtk.Popover
-	image   *gtk.Image
-	link    link
-	data    []byte
-	grown   bool
+	// image is the image shown, or text, the window the text shows in.
+	image *gtk.Image
+	text  *gtk.ScrolledWindow
+	link  link
+	data  []byte
+	grown bool
 	// hideTimer hides it, once the pointer has been off the link and it for previewGrace.
 	hideTimer glib.SourceHandle
 }
@@ -112,8 +121,83 @@ func readHostFile(ctx context.Context, h *Host, name string) ([]byte, error) {
 	return []byte(out), nil
 }
 
-// onMotion follows the pointer over links, and previews the image a link names once the
-// pointer rests on it. In a split window, where the terminal only sees the row of a link
+// readHostFileStart reads up to n bytes from the start of a file on a session's host, as
+// readHostFile reads all of one.
+func readHostFileStart(ctx context.Context, h *Host, name string, n int) ([]byte, error) {
+	if h.client.SSH == nil {
+		f, err := os.Open(name)
+		if err != nil {
+			return nil, err
+		}
+		defer f.Close()
+		if info, err := f.Stat(); err != nil || !info.Mode().IsRegular() {
+			return nil, errors.Errorf("%s isn't a file", name)
+		}
+		return io.ReadAll(io.LimitReader(f, int64(n)))
+	}
+	name = strings.TrimPrefix(name, "~/")
+	out, err := h.client.SSH.Output(ctx, "head", "-c", strconv.Itoa(n), "--", name)
+	return []byte(out), err
+}
+
+// isHTMLPath reports whether a path names an HTML file, going by its extension.
+func isHTMLPath(p string) bool {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".html", ".htm", ".xhtml":
+		return true
+	}
+	return false
+}
+
+// wholeBlocks returns a markdown file read up to limit bytes. If it filled them, so may
+// have been cut off, it leaves out the last block, which may be cut short: it returns the
+// file up to its last blank line, if it has one.
+func wholeBlocks(data []byte, limit int) []byte {
+	if len(data) < limit {
+		return data
+	}
+	if i := bytes.LastIndex(data, []byte("\n\n")); i >= 0 {
+		return data[:i+1]
+	}
+	return data
+}
+
+//nolint:gochecknoglobals
+var (
+	// htmlHidden matches the parts of an HTML document that aren't shown as text.
+	htmlHidden = regexp.MustCompile(`(?is)<!--.*?(-->|$)|<(script|style|head|template|svg)\b.*?(</(script|style|head|template|svg)\s*>|$)`)
+	// htmlTitle matches an HTML document's title.
+	htmlTitle = regexp.MustCompile(`(?is)<title\b[^>]*>(.*?)</title`)
+	// htmlBreak matches the tags that start or end a block of text.
+	htmlBreak = regexp.MustCompile(`(?i)</?(p|div|br|h[1-6]|li|ul|ol|tr|table|section|article|header|footer|nav|main|aside|pre|blockquote|hr|dt|dd|figure|figcaption)\b[^>]*>`)
+	// htmlTag matches any other tag.
+	htmlTag = regexp.MustCompile(`(?s)<[^>]*(>|$)`)
+)
+
+// htmlText returns the text an HTML document shows, roughly: its title, then its text, a
+// line to each paragraph or other block.
+func htmlText(doc string) string {
+	var lines []string
+	if m := htmlTitle.FindStringSubmatch(doc); m != nil {
+		if title := strings.Join(strings.Fields(html.UnescapeString(htmlTag.ReplaceAllString(m[1], ""))), " "); title != "" {
+			lines = append(lines, title, "")
+		}
+	}
+	doc = htmlHidden.ReplaceAllString(doc, "")
+	doc = htmlBreak.ReplaceAllString(doc, "\n")
+	doc = html.UnescapeString(htmlTag.ReplaceAllString(doc, ""))
+	for line := range strings.Lines(doc) {
+		if line := strings.Join(strings.Fields(line), " "); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// onMotion follows the pointer over links, and previews the image, markdown or HTML file
+// a link names once the pointer rests on it. Clicking the preview opens the file, which
+// works with the mouse alone even where the program in the pane has the mouse's clicks,
+// such as a coding agent. In a split window, where the terminal only sees the row of a link
 // tmux wrapped that the pointer is on, if that, tmux is asked whenever the pointer rests,
 // and the preview stays while the pointer is on the link it found.
 func (p *Pane) onMotion(event *gdk.Event) {
@@ -154,8 +238,13 @@ func (p *Pane) onMotion(event *gdk.Event) {
 }
 
 // loadPreview reads and decodes the image a link names, if it names one, and shows it
-// by the point x, y of the terminal, unless the pointer has moved on by then.
+// by the point x, y of the terminal, unless the pointer has moved on by then. Of a
+// markdown or HTML file, it shows the start.
 func (p *Pane) loadPreview(l link, gen int, x, y float64) {
+	if l.file != "" && (isMarkdownPath(l.file) || isHTMLPath(l.file)) {
+		p.loadTextPreview(l, gen, x, y)
+		return
+	}
 	if l.file == "" || !isImagePath(l.file) {
 		return
 	}
@@ -200,28 +289,17 @@ func (p *Pane) showPreview(l link, data []byte, pb *gdk.Pixbuf, x, y float64) {
 		return
 	}
 	addClass(popover, "ttt-image-preview")
-	popover.SetModal(false)
 	// The image takes the pointer: GtkImage has no window of its own to get events.
 	events, _ := gtk.EventBoxNew()
 	events.Add(img)
 	events.SetTooltipText("Click to open " + path.Base(l.file) + " in the preview pane")
 	popover.Add(events)
-	rect := gdk.Rectangle{}
-	rect.SetX(int(x))
-	rect.SetY(int(y))
-	rect.SetWidth(1)
-	rect.SetHeight(1)
-	popover.SetPointingTo(rect)
-	popover.SetPosition(gtk.POS_BOTTOM)
+	p.pointPreview(popover, x, y)
 
 	hp := &hoverPreview{popover: popover, image: img, link: l, data: data}
+	p.followPreview(hp, &events.Widget)
 	events.Connect("enter-notify-event", func() bool {
-		p.keepPreview()
 		p.growPreview(hp)
-		return false
-	})
-	events.Connect("leave-notify-event", func() bool {
-		p.hidePreviewSoon()
 		return false
 	})
 	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
@@ -237,8 +315,118 @@ func (p *Pane) showPreview(l link, data []byte, pb *gdk.Pixbuf, x, y float64) {
 	p.preview = hp
 }
 
+// loadTextPreview reads the start of the markdown or HTML file a link names, and shows
+// it by the point x, y of the terminal, unless the pointer has moved on by then.
+func (p *Pane) loadTextPreview(l link, gen int, x, y float64) {
+	h, _ := p.win.app.lookup(p.SessionKey())
+	if h == nil {
+		return
+	}
+	runAsync(p.win.app, func(ctx context.Context) ([]byte, error) {
+		return readHostFileStart(ctx, h, l.file, previewTextBytes)
+	}, func(data []byte, err error) {
+		if p.closed || gen != p.hoverGen {
+			return
+		}
+		if err != nil {
+			p.win.app.log.Debug("No preview", zap.String("file", l.file), zap.Error(err))
+			return
+		}
+		p.showTextPreview(l, data, x, y)
+	})
+}
+
+// showTextPreview shows the start of a markdown or HTML file in a popover pointing at
+// x, y of the terminal, as showPreview shows an image: markdown formatted as the preview
+// pane formats it, and HTML as its text. A click opens the file: markdown in the preview
+// pane, and HTML as a double click on its link would.
+func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
+	popover, err := gtk.PopoverNew(p.term)
+	if err != nil {
+		return
+	}
+	var view *gtk.TextView
+	tip := "Click to open " + path.Base(l.file) + " in the preview pane"
+	if isMarkdownPath(l.file) {
+		md := newMdView(func(string) {}, func(_ string, then func(*gdk.Pixbuf)) { then(nil) })
+		md.show(markdown.Parse(wholeBlocks(data, previewTextBytes)))
+		view = md.view
+	} else {
+		view, _ = gtk.TextViewNew()
+		view.SetWrapMode(gtk.WRAP_WORD_CHAR)
+		for _, set := range []func(int){view.SetLeftMargin, view.SetRightMargin, view.SetTopMargin, view.SetBottomMargin} {
+			set(mdMargin)
+		}
+		buf, _ := view.GetBuffer()
+		buf.SetText(htmlText(string(data)))
+		tip = "Click to open " + path.Base(l.file)
+	}
+	view.SetEditable(false)
+	view.SetCursorVisible(false)
+	view.SetCanFocus(false)
+	scroll, _ := gtk.ScrolledWindowNew(nil, nil)
+	scroll.SetPolicy(gtk.POLICY_NEVER, gtk.POLICY_EXTERNAL)
+	scroll.SetSizeRequest(previewWidth, previewHeight)
+	scroll.Add(view)
+	addClass(popover, "ttt-text-preview")
+	// The box above the text takes the pointer, so a click opens the file rather than
+	// selecting text.
+	events, _ := gtk.EventBoxNew()
+	events.SetAboveChild(true)
+	events.Add(scroll)
+	events.SetTooltipText(tip)
+	popover.Add(events)
+	p.pointPreview(popover, x, y)
+
+	hp := &hoverPreview{popover: popover, text: scroll, link: l}
+	p.followPreview(hp, &events.Widget)
+	events.Connect("enter-notify-event", func() bool {
+		p.growPreview(hp)
+		return false
+	})
+	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY {
+			return false
+		}
+		p.hidePreview()
+		p.win.openLinkDefault(l)
+		return true
+	})
+	events.ShowAll()
+	popover.Show()
+	p.preview = hp
+}
+
+// pointPreview sets up a hover preview's popover to point at x, y of the terminal,
+// without taking the focus.
+func (p *Pane) pointPreview(popover *gtk.Popover, x, y float64) {
+	popover.SetModal(false)
+	rect := gdk.Rectangle{}
+	rect.SetX(int(x))
+	rect.SetY(int(y))
+	rect.SetWidth(1)
+	rect.SetHeight(1)
+	popover.SetPointingTo(rect)
+	popover.SetPosition(gtk.POS_BOTTOM)
+}
+
+// followPreview keeps a hover preview while the pointer is on its widget, and hides it
+// soon after the pointer leaves.
+func (p *Pane) followPreview(hp *hoverPreview, widget *gtk.Widget) {
+	widget.Connect("enter-notify-event", func() bool {
+		p.keepPreview()
+		return false
+	})
+	widget.Connect("leave-notify-event", func() bool {
+		if p.preview == hp {
+			p.hidePreviewSoon()
+		}
+		return false
+	})
+}
+
 // growPreview shows a preview larger, up to previewGrownShare of the window, once.
-// Images already shown whole stay as they are.
+// Images already shown whole stay as they are, and text shows more of the file.
 func (p *Pane) growPreview(hp *hoverPreview) {
 	if hp.grown {
 		return
@@ -247,6 +435,10 @@ func (p *Pane) growPreview(hp *hoverPreview) {
 	width := int(float64(p.win.window.GetAllocatedWidth()) * previewGrownShare)
 	height := int(float64(p.win.window.GetAllocatedHeight()) * previewGrownShare)
 	if width <= previewWidth && height <= previewHeight {
+		return
+	}
+	if hp.text != nil {
+		hp.text.SetSizeRequest(max(width, previewWidth), max(height, previewHeight))
 		return
 	}
 	runAsync(p.win.app, func(context.Context) (*gdk.Pixbuf, error) {

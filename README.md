@@ -71,13 +71,16 @@ or split the window to watch several sessions side by side.
   `notes-2.md`. Uploads go over the host's ssh connection, show their progress with the
   downloads, and can be cancelled there; a finished one's Copy button copies its path
   again. A session on this computer gets a copy of the file too.
-* **Image previews.** Rest the pointer on a link to an image file, local or on a remote
-  host, and a preview of it pops up, scaled to fit 360×270 pixels. Move the pointer onto
-  the preview and it grows, up to most of the window; click it to open the image in the
-  preview pane. Remote images are read over the host's ssh connection, and files over
-  32 MiB are skipped. Images on the web
-  aren't fetched. Turn previews off with `links.image-previews: false` in the
-  configuration file.
+* **Link previews.** Rest the pointer on a link to an image, a markdown file or an HTML
+  file, local or on a remote host, and a preview of it pops up in 360×270 pixels: the
+  image scaled to fit, or the start of the file, markdown formatted as in the preview
+  pane and HTML as its text. Move the pointer onto the preview and it grows, up to most of
+  the window; click it to open the file: an image or markdown in the preview pane, and
+  HTML as a double-click would. That works with the mouse alone even when the program in
+  the pane uses the mouse, such as a coding agent, which then has the right-click. Remote
+  files are read over the host's ssh connection; images over 32 MiB are skipped, and only
+  the first 64 KiB of a markdown or HTML file is read. Files on the web aren't fetched.
+  Turn previews off with `links.image-previews: false` in the configuration file.
 * **File previews.** Right-click a link to a markdown file or an image, local or on a
   remote host, and choose Preview in Split to show it in a pane beside the terminal, as
   the plans, reports and screenshots a coding agent writes. Markdown is formatted as

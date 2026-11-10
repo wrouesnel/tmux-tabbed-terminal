@@ -64,8 +64,9 @@ clipboard:
   from-tmux: true
 
 links:
-  # Show the image a link names, such as ![shot](img/a.png) in markdown, when the pointer
-  # rests on the link. Remote images are read over the host's ssh connection.
+  # Show the image a link names, such as ![shot](img/a.png) in markdown, or the start of
+  # the markdown or HTML file, when the pointer rests on the link. Clicking the preview
+  # opens the file. Remote files are read over the host's ssh connection.
   image-previews: true
 
 ssh:

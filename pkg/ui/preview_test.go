@@ -92,3 +92,65 @@ func TestReadRemoteImage(t *testing.T) {
 		t.Error("read a missing file")
 	}
 }
+
+// TestReadHostFileStart reads the start of files, here and through the ssh code path.
+func TestReadHostFileStart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake ssh is a shell script")
+	}
+	fake, err := filepath.Abs("../tmux/testdata/fake-ssh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	name := filepath.Join(dir, "it's a plan.md")
+	if err := os.WriteFile(name, []byte("# Plan\n\nmore"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, h := range []*Host{
+		{client: &tmux.Client{Binary: "tmux"}},
+		{client: &tmux.Client{
+			Binary: "tmux",
+			SSH:    &tmux.SSH{Destination: "test-host", Binary: fake, ControlDir: t.TempDir()},
+		}},
+	} {
+		if got, err := readHostFileStart(ctx, h, name, 6); err != nil || string(got) != "# Plan" {
+			t.Errorf("got %q, %v", got, err)
+		}
+		if _, err := readHostFileStart(ctx, h, filepath.Join(dir, "gone.md"), 6); err == nil {
+			t.Error("read a missing file")
+		}
+	}
+}
+
+func TestWholeBlocks(t *testing.T) {
+	for in, want := range map[string]string{
+		"# Plan\n\nOne paragraph.\n\nA paragraph cut": "# Plan\n\nOne paragraph.\n",
+		"no blank line, cut off or not":               "no blank line, cut off or not",
+	} {
+		if got := string(wholeBlocks([]byte(in), len(in))); got != want {
+			t.Errorf("wholeBlocks(%q) = %q, want %q", in, got, want)
+		}
+	}
+	// A file read whole keeps its last block.
+	for _, in := range []string{"# Plan\n\nThe end.", ""} {
+		if got := string(wholeBlocks([]byte(in), len(in)+1)); got != in {
+			t.Errorf("wholeBlocks(%q) = %q, want it whole", in, got)
+		}
+	}
+}
+
+func TestHTMLText(t *testing.T) {
+	doc := `<!DOCTYPE html><html><head><title>The  &amp; Report</title>
+<style>body { color: red }</style><script>var x = "<p>no</p>";</script></head>
+<body><h1>Results</h1><!-- hidden --><p>All <b>42</b> tests
+passed &lt;ok&gt;.</p><ul><li>one</li><li>two</li></ul><div>cut off <span`
+	want := "The & Report\n\nResults\nAll 42 tests\npassed <ok>.\none\ntwo\ncut off"
+	if got := htmlText(doc); got != want {
+		t.Errorf("htmlText = %q, want %q", got, want)
+	}
+	if !isHTMLPath("/a/Report.HTML") || isHTMLPath("/a/report.md") {
+		t.Error("isHTMLPath")
+	}
+}
