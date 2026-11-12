@@ -3,13 +3,19 @@ package ui
 import (
 	"fmt"
 	"html"
+	"math"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 	"github.com/gotk3/gotk3/pango"
+	mermaid "github.com/zkrebbekx/go-mermaid"
+	"github.com/zkrebbekx/go-mermaid/raster"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/markdown"
 )
 
@@ -206,7 +212,9 @@ func (v *mdView) block(b markdown.Block, last bool) {
 			tags = nil
 		}
 	case markdown.CodeBlock:
-		v.codeBlock(b.Code, b.Lang, indent)
+		if !strings.EqualFold(b.Lang, "mermaid") || !v.diagram(b.Code, indent) {
+			v.codeBlock(b.Code, b.Lang, indent)
+		}
 		tags = append(tags, "block")
 	case markdown.Rule:
 		v.rule(indent, space)
@@ -323,6 +331,86 @@ func (v *mdView) codeBlock(code, lang string, indent int) {
 	v.fits = append(v.fits, func(width int) {
 		label.SetSizeRequest(max(width-indent-2*mdCodePadding, 1), -1)
 	})
+}
+
+// diagram adds a Mermaid diagram, drawn as wide as it is, or as the text if that's
+// narrower, and again in the theme's colors when the theme changes between light and
+// dark. It reports whether it could draw it: if it can't, as for a kind of diagram that
+// isn't supported, its code shows instead.
+func (v *mdView) diagram(code string, indent int) bool {
+	svg, width, ok := mermaidSVG(code, v.dark)
+	if !ok {
+		return false
+	}
+	img, _ := gtk.ImageNew()
+	v.anchor(img)
+	shown := 0
+	draw := func() {
+		if v.width <= 0 {
+			return
+		}
+		w := min(int(width), max(v.width-indent, 1))
+		pb, err := drawSVG(svg, width, w)
+		if err != nil {
+			img.SetFromIconName("image-missing-symbolic", gtk.ICON_SIZE_DIALOG)
+			img.SetTooltipText("The diagram couldn't be drawn: " + err.Error())
+			return
+		}
+		shown = w
+		img.SetFromPixbuf(pb)
+	}
+	v.fits = append(v.fits, func(int) {
+		if min(int(width), max(v.width-indent, 1)) != shown {
+			draw()
+		}
+	})
+	v.codes = append(v.codes, func(dark bool) {
+		if s, w, ok := mermaidSVG(code, dark); ok {
+			svg, width = s, w
+			draw()
+		}
+	})
+	return true
+}
+
+// drawSVG draws an SVG document, width pixels wide as it is, w pixels wide. GTK draws
+// it, with librsvg, where it has its SVG loader; otherwise go-mermaid's own rasterizer
+// does, which draws text and arrows more roughly.
+func drawSVG(svg []byte, width float64, w int) (*gdk.Pixbuf, error) {
+	pb, err := gtkx.PixbufFit(svg, w, math.MaxInt16)
+	if err == nil {
+		return pb, nil
+	}
+	png, rerr := raster.RasterizeSVG(svg, float64(w)/width)
+	if rerr != nil {
+		return nil, err
+	}
+	return gtkx.PixbufFit(png, w, math.MaxInt16)
+}
+
+// mermaidSVGSize matches the width an SVG document gives itself.
+var mermaidSVGSize = regexp.MustCompile(`^<svg\b[^>]*\bwidth="([0-9.]+)"`) //nolint:gochecknoglobals
+
+// mermaidSVG draws a Mermaid diagram as SVG, on no background, in light or dark colors,
+// and returns it with its width in pixels.
+func mermaidSVG(code string, dark bool) ([]byte, float64, bool) {
+	theme := mermaid.Default
+	if dark {
+		theme = mermaid.Dark
+	}
+	svg, err := mermaid.Render(code, mermaid.WithTheme(theme), mermaid.WithTransparentBackground())
+	if err != nil {
+		return nil, 0, false
+	}
+	m := mermaidSVGSize.FindSubmatch(svg)
+	if m == nil {
+		return nil, 0, false
+	}
+	width, err := strconv.ParseFloat(string(m[1]), 64)
+	if err != nil || width < 1 {
+		return nil, 0, false
+	}
+	return svg, width, true
 }
 
 // image adds an image, loaded in the background. Until it's loaded, or if it can't be, it

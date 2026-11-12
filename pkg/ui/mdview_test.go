@@ -105,3 +105,21 @@ func TestSpansMarkup(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
+
+// TestMermaid draws a diagram, at a width, light and dark, and finds a kind that isn't
+// supported isn't drawn.
+func TestMermaid(t *testing.T) {
+	for _, dark := range []bool{false, true} {
+		svg, width, ok := mermaidSVG("flowchart LR\n  A[Start] --> B[End]\n", dark)
+		if !ok || width < 50 {
+			t.Fatalf("dark %v: %v, %v", dark, ok, width)
+		}
+		pb, err := drawSVG(svg, width, 40)
+		if err != nil || pb.GetWidth() != 40 {
+			t.Errorf("dark %v: drawn %v, %v", dark, pb, err)
+		}
+	}
+	if _, _, ok := mermaidSVG("zenuml\n  title x\n", false); ok {
+		t.Error("drew an unsupported diagram")
+	}
+}

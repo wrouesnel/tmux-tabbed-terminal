@@ -16,6 +16,7 @@ Rules-Requires-Root: no
 Package: tmux-tabbed-terminal
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, tmux (>= 2.7)
+Recommends: librsvg2-common
 Description: GNOME Terminal style terminal for switching between tmux sessions
  A terminal which looks like GNOME Terminal and lists the tmux sessions running
  for the user, on this machine and on other hosts over ssh, in a sidebar.

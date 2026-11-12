@@ -20,6 +20,7 @@ BuildRequires:  pkgconfig(gtk+-3.0)
 BuildRequires:  pkgconfig(vte-2.91)
 Requires:       tmux >= 2.7
 Requires:       hicolor-icon-theme
+Recommends:     librsvg2
 
 %description
 A terminal which looks like GNOME Terminal and lists the tmux sessions running for

@@ -87,8 +87,12 @@ or split the window to watch several sessions side by side.
 * **File previews.** Right-click a link to a markdown file or an image, local or on a
   remote host, and choose Preview in Split to show it in a pane beside the terminal, as
   the plans, reports and screenshots a coding agent writes. Markdown is formatted as
-  GitHub formats it: headings, lists and task lists, tables, code, quotes, links, and the
-  images it shows from the same host. An image is scaled to fit the pane. The preview
+  GitHub formats it: headings, lists and task lists, tables, code, quotes, links, the
+  images it shows from the same host, and [Mermaid](https://mermaid.js.org) diagrams,
+  drawn with [go-mermaid](https://github.com/zkrebbekx/go-mermaid) in the theme's light
+  or dark colors; a kind of diagram it doesn't support shows as code. Diagrams are
+  sharpest where GTK has librsvg's SVG loader (`librsvg2-common` on Debian and Ubuntu).
+  An image is scaled to fit the pane. The preview
   reloads as soon as the file changes, as when an agent rewrites its plan: a local file,
   or one on a host reached through the [agent](#the-agent), is watched, with inotify,
   kqueue or ReadDirectoryChangesW, and others are checked every two seconds. The next
