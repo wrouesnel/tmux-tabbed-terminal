@@ -52,6 +52,9 @@ type hoverPreview struct {
 	link  link
 	data  []byte
 	grown bool
+	// engaged is set once the pointer has been on it. It then stays, for reading, until
+	// a click or a key, or until the pointer rests on another link.
+	engaged bool
 	// hideTimer hides it, once the pointer has been off the link and it for previewGrace.
 	hideTimer glib.SourceHandle
 }
@@ -211,14 +214,23 @@ func (p *Pane) onMotion(event *gdk.Event) {
 		p.keepPreview()
 		return
 	}
-	// Off the link with its preview showing: the pointer may be on its way to it.
-	if p.preview != nil {
+	_, _, readLines := p.readsPaneLines(m)
+	switch {
+	case p.preview != nil && p.preview.engaged:
+		// It stays until another link's preview takes its place.
+		p.forgetHover()
+		if !matched && !readLines {
+			return
+		}
+	case p.preview != nil:
+		// Off the link with its preview showing: the pointer may be on its way to it.
 		p.hidePreviewSoon()
 		return
-	}
-	p.hidePreview()
-	if _, _, readLines := p.readsPaneLines(m); !matched && !readLines {
-		return
+	default:
+		p.hidePreview()
+		if !matched && !readLines {
+			return
+		}
 	}
 	p.hoverText = m.Text
 	gen := p.hoverGen
@@ -279,40 +291,12 @@ func (p *Pane) loadPreview(l link, gen int, x, y float64) {
 // take the focus, so typing still goes to the terminal. With the pointer on it, it grows,
 // and a click opens the file in the preview pane.
 func (p *Pane) showPreview(l link, data []byte, pb *gdk.Pixbuf, x, y float64) {
-	popover, err := gtk.PopoverNew(p.term)
-	if err != nil {
-		return
-	}
 	img, err := gtk.ImageNewFromPixbuf(pb)
 	if err != nil {
-		popover.Destroy()
 		return
 	}
-	addClass(popover, "ttt-image-preview")
-	// The image takes the pointer: GtkImage has no window of its own to get events.
-	events, _ := gtk.EventBoxNew()
-	events.Add(img)
-	events.SetTooltipText("Click to open " + path.Base(l.file) + " in the preview pane")
-	popover.Add(events)
-	p.pointPreview(popover, x, y)
-
-	hp := &hoverPreview{popover: popover, image: img, link: l, data: data}
-	p.followPreview(hp, &events.Widget)
-	events.Connect("enter-notify-event", func() bool {
-		p.growPreview(hp)
-		return false
-	})
-	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
-		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY {
-			return false
-		}
-		p.hidePreview()
-		p.win.previewFile(l.host, l.file)
-		return true
-	})
-	events.ShowAll()
-	popover.Show()
-	p.preview = hp
+	hp := &hoverPreview{image: img, link: l, data: data}
+	p.popPreview(hp, img, "Click to open it in the preview pane", func() { p.win.previewFile(l.host, l.file) }, x, y)
 }
 
 // loadTextPreview reads the start of the markdown or HTML file a link names, and shows
@@ -341,12 +325,8 @@ func (p *Pane) loadTextPreview(l link, gen int, x, y float64) {
 // pane formats it, and HTML as its text. A click opens the file: markdown in the preview
 // pane, and HTML as a double click on its link would.
 func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
-	popover, err := gtk.PopoverNew(p.term)
-	if err != nil {
-		return
-	}
 	var view *gtk.TextView
-	tip := "Click to open " + path.Base(l.file) + " in the preview pane"
+	caption := "Click to open it in the preview pane"
 	if isMarkdownPath(l.file) {
 		md := newMdView(func(string) {}, func(_ string, then func(*gdk.Pixbuf)) { then(nil) })
 		md.show(markdown.Parse(wholeBlocks(data, previewTextBytes)))
@@ -359,7 +339,7 @@ func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
 		}
 		buf, _ := view.GetBuffer()
 		buf.SetText(htmlText(string(data)))
-		tip = "Click to open " + path.Base(l.file)
+		caption = "Click to open it"
 	}
 	view.SetEditable(false)
 	view.SetCursorVisible(false)
@@ -368,38 +348,21 @@ func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
 	scroll.SetPolicy(gtk.POLICY_NEVER, gtk.POLICY_EXTERNAL)
 	scroll.SetSizeRequest(previewWidth, previewHeight)
 	scroll.Add(view)
-	addClass(popover, "ttt-text-preview")
-	// The box above the text takes the pointer, so a click opens the file rather than
-	// selecting text.
-	events, _ := gtk.EventBoxNew()
-	events.SetAboveChild(true)
-	events.Add(scroll)
-	events.SetTooltipText(tip)
-	popover.Add(events)
-	p.pointPreview(popover, x, y)
-
-	hp := &hoverPreview{popover: popover, text: scroll, link: l}
-	p.followPreview(hp, &events.Widget)
-	events.Connect("enter-notify-event", func() bool {
-		p.growPreview(hp)
-		return false
-	})
-	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
-		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY {
-			return false
-		}
-		p.hidePreview()
-		p.win.openLinkDefault(l)
-		return true
-	})
-	events.ShowAll()
-	popover.Show()
-	p.preview = hp
+	hp := &hoverPreview{text: scroll, link: l}
+	p.popPreview(hp, scroll, caption, func() { p.win.openLinkDefault(l) }, x, y)
 }
 
-// pointPreview sets up a hover preview's popover to point at x, y of the terminal,
-// without taking the focus.
-func (p *Pane) pointPreview(popover *gtk.Popover, x, y float64) {
+// popPreview shows a hover preview, its content above a caption, in a popover pointing at
+// x, y of the terminal, in place of any other. It doesn't take the focus, so typing still
+// goes to the terminal. With the pointer on it, it grows, and stays; the wheel scrolls
+// text, and a click calls open.
+func (p *Pane) popPreview(hp *hoverPreview, content gtk.IWidget, caption string, open func(), x, y float64) {
+	popover, err := gtk.PopoverNew(p.term)
+	if err != nil {
+		return
+	}
+	hp.popover = popover
+	addClass(popover, "ttt-hover-preview")
 	popover.SetModal(false)
 	rect := gdk.Rectangle{}
 	rect.SetX(int(x))
@@ -408,21 +371,77 @@ func (p *Pane) pointPreview(popover *gtk.Popover, x, y float64) {
 	rect.SetHeight(1)
 	popover.SetPointingTo(rect)
 	popover.SetPosition(gtk.POS_BOTTOM)
-}
 
-// followPreview keeps a hover preview while the pointer is on its widget, and hides it
-// soon after the pointer leaves.
-func (p *Pane) followPreview(hp *hoverPreview, widget *gtk.Widget) {
-	widget.Connect("enter-notify-event", func() bool {
-		p.keepPreview()
+	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
+	box.PackStart(content, true, true, 0)
+	label, _ := gtk.LabelNew(caption)
+	addClass(label, "dim-label")
+	addClass(label, "ttt-hover-preview-caption")
+	box.PackStart(label, false, false, 0)
+	// The box above the content takes the pointer, so a click opens the file rather than
+	// selecting text: GtkImage has no window of its own to get events, and a text view
+	// would take them.
+	events, _ := gtk.EventBoxNew()
+	events.SetAboveChild(true)
+	events.AddEvents(int(gdk.SCROLL_MASK | gdk.SMOOTH_SCROLL_MASK))
+	events.Add(box)
+	popover.Add(events)
+
+	events.Connect("enter-notify-event", func() bool {
+		if p.preview == hp {
+			p.keepPreview()
+			hp.engaged = true
+			p.growPreview(hp)
+		}
 		return false
 	})
-	widget.Connect("leave-notify-event", func() bool {
+	events.Connect("leave-notify-event", func() bool {
 		if p.preview == hp {
 			p.hidePreviewSoon()
 		}
 		return false
 	})
+	events.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
+		if hp.text != nil {
+			scrollBy(hp.text.GetVAdjustment(), gdk.EventScrollNewFromEvent(ev))
+		}
+		return true
+	})
+	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY {
+			return false
+		}
+		p.hidePreview()
+		open()
+		return true
+	})
+	if old := p.preview; old != nil {
+		p.dropPreview(old)
+	}
+	events.ShowAll()
+	popover.Show()
+	p.preview = hp
+}
+
+// scrollBy scrolls an adjustment by a wheel event, by a few lines a notch.
+func scrollBy(adj *gtk.Adjustment, ev *gdk.EventScroll) {
+	if adj == nil {
+		return
+	}
+	step := adj.GetPageSize() / 6 //nolint:mnd // a few lines
+	var steps float64
+	switch ev.Direction() {
+	case gdk.SCROLL_UP:
+		steps = -1
+	case gdk.SCROLL_DOWN:
+		steps = 1
+	case gdk.SCROLL_SMOOTH:
+		steps = ev.DeltaY()
+	case gdk.SCROLL_LEFT, gdk.SCROLL_RIGHT:
+		return
+	}
+	value := adj.GetValue() + steps*step
+	adj.SetValue(max(adj.GetLower(), min(value, adj.GetUpper()-adj.GetPageSize())))
 }
 
 // growPreview shows a preview larger, up to previewGrownShare of the window, once.
@@ -460,10 +479,10 @@ func (p *Pane) keepPreview() {
 }
 
 // hidePreviewSoon hides the preview after previewGrace, unless the pointer comes back
-// to its link or to it.
+// to its link or to it. One the pointer has been on stays.
 func (p *Pane) hidePreviewSoon() {
 	hp := p.preview
-	if hp == nil || hp.hideTimer != 0 {
+	if hp == nil || hp.engaged || hp.hideTimer != 0 {
 		return
 	}
 	hp.hideTimer = glib.TimeoutAdd(uint(previewGrace/time.Millisecond), func() bool {
@@ -475,20 +494,33 @@ func (p *Pane) hidePreviewSoon() {
 	})
 }
 
-// hidePreview hides the image preview, and forgets the link under the pointer, so a
-// lookup or load still under way shows nothing.
+// hidePreview hides the hover preview, and forgets the link under the pointer.
 func (p *Pane) hidePreview() {
+	p.forgetHover()
+	if hp := p.preview; hp != nil {
+		p.dropPreview(hp)
+	}
+}
+
+// forgetHover forgets the link under the pointer, so a lookup or load still under way for
+// it shows nothing.
+func (p *Pane) forgetHover() {
 	p.hoverGen++
 	p.hoverText, p.hoverSpan = "", cellSpan{}
 	if p.hoverTimer != 0 {
 		glib.SourceRemove(p.hoverTimer)
 		p.hoverTimer = 0
 	}
-	if hp := p.preview; hp != nil {
+}
+
+// dropPreview takes a hover preview down.
+func (p *Pane) dropPreview(hp *hoverPreview) {
+	if p.preview == hp {
 		p.preview = nil
-		if hp.hideTimer != 0 {
-			glib.SourceRemove(hp.hideTimer)
-		}
-		hp.popover.Destroy()
 	}
+	if hp.hideTimer != 0 {
+		glib.SourceRemove(hp.hideTimer)
+		hp.hideTimer = 0
+	}
+	hp.popover.Destroy()
 }

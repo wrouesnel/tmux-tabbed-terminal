@@ -95,6 +95,9 @@ type Pane struct {
 	// doubleClicks counts double clicks, so a click's copy, which waits to see whether
 	// the click was the first of a double click, can tell that it was.
 	doubleClicks int
+	// dismissClick is set while the button that put away a hover preview is down, so
+	// neither its press nor its release goes to the terminal.
+	dismissClick bool
 
 	// Mouse wheel state: lines waiting to be scrolled, whether a scroll command is
 	// running, and the streak of quick wheel events which speeds scrolling up.
@@ -191,10 +194,20 @@ func newPane(w *Window) *Pane {
 	// Before VTE's own handler, which would otherwise give the click to tmux whenever its
 	// mouse option is on, and tmux's menu can't paste the clipboard.
 	p.term.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		// A click that puts away a preview being read does only that.
+		if p.preview != nil && p.preview.engaged {
+			p.hidePreview()
+			p.dismissClick = true
+			return true
+		}
 		p.hidePreview()
 		return p.onButtonPress(ev)
 	})
 	p.term.Connect("button-release-event", func(_ interface{}, ev *gdk.Event) bool {
+		if p.dismissClick {
+			p.dismissClick = false
+			return true
+		}
 		p.onButtonRelease(ev)
 		return false
 	})

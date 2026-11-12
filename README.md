@@ -75,9 +75,12 @@ or split the window to watch several sessions side by side.
   file, local or on a remote host, and a preview of it pops up in 360×270 pixels: the
   image scaled to fit, or the start of the file, markdown formatted as in the preview
   pane and HTML as its text. Move the pointer onto the preview and it grows, up to most of
-  the window; click it to open the file: an image or markdown in the preview pane, and
-  HTML as a double-click would. That works with the mouse alone even when the program in
-  the pane uses the mouse, such as a coding agent, which then has the right-click. Remote
+  the window, and stays for reading, with the wheel scrolling text, until a click, a key
+  or another link's preview puts it away; a click on the terminal that puts it away does
+  only that. Click the preview to open the file: an image or markdown in the preview
+  pane, and HTML as a double-click would. That works with the mouse alone even when the
+  program in the pane uses the mouse, such as a coding agent, which then has the
+  right-click. Remote
   files are read over the host's ssh connection; images over 32 MiB are skipped, and only
   the first 64 KiB of a markdown or HTML file is read. Files on the web aren't fetched.
   Turn previews off with `links.image-previews: false` in the configuration file.

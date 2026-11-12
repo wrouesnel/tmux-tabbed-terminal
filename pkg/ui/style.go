@@ -53,6 +53,10 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-markdown, .ttt-markdown text {
 	background-color: @theme_base_color;
 }
+.ttt-hover-preview-caption {
+	padding: 4px 0 0;
+	font-size: 90%;
+}
 .ttt-md-code {
 	padding: 12px 16px;
 	border-radius: 6px;
