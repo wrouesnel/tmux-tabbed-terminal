@@ -4,11 +4,15 @@ package gtkx
 /*
 #cgo pkg-config: gtk+-3.0
 #include <stdlib.h>
+#include <stdint.h>
 #include <gtk/gtk.h>
 
 static GdkDragContext *to_drag_context(void *p) { return GDK_DRAG_CONTEXT(p); }
 static GtkWindow *to_window(void *p) { return GTK_WINDOW(p); }
 static GtkWidget *to_widget(void *p) { return GTK_WIDGET(p); }
+static void ttt_set_source_pixbuf(uintptr_t cr, void *pb, double x, double y) {
+	gdk_cairo_set_source_pixbuf((cairo_t *)cr, GDK_PIXBUF(pb), x, y);
+}
 
 // ttt_release_name gives up the application's D-Bus name, waiting until the bus has, so
 // that a process started next can take it. It does nothing without a session bus.
@@ -78,6 +82,7 @@ import (
 	"errors"
 	"unsafe"
 
+	"github.com/gotk3/gotk3/cairo"
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
@@ -183,4 +188,10 @@ func PixbufFit(data []byte, width, height int) (*gdk.Pixbuf, error) {
 		return nil, errors.New("not an image")
 	}
 	return &gdk.Pixbuf{Object: glib.Take(unsafe.Pointer(pb))}, nil
+}
+
+// CairoSetSourcePixbuf makes a pixbuf the source cairo paints with, its top left corner at
+// x, y.
+func CairoSetSourcePixbuf(cr *cairo.Context, pb *gdk.Pixbuf, x, y float64) {
+	C.ttt_set_source_pixbuf(C.uintptr_t(cr.Native()), unsafe.Pointer(pb.GObject), C.double(x), C.double(y))
 }

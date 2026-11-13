@@ -92,6 +92,11 @@ or split the window to watch several sessions side by side.
   drawn with [go-mermaid](https://github.com/zkrebbekx/go-mermaid) in the theme's light
   or dark colors; a kind of diagram it doesn't support shows as code. Diagrams are
   sharpest where GTK has librsvg's SVG loader (`librsvg2-common` on Debian and Ubuntu).
+  A diagram is shown at its own size, and one wider than the pane scrolls sideways: drag
+  it, use its scrollbar, or Shift and the wheel. Click a diagram to open it in a window
+  of its own, where the wheel zooms about the pointer, dragging moves it, a double-click
+  switches between fitting the window and 100%, and the title bar's buttons, or +, −, 0
+  and F, zoom.
   An image is scaled to fit the pane. The preview
   reloads as soon as the file changes, as when an agent rewrites its plan: a local file,
   or one on a host reached through the [agent](#the-agent), is watched, with inotify,

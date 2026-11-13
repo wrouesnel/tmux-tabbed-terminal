@@ -110,16 +110,16 @@ func TestSpansMarkup(t *testing.T) {
 // supported isn't drawn.
 func TestMermaid(t *testing.T) {
 	for _, dark := range []bool{false, true} {
-		svg, width, ok := mermaidSVG("flowchart LR\n  A[Start] --> B[End]\n", dark)
-		if !ok || width < 50 {
-			t.Fatalf("dark %v: %v, %v", dark, ok, width)
+		d, ok := mermaidSVG("flowchart LR\n  A[Start] --> B[End]\n", dark)
+		if !ok || d.width < 50 || d.height < 10 {
+			t.Fatalf("dark %v: %v, %v×%v", dark, ok, d.width, d.height)
 		}
-		pb, err := drawSVG(svg, width, 40)
+		pb, err := drawSVG(d.svg, d.width, 40)
 		if err != nil || pb.GetWidth() != 40 {
 			t.Errorf("dark %v: drawn %v, %v", dark, pb, err)
 		}
 	}
-	if _, _, ok := mermaidSVG("zenuml\n  title x\n", false); ok {
+	if _, ok := mermaidSVG("zenuml\n  title x\n", false); ok {
 		t.Error("drew an unsupported diagram")
 	}
 }

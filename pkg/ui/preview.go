@@ -329,6 +329,7 @@ func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
 	caption := "Click to open it in the preview pane"
 	if isMarkdownPath(l.file) {
 		md := newMdView(func(string) {}, func(_ string, then func(*gdk.Pixbuf)) { then(nil) })
+		md.name = path.Base(l.file)
 		md.show(markdown.Parse(wholeBlocks(data, previewTextBytes)))
 		view = md.view
 	} else {

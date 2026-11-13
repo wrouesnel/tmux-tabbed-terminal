@@ -353,6 +353,7 @@ func (f *filePreview) load(keepPlace bool) {
 		}
 		adj := f.mdScroller.GetVAdjustment()
 		place := adj.GetValue()
+		f.md.name = path.Base(f.file)
 		f.md.show(c.blocks)
 		f.stack.SetVisibleChildName(previewMarkdown)
 		if keepPlace {

@@ -33,6 +33,9 @@ const (
 	mdCodeScale    = 0.9
 	// mdImageMaxSize bounds the size images are decoded at, before they're scaled to fit.
 	mdImageMaxSize = 4096
+	// diagramDragSlop is how far, in pixels, a press on a diagram moves before it's a drag
+	// rather than a click.
+	diagramDragSlop = 4
 )
 
 //nolint:gochecknoglobals
@@ -76,6 +79,8 @@ type mdView struct {
 	// were colored for.
 	codes []func(dark bool)
 	dark  bool
+	// name is the name of the document, for the title of a diagram's window.
+	name string
 }
 
 // mdLink is a link's tag and destination.
@@ -333,44 +338,135 @@ func (v *mdView) codeBlock(code, lang string, indent int) {
 	})
 }
 
-// diagram adds a Mermaid diagram, drawn as wide as it is, or as the text if that's
-// narrower, and again in the theme's colors when the theme changes between light and
-// dark. It reports whether it could draw it: if it can't, as for a kind of diagram that
-// isn't supported, its code shows instead.
+// diagram adds a Mermaid diagram, drawn as large as it is, and again in the theme's
+// colors when the theme changes between light and dark. One wider than the text scrolls
+// sideways: with the wheel while Shift is held, by its scrollbar, or by dragging it. A
+// click opens it in a window of its own, to zoom and pan. It reports whether it could draw
+// it: if it can't, as for a kind of diagram that isn't supported, its code shows instead.
 func (v *mdView) diagram(code string, indent int) bool {
-	svg, width, ok := mermaidSVG(code, v.dark)
+	d, ok := mermaidSVG(code, v.dark)
 	if !ok {
 		return false
 	}
 	img, _ := gtk.ImageNew()
-	v.anchor(img)
-	shown := 0
 	draw := func() {
-		if v.width <= 0 {
-			return
-		}
-		w := min(int(width), max(v.width-indent, 1))
-		pb, err := drawSVG(svg, width, w)
+		pb, err := drawSVG(d.svg, d.width, int(d.width))
 		if err != nil {
 			img.SetFromIconName("image-missing-symbolic", gtk.ICON_SIZE_DIALOG)
 			img.SetTooltipText("The diagram couldn't be drawn: " + err.Error())
 			return
 		}
-		shown = w
 		img.SetFromPixbuf(pb)
 	}
-	v.fits = append(v.fits, func(int) {
-		if min(int(width), max(v.width-indent, 1)) != shown {
-			draw()
+	draw()
+	events, _ := gtk.EventBoxNew()
+	events.Add(img)
+	events.AddEvents(int(gdk.BUTTON_PRESS_MASK | gdk.BUTTON_RELEASE_MASK | gdk.POINTER_MOTION_MASK |
+		gdk.SCROLL_MASK | gdk.SMOOTH_SCROLL_MASK))
+	scroll, _ := gtk.ScrolledWindowNew(nil, nil)
+	scroll.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_NEVER)
+	scroll.SetOverlayScrolling(false)
+	scroll.SetPropagateNaturalHeight(true)
+	scroll.Add(events)
+	v.anchor(scroll)
+	fit := func() {
+		if v.width <= 0 {
+			return
 		}
-	})
+		shown := min(int(d.width), max(v.width-indent, 1))
+		scroll.SetSizeRequest(shown, -1)
+		tip := "Click to open the diagram in its own window, to zoom and pan"
+		if shown < int(d.width) {
+			tip += ". Drag it, or Shift and the wheel, to scroll it sideways"
+		}
+		events.SetTooltipText(tip)
+	}
+	v.fits = append(v.fits, func(int) { fit() })
 	v.codes = append(v.codes, func(dark bool) {
-		if s, w, ok := mermaidSVG(code, dark); ok {
-			svg, width = s, w
+		if nd, ok := mermaidSVG(code, dark); ok {
+			d = nd
 			draw()
+			fit()
 		}
 	})
+	v.diagramEvents(events, scroll.GetHAdjustment(), func() { openDiagram(v.view, v.name, code) })
 	return true
+}
+
+// diagramEvents makes a diagram in the text drag sideways, as far as it's scrolled by
+// adj, and open on a click that doesn't drag. The wheel scrolls it sideways with Shift
+// held, and otherwise scrolls the text.
+func (v *mdView) diagramEvents(events *gtk.EventBox, adj *gtk.Adjustment, open func()) {
+	var pressed, dragged bool
+	var fromX, fromValue float64
+	events.Connect("realize", func() { setCursor(&events.Widget, "zoom-in") })
+	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
+		b := gdk.EventButtonNewFromEvent(ev)
+		if b.Button() != gdk.BUTTON_PRIMARY || b.Type() != gdk.EVENT_BUTTON_PRESS {
+			return b.Button() == gdk.BUTTON_PRIMARY
+		}
+		pressed, dragged = true, false
+		fromX, fromValue = b.XRoot(), adj.GetValue()
+		return true
+	})
+	events.Connect("motion-notify-event", func(_ interface{}, ev *gdk.Event) bool {
+		if !pressed {
+			return false
+		}
+		x, _ := gdk.EventMotionNewFromEvent(ev).MotionValRoot()
+		if !dragged && math.Abs(x-fromX) < diagramDragSlop {
+			return true
+		}
+		if !dragged {
+			dragged = true
+			setCursor(&events.Widget, "grabbing")
+		}
+		adj.SetValue(max(adj.GetLower(), min(fromValue-(x-fromX), adj.GetUpper()-adj.GetPageSize())))
+		return true
+	})
+	events.Connect("button-release-event", func(_ interface{}, ev *gdk.Event) bool {
+		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY || !pressed {
+			return false
+		}
+		pressed = false
+		if dragged {
+			setCursor(&events.Widget, "zoom-in")
+			return true
+		}
+		open()
+		return true
+	})
+	events.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
+		s := gdk.EventScrollNewFromEvent(ev)
+		if s.State()&gdk.SHIFT_MASK == 0 {
+			return false
+		}
+		step := adj.GetPageSize() / 6 //nolint:mnd // a little at a notch
+		var steps float64
+		switch s.Direction() {
+		case gdk.SCROLL_UP, gdk.SCROLL_LEFT:
+			steps = -1
+		case gdk.SCROLL_DOWN, gdk.SCROLL_RIGHT:
+			steps = 1
+		case gdk.SCROLL_SMOOTH:
+			steps = s.DeltaY() + s.DeltaX()
+		}
+		adj.SetValue(max(adj.GetLower(), min(adj.GetValue()+steps*step, adj.GetUpper()-adj.GetPageSize())))
+		return true
+	})
+}
+
+// setCursor shows a named cursor over a widget with a window of its own.
+func setCursor(w *gtk.Widget, name string) {
+	win, err := w.GetWindow()
+	if err != nil || win == nil {
+		return
+	}
+	if display, err := gdk.DisplayGetDefault(); err == nil {
+		if cursor, err := gdk.CursorNewFromName(display, name); err == nil {
+			win.SetCursor(cursor)
+		}
+	}
 }
 
 // drawSVG draws an SVG document, width pixels wide as it is, w pixels wide. GTK draws
@@ -388,29 +484,46 @@ func drawSVG(svg []byte, width float64, w int) (*gdk.Pixbuf, error) {
 	return gtkx.PixbufFit(png, w, math.MaxInt16)
 }
 
-// mermaidSVGSize matches the width an SVG document gives itself.
-var mermaidSVGSize = regexp.MustCompile(`^<svg\b[^>]*\bwidth="([0-9.]+)"`) //nolint:gochecknoglobals
+// mermaidSVGSize matches the size an SVG document gives itself.
+//
+//nolint:gochecknoglobals
+var (
+	mermaidSVGWidth  = regexp.MustCompile(`^<svg\b[^>]*\bwidth="([0-9.]+)"`)
+	mermaidSVGHeight = regexp.MustCompile(`^<svg\b[^>]*\bheight="([0-9.]+)"`)
+)
 
-// mermaidSVG draws a Mermaid diagram as SVG, on no background, in light or dark colors,
-// and returns it with its width in pixels.
-func mermaidSVG(code string, dark bool) ([]byte, float64, bool) {
+// mermaidDiagram is a Mermaid diagram drawn as SVG, and its size in pixels.
+type mermaidDiagram struct {
+	svg           []byte
+	width, height float64
+}
+
+// mermaidSVG draws a Mermaid diagram as SVG, on no background, in light or dark colors.
+func mermaidSVG(code string, dark bool) (mermaidDiagram, bool) {
 	theme := mermaid.Default
 	if dark {
 		theme = mermaid.Dark
 	}
 	svg, err := mermaid.Render(code, mermaid.WithTheme(theme), mermaid.WithTransparentBackground())
 	if err != nil {
-		return nil, 0, false
+		return mermaidDiagram{}, false
 	}
-	m := mermaidSVGSize.FindSubmatch(svg)
-	if m == nil {
-		return nil, 0, false
+	d := mermaidDiagram{svg: svg}
+	for _, size := range []struct {
+		re *regexp.Regexp
+		to *float64
+	}{{mermaidSVGWidth, &d.width}, {mermaidSVGHeight, &d.height}} {
+		m := size.re.FindSubmatch(svg)
+		if m == nil {
+			return mermaidDiagram{}, false
+		}
+		n, err := strconv.ParseFloat(string(m[1]), 64)
+		if err != nil || n < 1 {
+			return mermaidDiagram{}, false
+		}
+		*size.to = n
 	}
-	width, err := strconv.ParseFloat(string(m[1]), 64)
-	if err != nil || width < 1 {
-		return nil, 0, false
-	}
-	return svg, width, true
+	return d, true
 }
 
 // image adds an image, loaded in the background. Until it's loaded, or if it can't be, it
@@ -581,7 +694,12 @@ func spansMarkup(spans []markdown.Span) string {
 
 // darkTheme reports whether the view's theme is dark: whether its text is light.
 func (v *mdView) darkTheme() bool {
-	sc, err := v.view.GetStyleContext()
+	return darkText(v.view)
+}
+
+// darkText reports whether a widget's theme is dark: whether its text is light.
+func darkText(w styled) bool {
+	sc, err := w.GetStyleContext()
 	if err != nil {
 		return false
 	}
