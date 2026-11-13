@@ -5,6 +5,7 @@ import (
 	"context"
 	"html"
 	"io"
+	"math"
 	"os"
 	"path"
 	"regexp"
@@ -40,6 +41,24 @@ const (
 	// previewGrace is how long a preview stays once the pointer leaves its link or it, so
 	// the pointer can cross from one to the other.
 	previewGrace = 500 * time.Millisecond
+	// previewReadWidth is the widest a grown text preview is, about GitHub's page width,
+	// so its lines stay short enough to read.
+	previewReadWidth = 960
+	// previewMinWidth and previewMinHeight are the least a preview is, or is resized to.
+	previewMinWidth  = 160
+	previewMinHeight = 60
+	// previewEdge is how near an edge of a preview, in pixels, a drag resizes it.
+	previewEdge = 8
+	// previewMaxShare is the most of the window a preview is resized to.
+	previewMaxShare = 0.95
+)
+
+// The edges of a preview a drag resizes.
+const (
+	edgeLeft = 1 << iota
+	edgeRight
+	edgeTop
+	edgeBottom
 )
 
 // hoverPreview is the preview shown for a link, of an image or the start of a markdown or
@@ -49,7 +68,19 @@ type hoverPreview struct {
 	// image is the image shown, or text, the window the text shows in.
 	image *gtk.Image
 	text  *gtk.ScrolledWindow
-	link  link
+	view  *gtk.TextView
+	// width is the text's width, and maxHeight the most its height grows to fit it.
+	width, maxHeight int
+	// sized is set once it's been resized by hand, and keeps the size it was given.
+	sized bool
+	// events takes the pointer over it. edges are the edges a drag from where the
+	// pointer is resizes, or resizing, those a drag under way does; lastX, lastY are
+	// where the drag's pointer was last, on the screen.
+	events       *gtk.EventBox
+	edges        int
+	resizing     int
+	lastX, lastY float64
+	link         link
 	data  []byte
 	grown bool
 	// engaged is set once the pointer has been on it. It then stays, for reading, until
@@ -346,10 +377,14 @@ func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
 	view.SetCursorVisible(false)
 	view.SetCanFocus(false)
 	scroll, _ := gtk.ScrolledWindowNew(nil, nil)
-	scroll.SetPolicy(gtk.POLICY_NEVER, gtk.POLICY_EXTERNAL)
+	// Neither way does the text hold the window open: it's fitted to the window's width, as
+	// it's resized, and scrolled by the wheel.
+	scroll.SetPolicy(gtk.POLICY_EXTERNAL, gtk.POLICY_EXTERNAL)
 	scroll.SetSizeRequest(previewWidth, previewHeight)
 	scroll.Add(view)
-	hp := &hoverPreview{text: scroll, link: l}
+	hp := &hoverPreview{text: scroll, view: view, link: l, width: previewWidth, maxHeight: previewHeight}
+	// It's as tall as its text, up to maxHeight, once the text is laid out.
+	scroll.GetVAdjustment().Connect("changed", func() { glib.IdleAdd(func() { p.fitTextHeight(hp) }) })
 	p.popPreview(hp, scroll, caption, func() { p.win.openLinkDefault(l) }, x, y)
 }
 
@@ -402,6 +437,20 @@ func (p *Pane) popPreview(hp *hoverPreview, content gtk.IWidget, caption string,
 		}
 		return false
 	})
+	hp.events = events
+	events.AddEvents(int(gdk.POINTER_MOTION_MASK | gdk.BUTTON_RELEASE_MASK))
+	events.Connect("motion-notify-event", func(_ interface{}, ev *gdk.Event) bool {
+		p.onPreviewMotion(hp, gdk.EventMotionNewFromEvent(ev))
+		return true
+	})
+	events.Connect("button-release-event", func(_ interface{}, ev *gdk.Event) bool {
+		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY || hp.resizing == 0 {
+			return false
+		}
+		hp.resizing = 0
+		p.refitImage(hp)
+		return true
+	})
 	events.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
 		if hp.text != nil {
 			scrollBy(hp.text.GetVAdjustment(), gdk.EventScrollNewFromEvent(ev))
@@ -409,8 +458,17 @@ func (p *Pane) popPreview(hp *hoverPreview, content gtk.IWidget, caption string,
 		return true
 	})
 	events.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
-		if gdk.EventButtonNewFromEvent(ev).Button() != gdk.BUTTON_PRIMARY {
+		b := gdk.EventButtonNewFromEvent(ev)
+		if b.Button() != gdk.BUTTON_PRIMARY {
 			return false
+		}
+		if hp.edges != 0 {
+			// A drag from an edge resizes it.
+			if b.Type() == gdk.EVENT_BUTTON_PRESS {
+				hp.resizing, hp.sized, hp.grown = hp.edges, true, true
+				hp.lastX, hp.lastY = b.XRoot(), b.YRoot()
+			}
+			return true
 		}
 		p.hidePreview()
 		open()
@@ -458,11 +516,161 @@ func (p *Pane) growPreview(hp *hoverPreview) {
 		return
 	}
 	if hp.text != nil {
-		hp.text.SetSizeRequest(max(width, previewWidth), max(height, previewHeight))
+		hp.width = max(min(width, previewReadWidth), previewWidth)
+		hp.maxHeight = max(height, previewHeight)
+		hp.text.SetSizeRequest(hp.width, previewHeight)
+		p.fitTextHeight(hp)
 		return
 	}
 	runAsync(p.win.app, func(context.Context) (*gdk.Pixbuf, error) {
 		return gtkx.PixbufFit(hp.data, width, height)
+	}, func(pb *gdk.Pixbuf, err error) {
+		if err != nil || p.preview != hp {
+			return
+		}
+		hp.image.SetFromPixbuf(pb)
+	})
+}
+
+// fitTextHeight makes a text preview as tall as its text, up to its maxHeight, so it
+// leaves no space below a short one. One resized by hand keeps its size.
+func (p *Pane) fitTextHeight(hp *hoverPreview) {
+	if hp.text == nil || hp.sized || p.preview != hp {
+		return
+	}
+	adj := hp.text.GetVAdjustment()
+	content := int(math.Ceil(adj.GetUpper()))
+	if adj.GetUpper() <= adj.GetPageSize()+1 {
+		// It all fits, so the adjustment only says how tall the window is: the text's
+		// height is where its last line ends.
+		buf, err := hp.view.GetBuffer()
+		if err != nil {
+			return
+		}
+		y, h := hp.view.GetLineYrange(buf.GetEndIter())
+		content = y + h + hp.view.GetTopMargin() + hp.view.GetBottomMargin()
+	}
+	height := max(min(content, hp.maxHeight), previewMinHeight)
+	if _, now := hp.text.GetSizeRequest(); now != height {
+		hp.text.SetSizeRequest(hp.width, height)
+	}
+}
+
+// onPreviewMotion shows a resizing cursor by the edges of a preview that can be dragged,
+// and resizes it while one is.
+func (p *Pane) onPreviewMotion(hp *hoverPreview, ev *gdk.EventMotion) {
+	x, y := ev.MotionVal()
+	w, h := float64(hp.events.GetAllocatedWidth()), float64(hp.events.GetAllocatedHeight())
+	if hp.resizing == 0 {
+		edges := 0
+		switch {
+		case x < previewEdge:
+			edges |= edgeLeft
+		case x > w-previewEdge:
+			edges |= edgeRight
+		}
+		switch {
+		case y < previewEdge:
+			edges |= edgeTop
+		case y > h-previewEdge:
+			edges |= edgeBottom
+		}
+		// The edge by its link stays put: the one the popover points from.
+		if p.previewBelow(hp) {
+			edges &^= edgeTop
+		} else {
+			edges &^= edgeBottom
+		}
+		if edges != hp.edges {
+			hp.edges = edges
+			setCursor(&hp.events.Widget, edgeCursor(edges))
+		}
+		return
+	}
+	// The edge dragged follows the pointer: the popover moves as it's resized, so each
+	// step resizes it by how far the edge is from the pointer now, but by no more than
+	// twice as far as the pointer moved, so an edge that can't move doesn't run away.
+	rx, ry := ev.MotionValRoot()
+	limit := func(want, moved float64) int {
+		if want*moved <= 0 {
+			return 0
+		}
+		return int(math.Copysign(min(math.Abs(want), 2*math.Abs(moved)), want))
+	}
+	var dw, dh int
+	switch {
+	case hp.resizing&edgeRight != 0:
+		dw = limit(x-w, rx-hp.lastX)
+	case hp.resizing&edgeLeft != 0:
+		dw = limit(-x, hp.lastX-rx)
+	}
+	switch {
+	case hp.resizing&edgeBottom != 0:
+		dh = limit(y-h, ry-hp.lastY)
+	case hp.resizing&edgeTop != 0:
+		dh = limit(-y, hp.lastY-ry)
+	}
+	hp.lastX, hp.lastY = rx, ry
+	if dw == 0 && dh == 0 {
+		return
+	}
+	var content *gtk.Widget
+	if hp.text != nil {
+		content = &hp.text.Widget
+	} else {
+		content = &hp.image.Widget
+	}
+	cw, ch := content.GetSizeRequest()
+	if cw <= 0 {
+		cw = content.GetAllocatedWidth()
+	}
+	if ch <= 0 {
+		ch = content.GetAllocatedHeight()
+	}
+	maxW := int(float64(p.win.window.GetAllocatedWidth()) * previewMaxShare)
+	maxH := int(float64(p.win.window.GetAllocatedHeight()) * previewMaxShare)
+	cw = max(previewMinWidth, min(cw+dw, maxW))
+	ch = max(previewMinHeight, min(ch+dh, maxH))
+	hp.width = cw
+	content.SetSizeRequest(cw, ch)
+}
+
+// previewBelow reports whether a preview is below the point it points at.
+func (p *Pane) previewBelow(hp *hoverPreview) bool {
+	_, y, err := hp.events.TranslateCoordinates(p.term, 0, 0)
+	if err != nil {
+		return true
+	}
+	rect, ok := hp.popover.GetPointingTo()
+	return !ok || y >= rect.GetY()
+}
+
+// edgeCursor names the cursor for resizing by some edges, or the pointer's for none.
+func edgeCursor(edges int) string {
+	switch edges {
+	case edgeLeft, edgeRight:
+		return "ew-resize"
+	case edgeTop, edgeBottom:
+		return "ns-resize"
+	case edgeLeft | edgeTop, edgeRight | edgeBottom:
+		return "nwse-resize"
+	case edgeRight | edgeTop, edgeLeft | edgeBottom:
+		return "nesw-resize"
+	}
+	return "pointer"
+}
+
+// refitImage draws an image preview again to fit the size it's been resized to.
+func (p *Pane) refitImage(hp *hoverPreview) {
+	if hp.image == nil {
+		return
+	}
+	w, h := hp.image.GetSizeRequest()
+	if w <= 0 || h <= 0 {
+		return
+	}
+	runAsync(p.win.app, func(context.Context) (*gdk.Pixbuf, error) {
+		return gtkx.PixbufFit(hp.data, w, h)
 	}, func(pb *gdk.Pixbuf, err error) {
 		if err != nil || p.preview != hp {
 			return

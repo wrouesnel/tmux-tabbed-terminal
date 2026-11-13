@@ -74,10 +74,11 @@ or split the window to watch several sessions side by side.
 * **Link previews.** Rest the pointer on a link to an image, a markdown file or an HTML
   file, local or on a remote host, and a preview of it pops up in 360×270 pixels: the
   image scaled to fit, or the start of the file, markdown formatted as in the preview
-  pane and HTML as its text. Move the pointer onto the preview and it grows, up to most of
-  the window, and stays for reading, with the wheel scrolling text, until a click, a key
+  pane and HTML as its text, no taller than the text. Move the pointer onto the preview
+  and it grows, up to most of the window and, for text, about GitHub's page width, and
+  stays for reading, with the wheel scrolling text, until a click, a key
   or another link's preview puts it away; a click on the terminal that puts it away does
-  only that. Click the preview to open the file: an image or markdown in the preview
+  only that. Drag its edges to resize it. Click the preview to open the file: an image or markdown in the preview
   pane, and HTML as a double-click would. That works with the mouse alone even when the
   program in the pane uses the mouse, such as a coding agent, which then has the
   right-click. Remote
