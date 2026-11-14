@@ -81,8 +81,8 @@ type hoverPreview struct {
 	resizing     int
 	lastX, lastY float64
 	link         link
-	data  []byte
-	grown bool
+	data         []byte
+	grown        bool
 	// engaged is set once the pointer has been on it. It then stays, for reading, until
 	// a click or a key, or until the pointer rests on another link.
 	engaged bool

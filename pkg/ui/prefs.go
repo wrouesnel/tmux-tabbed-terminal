@@ -21,7 +21,6 @@ const (
 	tabBarBottom = "bottom"
 )
 
-
 const (
 	prefsSpacing = 12
 	prefsWidth   = 460

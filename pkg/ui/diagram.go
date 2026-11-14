@@ -16,10 +16,10 @@ import (
 // The diagram window's zoom: the least and most, the step a wheel notch or button takes,
 // and the most a diagram is enlarged to fit the window.
 const (
-	diagramMinZoom = 0.1
-	diagramMaxZoom = 8.0
+	diagramMinZoom  = 0.1
+	diagramMaxZoom  = 8.0
 	diagramZoomStep = 1.2
-	diagramMaxFit  = 2.0
+	diagramMaxFit   = 2.0
 	// diagramMaxPixels is the longest side a diagram is drawn at. Beyond it, it's drawn at
 	// that and enlarged, rather than held in memory at full size.
 	diagramMaxPixels = 8192
