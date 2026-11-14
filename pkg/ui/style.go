@@ -53,6 +53,28 @@ row:selected .ttt-busy-dot, row:selected .ttt-unseen-dot {
 .ttt-markdown, .ttt-markdown text {
 	background-color: @theme_base_color;
 }
+.ttt-shelf-header {
+	padding: 8px 6px 4px 12px;
+}
+.ttt-shelf-title {
+	font-size: smaller;
+	font-weight: bold;
+}
+.ttt-shelf-list row {
+	padding: 8px 12px;
+}
+.ttt-shelf-card {
+	padding: 8px 10px;
+	border-radius: 6px;
+	background-color: @theme_base_color;
+	border: 1px solid alpha(@theme_fg_color, 0.15);
+}
+.ttt-shelf-card-title {
+	font-weight: bold;
+}
+.ttt-shelf-card-text, .ttt-shelf-name {
+	font-size: smaller;
+}
 .ttt-hover-preview-caption {
 	padding: 4px 0 0;
 	font-size: 90%;
@@ -216,6 +238,9 @@ func terminalStylesheet(fg, bg theme.Color) string {
 	color: %[4]s;
 }
 .ttt-nav row.ttt-session:hover:not(:selected) {
+	background-color: %[2]s;
+}
+.ttt-nav .ttt-shelf-list row:hover {
 	background-color: %[2]s;
 }
 .ttt-nav separator {

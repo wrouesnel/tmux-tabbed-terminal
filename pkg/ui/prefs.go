@@ -21,6 +21,12 @@ const (
 	tabBarBottom = "bottom"
 )
 
+// IDs of the file shelf's choices in Preferences.
+const (
+	shelfShowNew   = "new"
+	shelfShowAsked = "asked"
+)
+
 const (
 	prefsSpacing = 12
 	prefsWidth   = 460
@@ -38,6 +44,7 @@ type preferences struct {
 	font       *gtk.FontButton
 	bold       *gtk.CheckButton
 	tabBar     *gtk.ComboBoxText
+	shelf      *gtk.ComboBoxText
 	shell      *gtk.ComboBoxText
 	systemTmux *gtk.CheckButton
 	useAgent   *gtk.CheckButton
@@ -208,6 +215,23 @@ func newPreferences(a *App) *preferences {
 		}
 	})
 	add("Window tabs", p.tabBar)
+
+	p.shelf, _ = gtk.ComboBoxTextNew()
+	p.shelf.Append(shelfShowNew, "Show it when a file is mentioned")
+	p.shelf.Append(shelfShowAsked, "Show it only when asked")
+	if a.shelfAutoShow() {
+		p.shelf.SetActiveID(shelfShowNew)
+	} else {
+		p.shelf.SetActiveID(shelfShowAsked)
+	}
+	p.shelf.SetTooltipText("The file shelf lists the images, markdown and HTML files the session mentions. " +
+		"Its title bar button, or Ctrl+Shift+I, shows and hides it.")
+	p.shelf.Connect("changed", func() {
+		if !p.loading {
+			a.setShelfAutoShow(p.shelf.GetActiveID() == shelfShowNew)
+		}
+	})
+	add("File shelf", p.shelf)
 
 	// The ssh configuration, which hosts are listed from and connected with.
 	sshFile, _ := gtk.FileChooserButtonNew("SSH Configuration File", gtk.FILE_CHOOSER_ACTION_OPEN)

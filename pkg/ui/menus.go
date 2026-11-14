@@ -33,6 +33,7 @@ var accelerators = func() map[string][]string {
 		"win.zoom-out":       {"<Primary>minus", "<Primary>KP_Subtract"},
 		"win.zoom-normal":    {"<Primary>0", "<Primary>KP_0"},
 		"win.show-sidebar":   {"<Primary><Shift>s"},
+		"win.show-shelf":     {"<Primary><Shift>i"},
 		"win.find-session":   {"<Primary><Shift>f"},
 		"win.fullscreen":     {"F11"},
 		"win.rename-session": {"<Primary><Shift>r"},
@@ -119,7 +120,7 @@ func mainMenu() *glib.MenuModel {
 		section("Rename Session…", "win.rename-session", "Kill Session…", "win.kill-session"),
 		section("Zoom In", "win.zoom-in", "Zoom Out", "win.zoom-out", "Normal Size", "win.zoom-normal"),
 		section("Find Session…", "win.find-session", "Group Sessions by Application", "win.group-sessions"),
-		section("Show Sessions", "win.show-sidebar", "Show Tab Bar", "win.show-tabs",
+		section("Show Sessions", "win.show-sidebar", "Show File Shelf", "win.show-shelf", "Show Tab Bar", "win.show-tabs",
 			"Full Screen", "win.fullscreen"),
 		section("Preferences", "app.preferences", "About", "app.about"),
 	)

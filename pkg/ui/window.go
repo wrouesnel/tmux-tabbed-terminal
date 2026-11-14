@@ -28,6 +28,10 @@ const (
 	// own opens.
 	minMovedWidth  = 480
 	minMovedHeight = 320
+	// previewWindowWidth and previewWindowHeight are the size a file previewed in a window
+	// of its own opens at.
+	previewWindowWidth  = 760
+	previewWindowHeight = 820
 	// tabShortcuts is how many tabs have Alt+number shortcuts.
 	tabShortcuts = 9
 )
@@ -41,6 +45,11 @@ type Window struct {
 
 	outer   *gtk.Paned
 	sidebar *sidebar
+	// inner holds the content and the file shelf, which is on the side opposite the
+	// session list.
+	inner       *gtk.Paned
+	shelf       *shelf
+	shelfAction *glib.SimpleAction
 	// content is the terminal side of the window: the tab bar over the panes.
 	content *gtk.Box
 	// main is the content with the download toast over it.
@@ -100,12 +109,16 @@ func newWindow(app *App) *Window {
 	w.main.AddOverlay(w.downloads.bar)
 	w.placeTabs()
 
+	w.shelf = newShelf(w)
+	w.inner, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
 	w.outer, _ = gtk.PanedNew(gtk.ORIENTATION_HORIZONTAL)
 	w.placeSidebar()
 	w.window.Add(w.outer)
 
 	w.installActions()
 	w.window.ShowAll()
+	// The shelf shows once it has files, or is asked for.
+	w.setShelfVisible(false)
 	w.showUpdate()
 	return w
 }
@@ -137,6 +150,14 @@ func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 		}
 	})
 	hb.PackEnd(menuBtn)
+
+	shelfBtn, _ := gtk.ToggleButtonNew()
+	shelfIcon, _ := gtk.ImageNewFromIconName(firstIcon("view-sidebar-end-symbolic", "image-x-generic-symbolic"),
+		gtk.ICON_SIZE_BUTTON)
+	shelfBtn.SetImage(shelfIcon)
+	shelfBtn.SetActionName("win.show-shelf")
+	shelfBtn.SetTooltipText("Show File Shelf (Ctrl+Shift+I)")
+	hb.PackEnd(shelfBtn)
 
 	splitBtn, _ := gtk.ButtonNewFromIconName(firstIcon("view-dual-symbolic", "view-paged-symbolic"),
 		gtk.ICON_SIZE_BUTTON)
@@ -262,6 +283,45 @@ func (w *Window) installActions() {
 	})
 	m.AddAction(showSidebar)
 	w.sidebarAction = showSidebar
+
+	showShelf := glib.SimpleActionNewStateful("show-shelf", nil, glib.VariantFromBoolean(false))
+	showShelf.Connect("activate", func() {
+		show := !showShelf.GetState().GetBoolean()
+		w.shelf.userShown, w.shelf.dismissed = show, !show
+		w.setShelfVisible(show)
+	})
+	m.AddAction(showShelf)
+	w.shelfAction = showShelf
+	w.shelf.installActions(m)
+}
+
+// setShelfVisible shows or hides the file shelf. Shown, it reads the window's sessions
+// for files straight away.
+func (w *Window) setShelfVisible(visible bool) {
+	if w.shelfAction == nil {
+		return
+	}
+	w.shelfAction.SetState(glib.VariantFromBoolean(visible))
+	if visible == w.shelf.visible() {
+		return
+	}
+	w.shelf.root.SetVisible(visible)
+	if visible {
+		w.scanShelfNow()
+	}
+}
+
+// wantsShelfScan reports whether the window's panes are read for files for the shelf:
+// while it's shown, or while it shows itself for new files.
+func (w *Window) wantsShelfScan() bool {
+	return w.shelf.visible() || w.app.shelfAutoShow()
+}
+
+// scanShelfNow reads the sessions of the window's panes for files for the shelf.
+func (w *Window) scanShelfNow() {
+	for _, p := range w.panes() {
+		p.scanForShelf()
+	}
 }
 
 // setSidebarVisible shows or hides the session list.
@@ -436,15 +496,24 @@ func (w *Window) placeSidebar() {
 	}
 	if parent, err := w.sidebar.root.GetParent(); err == nil && parent != nil {
 		w.outer.Remove(w.sidebar.root)
-		w.outer.Remove(w.main)
+		w.outer.Remove(w.inner)
 	}
+	if parent, err := w.shelf.root.GetParent(); err == nil && parent != nil {
+		w.inner.Remove(w.shelf.root)
+		w.inner.Remove(w.main)
+	}
+	// The shelf is on the other side from the session list.
 	if w.app.sidebarRight {
-		w.outer.Pack1(w.main, true, false)
+		w.inner.Pack1(w.shelf.root, false, false)
+		w.inner.Pack2(w.main, true, false)
+		w.outer.Pack1(w.inner, true, false)
 		w.outer.Pack2(w.sidebar.root, false, false)
 		w.outer.SetPosition(total - width)
 	} else {
+		w.inner.Pack1(w.main, true, false)
+		w.inner.Pack2(w.shelf.root, false, false)
 		w.outer.Pack1(w.sidebar.root, false, false)
-		w.outer.Pack2(w.main, true, false)
+		w.outer.Pack2(w.inner, true, false)
 		w.outer.SetPosition(width)
 	}
 }
@@ -798,6 +867,7 @@ func (w *Window) refresh() {
 	w.header.SetSubtitle(subtitle)
 	w.window.SetTitle(title)
 	w.updateActionState()
+	w.shelf.sync()
 }
 
 // shownSessions returns the sessions shown in the window's panes, and the one in the

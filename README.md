@@ -85,6 +85,18 @@ or split the window to watch several sessions side by side.
   files are read over the host's ssh connection; images over 32 MiB are skipped, and only
   the first 64 KiB of a markdown or HTML file is read. Files on the web aren't fetched.
   Turn previews off with `links.image-previews: false` in the configuration file.
+* **File shelf.** Beside the panes, on the side opposite the session list, the shelf
+  lists the images, markdown and HTML files the session of the window's active pane
+  mentions, newest first: an image's thumbnail, or a document's title and the start of its
+  text. It reads the panes' lines from tmux, a moment after their output changes, and the
+  last 2,000 lines of history the first time, so files an agent wrote before are listed
+  too; files that can't be read, such as ones not written yet, are left off. Click a file
+  to preview it in the split, as a double-click on its path would, or drag it out to open
+  it in a window of its own; right-click for Preview in New Window, Copy Path and Remove
+  From Shelf. Local files are read again when they change. The title bar's shelf button,
+  or Ctrl+Shift+I, shows and hides it. By default it shows itself when the session
+  mentions a new file, and otherwise stays as it was put; Preferences, or `shelf.auto-show:
+  false` in the configuration file, has it show only when asked for.
 * **File previews.** Right-click a link to a markdown file or an image, local or on a
   remote host, and choose Preview in Split to show it in a pane beside the terminal, as
   the plans, reports and screenshots a coding agent writes. Markdown is formatted as

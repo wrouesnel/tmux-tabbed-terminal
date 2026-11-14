@@ -64,6 +64,8 @@ type Pane struct {
 	hoverSpan  cellSpan
 	hoverTimer glib.SourceHandle
 	hoverGen   int
+	// shelfTimer waits to read the session for files for the shelf.
+	shelfTimer glib.SourceHandle
 	// file shows a file in place of the terminal, when the pane is a preview, or is nil.
 	file *filePreview
 	// dropZone highlights where a dragged session would land.
@@ -186,7 +188,10 @@ func newPane(w *Window) *Pane {
 		w.setActivePane(p)
 		return false
 	})
-	p.term.OnContentsChanged(func() { w.app.requestPoll(p.hostName) })
+	p.term.OnContentsChanged(func() {
+		w.app.requestPoll(p.hostName)
+		p.queueShelfScan()
+	})
 	var err error
 	if p.linkTags, err = addLinks(p.term); err != nil {
 		w.app.log.Warn("Some links won't be recognised", zap.Error(err))
@@ -658,6 +663,10 @@ func (p *Pane) detach() {
 // close hangs up the pane's client. The session keeps running.
 func (p *Pane) close() {
 	p.closed = true
+	if p.shelfTimer != 0 {
+		glib.SourceRemove(p.shelfTimer)
+		p.shelfTimer = 0
+	}
 	p.hidePreview()
 	p.closeFile()
 	if p.client != nil {

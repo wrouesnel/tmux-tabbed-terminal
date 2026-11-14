@@ -17,6 +17,7 @@ type Config struct {
 	Keyboard   KeyboardConfig   `yaml:"keyboard"`
 	SSH        SSHConfig        `yaml:"ssh"`
 	Links      LinksConfig      `yaml:"links"`
+	Shelf      ShelfConfig      `yaml:"shelf"`
 	Behaviour  BehaviourConfig  `yaml:"behaviour"`
 	// Hosts are remote hosts whose sessions are listed, besides those added in the UI.
 	Hosts []HostConfig `yaml:"hosts"`
@@ -120,6 +121,14 @@ type LinksConfig struct {
 	ImagePreviews bool `yaml:"image-previews"`
 }
 
+// ShelfConfig sets the file shelf, which lists the images, markdown and HTML files a
+// session mentions.
+type ShelfConfig struct {
+	// AutoShow shows a window's shelf when its session mentions a new file. Otherwise it
+	// shows only when asked for, with its button. Preferences overrides it.
+	AutoShow bool `yaml:"auto-show"`
+}
+
 // KeyboardConfig sets the keyboard shortcuts.
 type KeyboardConfig struct {
 	// Shortcuts replace the default shortcuts of actions. Keys are action names: those
@@ -210,6 +219,9 @@ func DefaultConfig() Config {
 		},
 		Links: LinksConfig{
 			ImagePreviews: true,
+		},
+		Shelf: ShelfConfig{
+			AutoShow: true,
 		},
 		Behaviour: BehaviourConfig{
 			CreateSessionOnStart: true,

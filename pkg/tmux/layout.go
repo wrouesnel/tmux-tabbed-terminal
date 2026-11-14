@@ -102,6 +102,12 @@ func ParseLayout(out string) *Layout {
 // so a line may take several rows. On a tmux whose capture-pane crashes, it returns
 // ErrCaptureCrashes without trying.
 func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
+	return c.PaneLinesFrom(ctx, pane, 0)
+}
+
+// PaneLinesFrom is PaneLines with up to history lines of the pane's history above its
+// screen.
+func (c *Client) PaneLinesFrom(ctx context.Context, pane string, history int) ([]string, error) {
 	version, err := c.ServerVersion(ctx)
 	if err != nil {
 		return nil, err
@@ -109,7 +115,11 @@ func (c *Client) PaneLines(ctx context.Context, pane string) ([]string, error) {
 	if CaptureCrashes(version) {
 		return nil, errors.Wrap(ErrCaptureCrashes, "tmux "+version)
 	}
-	out, err := c.run(ctx, "capture-pane", "-p", "-J", "-t", pane)
+	args := []string{"capture-pane", "-p", "-J", "-t", pane}
+	if history > 0 {
+		args = append(args, "-S", strconv.Itoa(-history))
+	}
+	out, err := c.run(ctx, args...)
 	if err != nil {
 		return nil, err
 	}

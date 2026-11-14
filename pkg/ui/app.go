@@ -74,6 +74,8 @@ type App struct {
 	prompts     []prompt
 	// downloadList is every download, shown in each window's title bar.
 	downloadList *downloadList
+	// shelf keeps the files each session mentions, for the windows' shelves.
+	shelf *shelfStore
 
 	ctx     context.Context
 	log     *zap.Logger
@@ -170,6 +172,7 @@ func Run(ctx context.Context, cfg Config, opts Options) error {
 		tabsBottom:   cfg.TabBar.Position == "bottom",
 	}
 	app.downloadList = &downloadList{app: app}
+	app.shelf = newShelfStore(app)
 	if st, err := loadState(stateFile()); err != nil {
 		app.log.Warn("Could not read UI state", zap.Error(err))
 	} else {
@@ -593,6 +596,25 @@ func (a *App) NewWindowFor(key string, x, y int) *Window {
 	w.window.Move(max(x-grabOffset*4, 0), max(y-grabOffset/2, 0)) //nolint:mnd // a little left of the pointer
 	w.window.Present()
 	w.activePane.Focus()
+	return w
+}
+
+// NewPreviewWindow opens a window previewing a file from a host, with the session list
+// hidden, with its top left near x, y on the screen if at is set. A file dragged off the
+// shelf opens this way.
+func (a *App) NewPreviewWindow(host, file string, x, y int, at bool) *Window {
+	w := a.addWindow()
+	w.setSidebarVisible(false)
+	p := w.activePane
+	p.showFile(host, file)
+	w.previewPane = p
+	w.refresh()
+	w.window.Resize(previewWindowWidth, previewWindowHeight)
+	if at {
+		const grabOffset = 40                                         // so the pointer lands in the title bar
+		w.window.Move(max(x-grabOffset*4, 0), max(y-grabOffset/2, 0)) //nolint:mnd // a little left of the pointer
+	}
+	w.window.Present()
 	return w
 }
 
