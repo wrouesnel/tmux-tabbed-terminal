@@ -474,19 +474,41 @@ func (p *Pane) scanForShelf() {
 	})
 }
 
-// shelfAutoShow reports whether a window's shelf shows itself when its session mentions
-// a new file: as chosen in Preferences, or else the configuration file.
-func (a *App) shelfAutoShow() bool {
-	if a.state.ShelfAutoShow != nil {
-		return *a.state.ShelfAutoShow
-	}
-	return a.cfg.Shelf.AutoShow
+// When the shelf shows: when the session mentions a new file, always or never. Its button
+// shows or hides it for the moment whatever the choice; showing another session puts it
+// back as chosen.
+const (
+	shelfShowNewFiles = "new-files"
+	shelfShowAlways   = "always"
+	shelfShowNever    = "never"
+)
+
+// validShelfShow reports whether a choice of when the shelf shows is one of them.
+func validShelfShow(show string) bool {
+	return show == shelfShowNewFiles || show == shelfShowAlways || show == shelfShowNever
 }
 
-// setShelfAutoShow sets, and keeps, whether shelves show themselves for new files.
-func (a *App) setShelfAutoShow(on bool) {
-	a.state.ShelfAutoShow = &on
+// shelfShow returns when windows' shelves show: as chosen in Preferences, or else the
+// configuration file, or else when a new file is mentioned.
+func (a *App) shelfShow() string {
+	if a.state.ShelfShow != nil && validShelfShow(*a.state.ShelfShow) {
+		return *a.state.ShelfShow
+	}
+	if validShelfShow(a.cfg.Shelf.Show) {
+		return a.cfg.Shelf.Show
+	}
+	return shelfShowNewFiles
+}
+
+// setShelfShow sets, and keeps, when shelves show, and shows or hides every window's as
+// it now says.
+func (a *App) setShelfShow(show string) {
+	a.state.ShelfShow = &show
 	a.saveState()
+	for w := range a.windows {
+		w.shelf.userShown, w.shelf.dismissed = false, false
+		w.shelf.applyShow()
+	}
 }
 
 // shelfChanged shows a session's changed files on the shelves showing it. isNew is set
@@ -579,9 +601,8 @@ func (s *shelf) visible() bool {
 	return s.root.GetVisible()
 }
 
-// sync follows the window's session: it lists that session's files, and, if shelves
-// show themselves for new files and it wasn't shown or hidden by hand, it shows itself
-// for a session with files and hides itself for one without.
+// sync follows the window's session: it lists that session's files, and shows or hides
+// itself as applyShow says.
 func (s *shelf) sync() {
 	key := ""
 	if p := s.w.sessionPane(); p != nil && p.running && p.file == nil {
@@ -592,11 +613,25 @@ func (s *shelf) sync() {
 	}
 	s.key = key
 	s.rebuild()
-	if s.w.app.shelfAutoShow() && !s.userShown && !s.dismissed {
-		s.w.setShelfVisible(len(s.w.app.shelf.items(key)) > 0)
-	}
+	s.applyShow()
 	if s.visible() {
 		s.w.scanShelfNow()
+	}
+}
+
+// applyShow shows or hides the shelf as chosen: always, never, or, when it shows for new
+// files, for a session with files, unless it was shown or hidden with its button since
+// the session last mentioned a new file.
+func (s *shelf) applyShow() {
+	switch s.w.app.shelfShow() {
+	case shelfShowAlways:
+		s.w.setShelfVisible(true)
+	case shelfShowNever:
+		s.w.setShelfVisible(false)
+	default:
+		if !s.userShown && !s.dismissed {
+			s.w.setShelfVisible(len(s.w.app.shelf.items(s.key)) > 0)
+		}
 	}
 }
 
@@ -609,7 +644,7 @@ func (s *shelf) changed(key string, isNew bool) {
 	s.rebuild()
 	if isNew {
 		s.dismissed = false
-		if s.w.app.shelfAutoShow() && !s.visible() {
+		if s.w.app.shelfShow() == shelfShowNewFiles && !s.visible() {
 			s.w.setShelfVisible(true)
 		}
 	}

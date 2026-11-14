@@ -23,9 +23,9 @@ type uiState struct {
 	PinsCollapsed bool `yaml:"pins-collapsed,omitempty"`
 	// HideUnavailablePins hides pinned sessions which aren't running.
 	HideUnavailablePins bool `yaml:"hide-unavailable-pins,omitempty"`
-	// ShelfAutoShow is whether a window's file shelf shows itself when its session
-	// mentions a new file, as chosen in Preferences.
-	ShelfAutoShow *bool `yaml:"shelf-auto-show,omitempty"`
+	// ShelfShow is when windows' file shelves show, as chosen in Preferences: for new
+	// files, always or never.
+	ShelfShow *string `yaml:"shelf-show,omitempty"`
 	// HideTabBar hides the tab bar.
 	HideTabBar bool `yaml:"hide-tab-bar,omitempty"`
 	// TabBarBottom puts the tab bar below the panes rather than above them.

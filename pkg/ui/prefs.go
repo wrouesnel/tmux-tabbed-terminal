@@ -21,11 +21,6 @@ const (
 	tabBarBottom = "bottom"
 )
 
-// IDs of the file shelf's choices in Preferences.
-const (
-	shelfShowNew   = "new"
-	shelfShowAsked = "asked"
-)
 
 const (
 	prefsSpacing = 12
@@ -217,18 +212,15 @@ func newPreferences(a *App) *preferences {
 	add("Window tabs", p.tabBar)
 
 	p.shelf, _ = gtk.ComboBoxTextNew()
-	p.shelf.Append(shelfShowNew, "Show it when a file is mentioned")
-	p.shelf.Append(shelfShowAsked, "Show it only when asked")
-	if a.shelfAutoShow() {
-		p.shelf.SetActiveID(shelfShowNew)
-	} else {
-		p.shelf.SetActiveID(shelfShowAsked)
-	}
+	p.shelf.Append(shelfShowNewFiles, "Show it when a file is mentioned")
+	p.shelf.Append(shelfShowAlways, "Always show it")
+	p.shelf.Append(shelfShowNever, "Never show it")
+	p.shelf.SetActiveID(a.shelfShow())
 	p.shelf.SetTooltipText("The file shelf lists the images, markdown and HTML files the session mentions. " +
-		"Its title bar button, or Ctrl+Shift+I, shows and hides it.")
+		"Its title bar button, or Ctrl+Shift+I, shows and hides it for the moment, whatever this says.")
 	p.shelf.Connect("changed", func() {
 		if !p.loading {
-			a.setShelfAutoShow(p.shelf.GetActiveID() == shelfShowNew)
+			a.setShelfShow(p.shelf.GetActiveID())
 		}
 	})
 	add("File shelf", p.shelf)

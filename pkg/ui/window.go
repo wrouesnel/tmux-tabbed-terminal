@@ -117,8 +117,8 @@ func newWindow(app *App) *Window {
 
 	w.installActions()
 	w.window.ShowAll()
-	// The shelf shows once it has files, or is asked for.
-	w.setShelfVisible(false)
+	// The shelf shows as chosen once a session is shown: hidden till then, unless always.
+	w.setShelfVisible(app.shelfShow() == shelfShowAlways)
 	w.showUpdate()
 	return w
 }
@@ -314,7 +314,7 @@ func (w *Window) setShelfVisible(visible bool) {
 // wantsShelfScan reports whether the window's panes are read for files for the shelf:
 // while it's shown, or while it shows itself for new files.
 func (w *Window) wantsShelfScan() bool {
-	return w.shelf.visible() || w.app.shelfAutoShow()
+	return w.shelf.visible() || w.app.shelfShow() == shelfShowNewFiles
 }
 
 // scanShelfNow reads the sessions of the window's panes for files for the shelf.

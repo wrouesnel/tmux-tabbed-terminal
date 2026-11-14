@@ -71,3 +71,24 @@ func TestClip(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// TestShelfShow takes Preferences' choice over the configuration file's, and showing for
+// new files when neither is one of the choices.
+func TestShelfShow(t *testing.T) {
+	never, bad := shelfShowNever, "sometimes"
+	for _, c := range []struct {
+		cfg   string
+		prefs *string
+		want  string
+	}{
+		{shelfShowAlways, nil, shelfShowAlways},
+		{shelfShowAlways, &never, shelfShowNever},
+		{"", &bad, shelfShowNewFiles},
+		{"", nil, shelfShowNewFiles},
+	} {
+		a := &App{cfg: Config{Shelf: ShelfConfig{Show: c.cfg}}, state: uiState{ShelfShow: c.prefs}}
+		if got := a.shelfShow(); got != c.want {
+			t.Errorf("config %q, preferences %v: got %q, want %q", c.cfg, c.prefs, got, c.want)
+		}
+	}
+}

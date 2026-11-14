@@ -124,9 +124,10 @@ type LinksConfig struct {
 // ShelfConfig sets the file shelf, which lists the images, markdown and HTML files a
 // session mentions.
 type ShelfConfig struct {
-	// AutoShow shows a window's shelf when its session mentions a new file. Otherwise it
-	// shows only when asked for, with its button. Preferences overrides it.
-	AutoShow bool `yaml:"auto-show"`
+	// Show is when a window's shelf shows: "new-files" when its session mentions a new
+	// file, and for sessions with files, "always" or "never". Its button shows or hides it
+	// for the moment whatever this says. Preferences overrides it.
+	Show string `yaml:"show"`
 }
 
 // KeyboardConfig sets the keyboard shortcuts.
@@ -221,7 +222,7 @@ func DefaultConfig() Config {
 			ImagePreviews: true,
 		},
 		Shelf: ShelfConfig{
-			AutoShow: true,
+			Show: shelfShowNewFiles,
 		},
 		Behaviour: BehaviourConfig{
 			CreateSessionOnStart: true,

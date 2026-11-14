@@ -71,10 +71,11 @@ links:
 
 shelf:
   # The file shelf, beside the panes, lists the images, markdown and HTML files the
-  # session of the window's active pane mentions, newest first. Show it when the session
-  # mentions a new file; false shows it only when asked for, with its title bar button.
+  # session of the window's active pane mentions, newest first. When it shows:
+  # new-files, when the session mentions a new file, and for sessions with files; always;
+  # or never. Its title bar button shows or hides it for the moment whatever this says.
   # Preferences overrides this.
-  auto-show: true
+  show: new-files
 
 ssh:
   # The ssh client configuration this machine's ssh connects to remote hosts with, as with
