@@ -135,7 +135,7 @@ func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 		"view-list-symbolic"), gtk.ICON_SIZE_BUTTON)
 	sidebarBtn.SetImage(sidebarIcon)
 	sidebarBtn.SetActionName("win.show-sidebar")
-	sidebarBtn.SetTooltipText("Show Sessions (F9)")
+	sidebarBtn.SetTooltipText("Show Sessions (Ctrl+Shift+S)")
 	hb.PackStart(sidebarBtn)
 
 	menuBtn, _ := gtk.MenuButtonNew()

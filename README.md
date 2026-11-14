@@ -1,6 +1,6 @@
 # tmux-tabbed-terminal
 
-![tmux-tabbed-terminal showing pinned sessions and sessions grouped by application](docs/screenshot.png)
+![tmux-tabbed-terminal with sessions from this machine and a remote host in the sidebar, the window split into panes with their own tmux window tabs, a markdown plan with a diagram previewed in a split, and the file shelf listing files the session mentions](docs/screenshot.png)
 
 A terminal for people who live in tmux. It looks like GNOME Terminal, but instead of tabs
 it lists the tmux sessions running for you in a sidebar. Click a session to switch to it,
@@ -24,7 +24,8 @@ or split the window to watch several sessions side by side.
   lists its tmux sessions under its own heading, below this machine's ("local"). Remote
   sessions open in panes like local ones. Hosts are listed from `~/.ssh/config`, or
   another ssh configuration chosen as SSH config in Preferences, which ssh then connects
-  with too (as `ssh -F`).
+  with too (as `ssh -F`). The filter button on a host's heading shows only that host's
+  sessions.
 * **Key passphrases.** When ssh needs a key's passphrase to connect, a dialog asks for it.
   With "Remember for this session" ticked, the passphrase is kept in memory, never on
   disk, until the application quits, so other connections with the key don't ask again;
@@ -59,7 +60,7 @@ or split the window to watch several sessions side by side.
   ssh connection. A file already there of the same name is kept, and the new one gets a
   number. Save As… asks where to put it instead, and asks before replacing a file. While
   a download runs, its progress shows in the title bar, beside the downloads button.
-  The button lists every download, with progress bars for those running, which can be
+  The button lists every download and upload, with progress bars for those running, which can be
   cancelled, and Open and Show in Folder for those done; Clear Finished empties the
   list. When a download is done, a notice at the bottom of the window offers to open the
   file or its folder too. Only files can be downloaded, not directories.
@@ -78,13 +79,14 @@ or split the window to watch several sessions side by side.
   and it grows, up to most of the window and, for text, about GitHub's page width, and
   stays for reading, with the wheel scrolling text, until a click, a key
   or another link's preview puts it away; a click on the terminal that puts it away does
-  only that. Drag its edges to resize it. Click the preview to open the file: an image or markdown in the preview
-  pane, and HTML as a double-click would. That works with the mouse alone even when the
-  program in the pane uses the mouse, such as a coding agent, which then has the
-  right-click. Remote
-  files are read over the host's ssh connection; images over 32 MiB are skipped, and only
-  the first 64 KiB of a markdown or HTML file is read. Files on the web aren't fetched.
-  Turn previews off with `links.image-previews: false` in the configuration file.
+  only that. Drag its edges to resize it. Click the preview to open the file: an image or
+  markdown in the preview pane, and HTML as a double-click would. That works with the
+  mouse alone even when the program in the pane uses the mouse, such as a coding agent,
+  which then has the right-click. Remote files are read over the host's ssh connection;
+  images over 32 MiB are skipped, and only the first 64 KiB of a markdown or HTML file is
+  read. Files on the web aren't fetched. Turn previews off with
+  `links.image-previews: false` in the configuration file (it covers markdown and HTML
+  previews too).
 * **File shelf.** Beside the panes, on the side opposite the session list, the shelf
   lists the images, markdown and HTML files the session of the window's active pane
   mentions, newest first: an image's thumbnail, or a document's title and the start of its
@@ -92,8 +94,8 @@ or split the window to watch several sessions side by side.
   last 2,000 lines of history the first time, so files an agent wrote before are listed
   too; files that can't be read, such as ones not written yet, are left off. Click a file
   to preview it in the split, as a double-click on its path would, or drag it out to open
-  it in a window of its own; right-click for Preview in New Window, Copy Path and Remove
-  From Shelf. Local files are read again when they change. The title bar's shelf button,
+  it in a window of its own; right-click for Preview in Split, Preview in New Window, Open
+  With Default Application (for a local file), Copy Path and Remove From Shelf. Local files are read again when they change. The title bar's shelf button,
   or Ctrl+Shift+I, shows and hides it. By default it shows itself when the session
   mentions a new file, and for a session with files, and stays hidden for one without;
   Preferences, or `shelf.show` in the configuration file, can instead have it always
@@ -111,17 +113,17 @@ or split the window to watch several sessions side by side.
   it, use its scrollbar, or Shift and the wheel. Click a diagram to open it in a window
   of its own, where the wheel zooms about the pointer, dragging moves it, a double-click
   switches between fitting the window and 100%, and the title bar's buttons, or +, −, 0
-  and F, zoom.
-  An image is scaled to fit the pane. The preview
+  and F, zoom; Escape closes it. Code blocks are highlighted by their language, in
+  GitHub's light or dark colors. HTML blocks show as written, without comments; inline
+  tags are hidden, apart from `<br>`. An image is scaled to fit the pane. The preview
   reloads as soon as the file changes, as when an agent rewrites its plan: a local file,
   or one on a host reached through the [agent](#the-agent), is watched, with inotify,
   kqueue or ReadDirectoryChangesW, and others are checked every two seconds. The next
-  file previewed replaces it. Move to New
-  Window, in the preview's header, gives it a window of its own, beside the terminal's. Links to other
-  markdown files and images open in the preview, with a Back button; web links open in
-  the browser. Raw HTML in markdown shows as written, code isn't highlighted, and files
-  over 32 MiB aren't shown. On Windows, only files on remote hosts can be previewed so
-  far, as with other links to paths.
+  file previewed replaces it. Move to New Window, in the preview's header, gives it a
+  window of its own, beside the terminal's. Links to other markdown files and images open
+  in the preview, with a Back button; web links open in the browser. Files over 32 MiB
+  aren't shown. On Windows, only files on remote hosts can be previewed, hovered or put
+  on the shelf so far, as with other links to paths.
 * **Clipboard.** Text copied in tmux lands on the desktop clipboard, from this machine and
   from remote hosts, so it pastes into other applications: each new tmux paste buffer, as
   copy mode makes, and as programs make with OSC 52 when tmux's `set-clipboard` option is
@@ -130,7 +132,7 @@ or split the window to watch several sessions side by side.
 * **Saving scrollback.** Right-click a session, or a terminal, and choose Save Scrollback
   to save the whole tmux history of its current pane as text, under
   `~/.local/share/tmux-tabbed-terminal/scrollback/<host>/<session>/<date-time>.txt`, or
-  Save Scrollback As… to choose where.
+  Save Scrollback As… to choose where. Scrollback Dir… opens the folder they're saved in.
 * **Pinned sessions.** Right-click a session and choose Pin to list it at the top, in a
   collapsible Pinned section, as well as in its usual place. Pins are kept by host and
   session name, so they survive tmux restarts. A pinned session that isn't running is
@@ -138,7 +140,8 @@ or split the window to watch several sessions side by side.
   heading hides the ones that aren't running.
 * **Grouping and search.** Sessions are grouped by the program running in their current
   window, so all your `claude` sessions sit together (toggle it under the list). The
-  search box at the top filters by session name, program or window name.
+  search box at the top filters by session name, program or window name. The ↔ button
+  under the list moves it to the other side of the window, and + starts a new session.
 * **Activity.** A session producing output shows a gently pulsing dot in the list and in
   its pane header. A session that produced output while it wasn't on screen is shown in bold
   with a dot until you look at it. Activity comes from tmux's own `window_activity`
@@ -165,7 +168,9 @@ or split the window to watch several sessions side by side.
   (Ctrl+comma) picks another GNOME Terminal profile, the GTK theme, one of GNOME
   Terminal's built-in schemes or custom colors, and the font. The profile in use is
   followed live as it's edited in GNOME Terminal, and the session list's colors are
-  derived from the terminal's.
+  derived from the terminal's. Preferences also sets bold text in bright colors, where the
+  tab bar goes, when the file shelf shows, the ssh configuration, the shell new sessions
+  run (tmux's `default-shell`) and, where they apply, the agent and the bundled tmux.
 
 Each pane runs an ordinary `tmux attach-session` client in a VTE terminal, so your tmux
 configuration, key bindings and status line all work as usual. Switching a pane to another
@@ -174,7 +179,8 @@ never kills a session.
 
 ## Install
 
-Packages are built from source by Launchpad and COPR, for amd64 and arm64.
+Packages are built from source by Launchpad and COPR, for amd64 and arm64. The Windows
+installer is for x64.
 
 ### Ubuntu 24.04 and 26.04
 
@@ -248,10 +254,13 @@ Update**, which starts the new version and opens the windows again on the sessio
 they showed, with their size and place. The sessions themselves carry on in tmux.
 
 In the session list, click a session to show it in the focused pane, or
-drag it onto a pane. Middle-click or Ctrl+click opens it in a new pane to the right. Right-click gives Open in Split Right,
-Open in Split Down, Rename and Kill, and Detach for a session shown in the window, which
-leaves the session running and its panes on the Detached page. In a terminal, right-click gives copy, paste and split,
-and on a link, Open Link, Preview in Split, Save, Save As… and Copy Link,
+drag it onto a pane. Middle-click or Ctrl+click opens it in a new pane to the right.
+Right-click gives Open, Open in Split Right and Open in Split Down; Detach for a session
+shown in the window, which leaves the session running and its panes on the Detached page;
+Save Scrollback, Save Scrollback As… and Scrollback Dir…; Pin or Unpin; and Rename… and
+Kill Session…. In a terminal, right-click gives Copy, Paste, Split Right and Split Down,
+the scrollback items, New Session and Close Pane, and on a link, Open Link, Preview in
+Split, Save, Save As… and Copy Link,
 even with tmux's `mouse` option on; a program that uses the mouse, such as vim or htop,
 gets the click instead, and Shift+right-click gives the menu there. Copy and Paste are
 also in the main menu.
@@ -269,6 +278,7 @@ also in the main menu.
 | Ctrl+Shift+C / Ctrl+Shift+V | Copy / paste |
 | Ctrl+plus / Ctrl+minus / Ctrl+0 | Zoom in / out / reset |
 | Ctrl+Shift+S | Show or hide the session list |
+| Ctrl+Shift+I | Show or hide the file shelf |
 | Ctrl+Shift+F | Search sessions (Enter opens the first match, Escape returns to the terminal) |
 | Ctrl+Shift+N | New window |
 | Ctrl+comma | Preferences |
@@ -295,7 +305,8 @@ session.
 ## Configuration
 
 Choices made in the UI, such as which side the session list is on, whether it's grouped,
-pinned sessions and Preferences, are remembered in `~/.local/state/tmux-tabbed-terminal/state.yml`.
+the tab bar, pinned sessions and Preferences, are remembered in
+`~/.local/state/tmux-tabbed-terminal/state.yml`.
 
 Configuration is optional. The application reads
 `~/.config/tmux-tabbed-terminal/config.yml` if it exists, or the file given with
@@ -311,6 +322,10 @@ appearance:
   palette: [tango]         # or a list of 16 colors
 activity:
   timeout: 2s              # how long a session shows as busy after output stops
+shelf:
+  show: new-files          # or always, or never
+behaviour:
+  confirm-kill: true       # ask before killing a session
 ```
 
 ## Remote hosts
@@ -402,8 +417,8 @@ macOS, on amd64 and arm64, and the application only talks to one of its own vers
 an upgrade installs a new one; agents unused for a month are removed. Hosts reached
 through another run their ssh on the first host, through its agent.
 
-`ssh.agent` chooses: `auto`, the default, uses the agent on Windows, and `always` uses it
-on Linux too, for remote commands and previews (panes there keep their own ssh, as VTE
+`ssh.agent` chooses: `auto`, the default, uses the agent on Windows, `never` doesn't use
+it, and `always` uses it on Linux too, for remote commands and previews (panes there keep their own ssh, as VTE
 reads only its own pty). On Linux, "Reach remote hosts through the agent" in Preferences
 chooses too, from the next start. On a host there's no agent for, Windows connects once per
 command. The protocol is gRPC, defined in
@@ -464,8 +479,9 @@ Pushing a `v*` tag runs `.github/workflows/release.yml`. It does the following:
 
 1. Runs the integration checks, which build every package as its repository will.
 2. Builds the binary archives for amd64 on `ubuntu-24.04` and arm64 on `ubuntu-24.04-arm`,
-   and the vendored source tarball (`go run mage.go source`), and makes a GitHub release
-   of them with their checksums. Releases carry only code: no packages.
+   the vendored source tarball (`go run mage.go source`), and the Windows installer, with
+   `install.ps1`, and makes a GitHub release of them with their checksums. Linux packages
+   come from the PPA and COPR, not the release.
 3. Builds signed source packages for Ubuntu 24.04 (noble) and 26.04 (resolute) with
    `go run mage.go debSource <suite>` and uploads them to the PPA, where Launchpad builds
    them.
@@ -536,18 +552,20 @@ MIT: see [LICENSE](LICENSE). The binary links
 |---|---|
 | `cmd/tmux-tabbed-terminal` | `main`. It only calls the entrypoint. |
 | `pkg/entrypoints/tmux_tabbed_terminal` | Command line, logging, configuration loading, and the `run` and `config` commands. |
-| `pkg/ui` | The GTK3 interface: application, windows, sidebar, pane split tree, terminal panes, appearance and menus. |
+| `pkg/ui` | The GTK3 interface: application, windows, sidebar, pane split tree, terminal panes, appearance and menus; link and hover previews, the markdown and file preview, the Mermaid diagram window, the file shelf, downloads and uploads, the ssh dialogs and the restart offer. |
 | `pkg/vte` | cgo bindings for the parts of VTE the UI uses, or on Windows the same API over `pkg/termwidget`. |
 | `pkg/termwidget` | A prototype terminal widget for where VTE isn't available: an emulator, a pty (ConPTY on Windows) and a GTK drawing area. Kept free of the rest of the repository, to be split out. |
 | `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
 | `pkg/agent`, `cmd/ttt-agent` | The agent run on remote hosts, serving the gRPC service in `proto/` over its standard input and output, and the application's side: installing it over ssh, and running commands and terminals through it. |
-| `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop). |
+| `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop, showing URIs, loading and drawing pixbufs). |
+| `pkg/askpass` | The dialog ssh runs as its `SSH_ASKPASS`, and the in-memory store of remembered passphrases. |
+| `pkg/filewatch` | Watches previewed files for changes, with inotify, kqueue or ReadDirectoryChangesW. |
 | `pkg/markdown` | Lays out GitHub Flavored Markdown, parsed with goldmark, as blocks of styled text for the file preview to draw. |
 | `pkg/sshconfig` | Lists the concrete hosts of an OpenSSH client configuration, following `Include`. |
 | `pkg/sessionlist` | Groups sessions by application, orders and filters the session list. |
 | `pkg/activity` | Decides which sessions are busy or have unseen output, from successive snapshots. |
 | `pkg/theme` | Color parsing and GNOME Terminal's built-in palettes. |
-| `packaging/` | Desktop entry, icon, AppStream metadata, example configuration, the RPM spec, the Debian packaging and the gotk3 build tag detection. |
+| `packaging/` | Desktop entry, icon, AppStream metadata, example configuration, the RPM spec, the Debian packaging, the gotk3 build tag detection, the agent build script, and the Windows bundle, installer and install script. |
 | `magefile.go`, `magefile_pkg.go` | The build system, plus the source tarball, source RPM and Debian source package targets. |
 
 Each host has a background goroutine which polls its tmux server once per `poll-interval` with one command that lists
