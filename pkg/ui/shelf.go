@@ -316,11 +316,12 @@ var (
 )
 
 // markdownSummary returns a markdown document's title, its first heading or else name,
-// and the start of its text, without markdown syntax or code blocks.
+// and the start of its text, without markdown syntax, later headings or code blocks. List
+// items are set apart with a dot.
 func markdownSummary(doc, name string) (string, string) {
 	title := ""
-	var parts []string
-	length, inCode := 0, false
+	var text strings.Builder
+	inCode, lastItem := false, false
 	for line := range strings.Lines(doc) {
 		t := strings.TrimSpace(line)
 		if strings.HasPrefix(t, "```") || strings.HasPrefix(t, "~~~") {
@@ -331,12 +332,12 @@ func markdownSummary(doc, name string) (string, string) {
 			continue
 		}
 		if strings.HasPrefix(t, "#") {
-			t = strings.TrimSpace(strings.TrimLeft(t, "#"))
 			if title == "" {
-				title = t
-				continue
+				title = strings.TrimSpace(strings.TrimLeft(t, "#"))
 			}
+			continue
 		}
+		item := mdListMarker.MatchString(t) && !strings.HasPrefix(t, ">")
 		t = mdListMarker.ReplaceAllString(t, "")
 		t = mdLinkText.ReplaceAllString(t, "$1")
 		t = mdEmphasis.ReplaceAllString(t, "")
@@ -344,15 +345,23 @@ func markdownSummary(doc, name string) (string, string) {
 		if t == "" {
 			continue
 		}
-		parts = append(parts, t)
-		if length += len(t); length > shelfSnippetChars {
+		switch {
+		case text.Len() == 0:
+		case item || lastItem:
+			text.WriteString(" · ")
+		default:
+			text.WriteString(" ")
+		}
+		text.WriteString(t)
+		lastItem = item
+		if text.Len() > shelfSnippetChars {
 			break
 		}
 	}
 	if title == "" {
 		title = name
 	}
-	return title, clip(strings.Join(parts, " "), shelfSnippetChars)
+	return title, clip(text.String(), shelfSnippetChars)
 }
 
 // htmlSummary returns an HTML document's title, or else name, and the start of its text.

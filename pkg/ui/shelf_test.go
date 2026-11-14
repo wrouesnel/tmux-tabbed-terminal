@@ -39,13 +39,13 @@ func TestShelfKindOf(t *testing.T) {
 // TestMarkdownSummary takes the first heading as the title, and the text without its
 // markdown, code or table rules.
 func TestMarkdownSummary(t *testing.T) {
-	doc := "# Upload plan\n\nDrop files on a **pane**.\n\n```go\nx := 1\n```\n\n" +
-		"- [x] Pipe it, see [the doc](d.md)\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+	doc := "# Upload plan\n\nDrop files on a **pane**.\n\n```go\nx := 1\n```\n\n## Steps\n\n" +
+		"- [x] Pipe it, see [the doc](d.md)\n- [ ] Test it\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
 	title, text := markdownSummary(doc, "plan.md")
 	if title != "Upload plan" {
 		t.Errorf("title %q", title)
 	}
-	if want := "Drop files on a pane. Pipe it, see the doc a b 1 2"; text != want {
+	if want := "Drop files on a pane. · Pipe it, see the doc · Test it · a b 1 2"; text != want {
 		t.Errorf("text %q, want %q", text, want)
 	}
 	if title, _ := markdownSummary("Just text.\n", "n.md"); title != "n.md" {
