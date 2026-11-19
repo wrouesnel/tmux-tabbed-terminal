@@ -569,6 +569,18 @@ func (a *App) refreshAll() {
 	}
 }
 
+// reattachAll reattaches every pane, in every window, which offers to reattach its
+// session, as its Reattach button would.
+func (a *App) reattachAll() {
+	for w := range a.windows {
+		for _, p := range w.panes() {
+			if p.awaitsReattach() {
+				p.reattach()
+			}
+		}
+	}
+}
+
 // commandContext returns a context bounding one tmux command.
 func (a *App) commandContext() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(a.ctx, commandTimeout)

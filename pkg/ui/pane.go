@@ -359,7 +359,7 @@ func (p *Pane) buildEmptyPage() gtk.IWidget {
 	buttons, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, paneSpacing)
 	buttons.SetHAlign(gtk.ALIGN_CENTER)
 	p.reattachBtn, _ = gtk.ButtonNewWithLabel("Reattach")
-	p.reattachBtn.Connect("clicked", func() { p.attach(p.SessionKey()) })
+	p.reattachBtn.Connect("clicked", p.reattach)
 	p.reattachBtn.Connect("focus-in-event", func() bool {
 		p.win.setActivePane(p)
 		return false
@@ -398,6 +398,18 @@ func (p *Pane) showEmpty(title, hint string, reattach bool) {
 	p.emptyHint.SetText(hint)
 	p.reattachBtn.SetVisible(reattach)
 	p.stack.SetVisibleChildName(pageEmpty)
+	p.win.syncReattachAll()
+}
+
+// awaitsReattach reports whether the pane shows its Reattach button: its session was
+// detached, couldn't be reached, or its client couldn't start.
+func (p *Pane) awaitsReattach() bool {
+	return !p.closed && !p.running && p.file == nil && p.reattachBtn.GetVisible()
+}
+
+// reattach attaches the pane to its session again, as its Reattach button does.
+func (p *Pane) reattach() {
+	p.attach(p.SessionKey())
 }
 
 // showFile shows a file from a host in the pane, in place of the terminal. The pane
@@ -613,6 +625,7 @@ func (p *Pane) started(client paneClient, tty, key string, generation int) {
 	p.win.app.tracker.MarkSeen(key)
 	p.closeFile()
 	p.stack.SetVisibleChildName(pageTerminal)
+	p.win.syncReattachAll()
 	if p.win.activePane == p {
 		p.term.GrabFocus()
 	}

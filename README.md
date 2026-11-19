@@ -301,7 +301,9 @@ Shortcuts with Ctrl+Shift and a letter are safest: a terminal sends programs the
 thing for them as for Ctrl and the letter, so nothing is lost. Plain Ctrl+V, for one, is
 better left to programs, which use it to insert a character literally or select a block.
 
-If a pane's client detaches (`prefix d`), the pane offers to reattach. If its session
+If a pane's client detaches (`prefix d`), the pane offers to reattach. While any pane
+offers to, the title bar has a Reattach All button, which reattaches every such pane in
+every window at once, such as after a remote host comes back. If its session
 ends, the pane closes, or, if it's the only pane, moves on to the most recently active
 session.
 

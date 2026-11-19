@@ -50,6 +50,10 @@ type Window struct {
 	inner       *gtk.Paned
 	shelf       *shelf
 	shelfAction *glib.SimpleAction
+	// reattachAll reattaches every pane offering to reattach its session. It shows while
+	// one of the window's panes does.
+	reattachAll       *gtk.Button
+	reattachAllAction *glib.SimpleAction
 	// content is the terminal side of the window: the tab bar over the panes.
 	content *gtk.Box
 	// main is the content with the download toast over it.
@@ -170,6 +174,12 @@ func (w *Window) buildHeaderBar() *gtk.HeaderBar {
 
 	w.update = w.newUpdateButton()
 	hb.PackEnd(w.update)
+
+	w.reattachAll, _ = gtk.ButtonNewWithLabel("Reattach All")
+	w.reattachAll.SetActionName("win.reattach-all")
+	w.reattachAll.SetTooltipText("Reattach every pane showing a detached or disconnected session, in all windows")
+	w.reattachAll.SetNoShowAll(true)
+	hb.PackEnd(w.reattachAll)
 	return hb
 }
 
@@ -292,6 +302,12 @@ func (w *Window) installActions() {
 	})
 	m.AddAction(showShelf)
 	w.shelfAction = showShelf
+
+	reattachAll := glib.SimpleActionNew("reattach-all", nil)
+	reattachAll.Connect("activate", func() { w.app.reattachAll() })
+	reattachAll.SetEnabled(false)
+	m.AddAction(reattachAll)
+	w.reattachAllAction = reattachAll
 	w.shelf.installActions(m)
 }
 
@@ -817,9 +833,24 @@ func (w *Window) toggleFullscreen() {
 	w.fullscreen = !w.fullscreen
 }
 
+// syncReattachAll shows the Reattach All button while one of the window's panes offers
+// to reattach its session.
+func (w *Window) syncReattachAll() {
+	if w.reattachAll == nil || w.reattachAllAction == nil {
+		return
+	}
+	waiting := false
+	for _, p := range w.panes() {
+		waiting = waiting || p.awaitsReattach()
+	}
+	w.reattachAllAction.SetEnabled(waiting)
+	w.reattachAll.SetVisible(waiting)
+}
+
 // refresh redraws the window from the application's current state.
 func (w *Window) refresh() {
 	panes := w.panes()
+	defer w.syncReattachAll()
 	split := len(panes) > 1
 
 	shown, selected := w.shownSessions()
