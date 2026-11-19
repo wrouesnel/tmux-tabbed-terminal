@@ -98,11 +98,12 @@ or split the window to watch several sessions side by side.
   to preview it in the split, as a double-click on its path would, or drag it out to open
   it in a window of its own; right-click for Preview in Split, Preview in New Window, Open
   With Default Application (for a local file), Copy Path and Remove From Shelf. Local files are read again when they change. The title bar's shelf button,
-  or Ctrl+Shift+I, shows and hides it. By default it shows itself when the session
-  mentions a new file, and for a session with files, and stays hidden for one without;
-  Preferences, or `shelf.show` in the configuration file, can instead have it always
-  shown or never shown, with the button still showing or hiding it until another session
-  is shown.
+  or Ctrl+Shift+I, shows and hides it. When it shows is set in Preferences, or with
+  `shelf.show` in the configuration file, and kept: `new-files`, the default, pops it up
+  when the session mentions a new file, and shows it for sessions with files and not for
+  ones without; `always` shows it even when it's empty; `never` never pops it up, so it
+  shows only when its button is clicked. With `always` or `never`, what the button chose
+  stays as sessions are switched.
 * **File previews.** Right-click a link to a markdown file or an image, local or on a
   remote host, and choose Preview in Split to show it in a pane beside the terminal, as
   the plans, reports and screenshots a coding agent writes. Markdown is formatted as

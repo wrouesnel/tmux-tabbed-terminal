@@ -124,9 +124,11 @@ type LinksConfig struct {
 // ShelfConfig sets the file shelf, which lists the images, markdown and HTML files a
 // session mentions.
 type ShelfConfig struct {
-	// Show is when a window's shelf shows: "new-files" when its session mentions a new
-	// file, and for sessions with files, "always" or "never". Its button shows or hides it
-	// for the moment whatever this says. Preferences overrides it.
+	// Show is when a window's shelf shows: "new-files" pops it up when its session
+	// mentions a new file, and shows it for sessions with files; "always" shows it, even
+	// when empty; "never" shows it only when its button is clicked. With "always" or
+	// "never", its button's choice stays as sessions are switched. Preferences overrides
+	// it.
 	Show string `yaml:"show"`
 }
 

@@ -72,9 +72,10 @@ links:
 shelf:
   # The file shelf, beside the panes, lists the images, markdown and HTML files the
   # session of the window's active pane mentions, newest first. When it shows:
-  # new-files, when the session mentions a new file, and for sessions with files; always;
-  # or never. Its title bar button shows or hides it for the moment whatever this says.
-  # Preferences overrides this.
+  # new-files pops it up when the session mentions a new file, and shows it for sessions
+  # with files; always shows it, even when empty; never doesn't pop it up, so it shows
+  # only when its title bar button is clicked. With always or never, the button's choice
+  # stays as sessions are switched. Preferences overrides this.
   show: new-files
 
 ssh:

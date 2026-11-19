@@ -483,9 +483,9 @@ func (p *Pane) scanForShelf() {
 	})
 }
 
-// When the shelf shows: when the session mentions a new file, always or never. Its button
-// shows or hides it for the moment whatever the choice; showing another session puts it
-// back as chosen.
+// When the shelf shows: popping up when the session mentions a new file, always, even
+// when empty, or never popping up, so only when its button is clicked. With always or
+// never, its button's choice stays as sessions are switched.
 const (
 	shelfShowNewFiles = "new-files"
 	shelfShowAlways   = "always"
@@ -657,15 +657,17 @@ func (s *shelf) sync() {
 	}
 }
 
-// applyShow shows or hides the shelf as chosen: always, never, or, when it shows for new
-// files, for a session with files, unless it was shown or hidden with its button since
-// the session last mentioned a new file.
+// applyShow shows or hides the shelf as chosen: always, even with no files, unless hidden
+// with its button; only when shown with its button; or, when it shows for new files, for
+// a session with files, unless it was shown or hidden with its button since the session
+// last mentioned a new file. Its button's choice stays from session to session, but for
+// new files.
 func (s *shelf) applyShow() {
 	switch s.w.app.shelfShow() {
 	case shelfShowAlways:
-		s.w.setShelfVisible(true)
+		s.w.setShelfVisible(!s.dismissed)
 	case shelfShowNever:
-		s.w.setShelfVisible(false)
+		s.w.setShelfVisible(s.userShown)
 	default:
 		if !s.userShown && !s.dismissed {
 			s.w.setShelfVisible(len(s.w.app.shelf.items(s.key)) > 0)
@@ -680,9 +682,9 @@ func (s *shelf) changed(key string, isNew bool) {
 		return
 	}
 	s.rebuild()
-	if isNew {
+	if isNew && s.w.app.shelfShow() == shelfShowNewFiles {
 		s.dismissed = false
-		if s.w.app.shelfShow() == shelfShowNewFiles && !s.visible() {
+		if !s.visible() {
 			s.w.setShelfVisible(true)
 		}
 	}

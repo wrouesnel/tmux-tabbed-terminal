@@ -211,12 +211,13 @@ func newPreferences(a *App) *preferences {
 	add("Window tabs", p.tabBar)
 
 	p.shelf, _ = gtk.ComboBoxTextNew()
-	p.shelf.Append(shelfShowNewFiles, "Show it when a file is mentioned")
-	p.shelf.Append(shelfShowAlways, "Always show it")
-	p.shelf.Append(shelfShowNever, "Never show it")
+	p.shelf.Append(shelfShowNewFiles, "Pop up when a file is mentioned")
+	p.shelf.Append(shelfShowAlways, "Always show, even when empty")
+	p.shelf.Append(shelfShowNever, "Never pop up: show with its button")
 	p.shelf.SetActiveID(a.shelfShow())
 	p.shelf.SetTooltipText("The file shelf lists the images, markdown and HTML files the session mentions. " +
-		"Its title bar button, or Ctrl+Shift+I, shows and hides it for the moment, whatever this says.")
+		"Its title bar button, or Ctrl+Shift+I, shows or hides it, and it stays that way from session " +
+		"to session, but when it pops up for a newly mentioned file.")
 	p.shelf.Connect("changed", func() {
 		if !p.loading {
 			a.setShelfShow(p.shelf.GetActiveID())
