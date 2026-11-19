@@ -44,7 +44,15 @@ type Client struct {
 
 	mu           sync.Mutex
 	defaultShell string
+	// version is the server's version as last asked, at versionAt.
+	version   string
+	versionAt time.Time
 }
+
+// versionTTL is how long the server's version is taken as known. It changes only when
+// the server is restarted, as with another tmux, so asking for it before each capture is
+// a process spent for nothing.
+const versionTTL = time.Minute
 
 // SetDefaultShell sets the server's default-shell option each time a session or window
 // is made, so that they and the panes split from them run shell. Empty leaves the option
@@ -649,10 +657,23 @@ func CaptureCrashes(version string) bool {
 	return strings.HasPrefix(strings.TrimSpace(version), "next-3.4")
 }
 
-// ServerVersion returns the version of the tmux server, as #{version} reports it.
+// ServerVersion returns the version of the tmux server, as #{version} reports it. It's
+// asked again at most once a minute.
 func (c *Client) ServerVersion(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	version, at := c.version, c.versionAt
+	c.mu.Unlock()
+	if version != "" && time.Since(at) < versionTTL {
+		return version, nil
+	}
 	out, err := c.run(ctx, "display-message", "-p", "#{version}")
-	return strings.TrimSpace(out), err
+	version = strings.TrimSpace(out)
+	if err == nil && version != "" {
+		c.mu.Lock()
+		c.version, c.versionAt = version, time.Now()
+		c.mu.Unlock()
+	}
+	return version, err
 }
 
 // CaptureHistory returns all the history and visible text of a session's current pane,
