@@ -543,6 +543,10 @@ type shelf struct {
 	listed []*gtk.ListBoxRow
 	// pressed is the item the last button press was on, which a drag takes.
 	pressed *shelfItem
+	// hover previews the item under the pointer, as a link's in a terminal is previewed,
+	// on the side facing the panes. hovered is that item.
+	hover   *hoverer
+	hovered *shelfItem
 	// userShown is set when it was shown with its button, and dismissed when it was
 	// hidden with it, since the session last mentioned a new file.
 	userShown, dismissed bool
@@ -578,7 +582,31 @@ func newShelf(w *Window) *shelf {
 	s.list.SetSelectionMode(gtk.SELECTION_NONE)
 	s.list.SetActivateOnSingleClick(true)
 	addClass(s.list, "ttt-shelf-list")
+	s.hover = newHoverer(w, s.list, func() gtk.PositionType {
+		if w.app.sidebarRight {
+			return gtk.POS_RIGHT
+		}
+		return gtk.POS_LEFT
+	}, func() bool { return false })
+	s.hover.forgotten = func() { s.hovered = nil }
+	s.list.AddEvents(int(gdk.POINTER_MOTION_MASK | gdk.LEAVE_NOTIFY_MASK))
+	s.list.Connect("motion-notify-event", func(_ interface{}, ev *gdk.Event) bool {
+		_, y := gdk.EventMotionNewFromEvent(ev).MotionVal()
+		s.onMotion(y)
+		return false
+	})
+	// Leaving the shelf may be for the preview, which is beside it.
+	s.list.Connect("leave-notify-event", func() bool {
+		if s.hover.preview != nil {
+			s.hover.forget()
+			s.hover.hideSoon()
+		} else {
+			s.hover.hide()
+		}
+		return false
+	})
 	s.list.Connect("row-activated", func(_ interface{}, row *gtk.ListBoxRow) {
+		s.hover.hide()
 		if it := s.rows[row.Native()]; it != nil {
 			s.open(it)
 		}
@@ -621,6 +649,7 @@ func (s *shelf) sync() {
 		return
 	}
 	s.key = key
+	s.hover.hide()
 	s.rebuild()
 	s.applyShow()
 	if s.visible() {
@@ -750,11 +779,56 @@ func (s *shelf) openInWindow(it *shelfItem, x, y int, at bool) {
 	s.w.app.NewPreviewWindow(it.host, it.file, x, y, at)
 }
 
+// onMotion previews the item under the pointer, at y in the list, once the pointer rests
+// on it, as a link in a terminal is previewed.
+func (s *shelf) onMotion(y float64) {
+	if !s.w.app.cfg.Links.ImagePreviews {
+		return
+	}
+	var it *shelfItem
+	if row := s.list.GetRowAtY(int(y)); row != nil {
+		it = s.rows[row.Native()]
+	}
+	if it != nil && it == s.hovered {
+		s.hover.keep()
+		return
+	}
+	switch {
+	case s.hover.engaged():
+		// It stays until another item's preview takes its place.
+		s.hover.forget()
+	case s.hover.preview != nil:
+		s.hover.forget()
+		s.hover.hideSoon()
+	default:
+		s.hover.hide()
+	}
+	if it == nil {
+		return
+	}
+	s.hovered = it
+	s.hover.rest(func(gen int) {
+		for _, row := range s.listed {
+			if s.rows[row.Native()] != it {
+				continue
+			}
+			x, y, err := row.TranslateCoordinates(s.list, 0, 0)
+			if err != nil {
+				return
+			}
+			rect := widgetRect(x, y, row.GetAllocatedWidth(), row.GetAllocatedHeight())
+			s.hover.load(s.w.app.host(it.host), it.link(), gen, rect)
+			return
+		}
+	})
+}
+
 // onButtonPress notes the item pressed, for a drag, and opens its menu on a right click.
 func (s *shelf) onButtonPress(ev *gdk.EventButton) bool {
 	if ev.Type() != gdk.EVENT_BUTTON_PRESS {
 		return false
 	}
+	s.hover.hide()
 	row := s.list.GetRowAtY(int(ev.Y()))
 	s.pressed = nil
 	if row != nil {
@@ -836,6 +910,7 @@ func (s *shelf) dragFiles() {
 	s.list.DragSourceSet(gdk.BUTTON1_MASK, []gtk.TargetEntry{*te}, gdk.ACTION_COPY)
 	var dragged *shelfItem
 	s.list.Connect("drag-begin", func(_ interface{}, ctx interface{}) {
+		s.hover.hide()
 		dragged = s.pressed
 		icon := "text-x-generic-symbolic"
 		if dragged != nil && dragged.kind == shelfImage {

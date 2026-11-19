@@ -49,6 +49,9 @@ const (
 	previewMinHeight = 60
 	// previewEdge is how near an edge of a preview, in pixels, a drag resizes it.
 	previewEdge = 8
+	// previewSideMargin is the room a preview shown beside the shelf leaves for its arrow
+	// and border.
+	previewSideMargin = 64
 	// previewMaxShare is the most of the window a preview is resized to.
 	previewMaxShare = 0.95
 )
@@ -228,78 +231,88 @@ func htmlText(doc string) string {
 	return strings.Join(lines, "\n")
 }
 
-// onMotion follows the pointer over links, and previews the image, markdown or HTML file
-// a link names once the pointer rests on it. Clicking the preview opens the file, which
-// works with the mouse alone even where the program in the pane has the mouse's clicks,
-// such as a coding agent. In a split window, where the terminal only sees the row of a link
-// tmux wrapped that the pointer is on, if that, tmux is asked whenever the pointer rests,
-// and the preview stays while the pointer is on the link it found.
-func (p *Pane) onMotion(event *gdk.Event) {
-	if !p.win.app.cfg.Links.ImagePreviews || !p.running {
-		return
-	}
-	m, matched := p.term.MatchAt(event)
-	x, y := gdk.EventMotionNewFromEvent(event).MotionVal()
-	col, row := p.term.CellAt(x, y)
-	if p.hoverSpan.contains(col, row) || (matched && p.hoverSpan == cellSpan{} && m.Text == p.hoverText) {
-		p.keepPreview()
-		return
-	}
-	_, _, readLines := p.readsPaneLines(m)
-	switch {
-	case p.preview != nil && p.preview.engaged:
-		// It stays until another link's preview takes its place.
-		p.forgetHover()
-		if !matched && !readLines {
-			return
+// hoverer shows hover previews of files by a widget: of the links in a pane's terminal,
+// and of the files on the shelf. It shows one at a time. A preview doesn't take the
+// focus, so typing still goes where it did. With the pointer on it, it grows and stays
+// for reading; the wheel scrolls text, its edges resize it, and a click opens the file.
+type hoverer struct {
+	win *Window
+	// anchor is the widget previews point at a rectangle of, and position the side of it
+	// they're shown on.
+	anchor   gtk.IWidget
+	position func() gtk.PositionType
+	// gone reports whether what the previews are for has gone, so nothing more is shown.
+	gone func() bool
+	// forgotten is called whenever what's under the pointer is forgotten.
+	forgotten func()
+	preview   *hoverPreview
+	// timer waits for the pointer to rest. gen increases whenever what's under the pointer
+	// is forgotten, so a preview on the way for it is dropped.
+	timer glib.SourceHandle
+	gen   int
+}
+
+func newHoverer(win *Window, anchor gtk.IWidget, position func() gtk.PositionType, gone func() bool) *hoverer {
+	return &hoverer{win: win, anchor: anchor, position: position, gone: gone, forgotten: func() {}}
+}
+
+// pointRect is the rectangle of a point, for a preview to point at.
+func pointRect(x, y float64) gdk.Rectangle {
+	return widgetRect(int(x), int(y), 1, 1)
+}
+
+// widgetRect is a rectangle of a widget.
+func widgetRect(x, y, w, h int) gdk.Rectangle {
+	rect := gdk.Rectangle{}
+	rect.SetX(x)
+	rect.SetY(y)
+	rect.SetWidth(w)
+	rect.SetHeight(h)
+	return rect
+}
+
+// engaged reports whether a preview the pointer has been on is showing.
+func (hv *hoverer) engaged() bool {
+	return hv.preview != nil && hv.preview.engaged
+}
+
+// rest calls show once the pointer has rested for previewDelay, unless what's under it
+// is forgotten first. show gets the generation to hand to load.
+func (hv *hoverer) rest(show func(gen int)) {
+	gen := hv.gen
+	hv.timer = glib.TimeoutAdd(uint(previewDelay/time.Millisecond), func() bool {
+		hv.timer = 0
+		if hv.current(gen) {
+			show(gen)
 		}
-	case p.preview != nil:
-		// Off the link with its preview showing: the pointer may be on its way to it.
-		p.hidePreviewSoon()
-		return
-	default:
-		p.hidePreview()
-		if !matched && !readLines {
-			return
-		}
-	}
-	p.hoverText = m.Text
-	gen := p.hoverGen
-	p.hoverTimer = glib.TimeoutAdd(uint(previewDelay/time.Millisecond), func() bool {
-		p.hoverTimer = 0
-		if gen != p.hoverGen {
-			return false
-		}
-		p.linkAt(m, matched, x, y, func(l link, ok bool) {
-			if ok && gen == p.hoverGen && !p.closed {
-				p.hoverSpan = l.span
-				p.loadPreview(l, gen, x, y)
-			}
-		})
 		return false
 	})
 }
 
-// loadPreview reads and decodes the image a link names, if it names one, and shows it
-// by the point x, y of the terminal, unless the pointer has moved on by then. Of a
-// markdown or HTML file, it shows the start.
-func (p *Pane) loadPreview(l link, gen int, x, y float64) {
-	if l.file != "" && (isMarkdownPath(l.file) || isHTMLPath(l.file)) {
-		p.loadTextPreview(l, gen, x, y)
+// current reports whether what was under the pointer at generation gen still is.
+func (hv *hoverer) current(gen int) bool {
+	return gen == hv.gen && !hv.gone()
+}
+
+// load reads the file a link names from its host, if it's an image, markdown or HTML
+// file, and shows its preview pointing at rect of the anchor, unless what's under the
+// pointer has changed by then.
+func (hv *hoverer) load(h *Host, l link, gen int, rect gdk.Rectangle) {
+	if h == nil || l.file == "" {
 		return
 	}
-	if l.file == "" || !isImagePath(l.file) {
+	if isMarkdownPath(l.file) || isHTMLPath(l.file) {
+		hv.loadText(h, l, gen, rect)
 		return
 	}
-	h, _ := p.win.app.lookup(p.SessionKey())
-	if h == nil {
+	if !isImagePath(l.file) {
 		return
 	}
 	type loaded struct {
 		data []byte
 		pb   *gdk.Pixbuf
 	}
-	runAsync(p.win.app, func(ctx context.Context) (loaded, error) {
+	runAsync(hv.win.app, func(ctx context.Context) (loaded, error) {
 		data, err := readHostFile(ctx, h, l.file)
 		if err != nil {
 			return loaded{}, err
@@ -307,55 +320,48 @@ func (p *Pane) loadPreview(l link, gen int, x, y float64) {
 		pb, err := gtkx.PixbufFit(data, previewWidth, previewHeight)
 		return loaded{data, pb}, err
 	}, func(img loaded, err error) {
-		if p.closed || gen != p.hoverGen {
+		if !hv.current(gen) {
 			return
 		}
 		if err != nil {
-			p.win.app.log.Debug("No preview", zap.String("file", l.file), zap.Error(err))
+			hv.win.app.log.Debug("No preview", zap.String("file", l.file), zap.Error(err))
 			return
 		}
-		p.showPreview(l, img.data, img.pb, x, y)
+		hv.showImage(l, img.data, img.pb, rect)
 	})
 }
 
-// showPreview shows an image in a popover pointing at x, y of the terminal. It doesn't
-// take the focus, so typing still goes to the terminal. With the pointer on it, it grows,
-// and a click opens the file in the preview pane.
-func (p *Pane) showPreview(l link, data []byte, pb *gdk.Pixbuf, x, y float64) {
+// showImage shows an image's preview. A click opens it in the preview pane.
+func (hv *hoverer) showImage(l link, data []byte, pb *gdk.Pixbuf, rect gdk.Rectangle) {
 	img, err := gtk.ImageNewFromPixbuf(pb)
 	if err != nil {
 		return
 	}
 	hp := &hoverPreview{image: img, link: l, data: data}
-	p.popPreview(hp, img, "Click to open it in the preview pane", func() { p.win.previewFile(l.host, l.file) }, x, y)
+	hv.pop(hp, img, "Click to open it in the preview pane", func() { hv.win.previewFile(l.host, l.file) }, rect)
 }
 
-// loadTextPreview reads the start of the markdown or HTML file a link names, and shows
-// it by the point x, y of the terminal, unless the pointer has moved on by then.
-func (p *Pane) loadTextPreview(l link, gen int, x, y float64) {
-	h, _ := p.win.app.lookup(p.SessionKey())
-	if h == nil {
-		return
-	}
-	runAsync(p.win.app, func(ctx context.Context) ([]byte, error) {
+// loadText reads the start of a markdown or HTML file, and shows it, unless what's under
+// the pointer has changed by then.
+func (hv *hoverer) loadText(h *Host, l link, gen int, rect gdk.Rectangle) {
+	runAsync(hv.win.app, func(ctx context.Context) ([]byte, error) {
 		return readHostFileStart(ctx, h, l.file, previewTextBytes)
 	}, func(data []byte, err error) {
-		if p.closed || gen != p.hoverGen {
+		if !hv.current(gen) {
 			return
 		}
 		if err != nil {
-			p.win.app.log.Debug("No preview", zap.String("file", l.file), zap.Error(err))
+			hv.win.app.log.Debug("No preview", zap.String("file", l.file), zap.Error(err))
 			return
 		}
-		p.showTextPreview(l, data, x, y)
+		hv.showText(l, data, rect)
 	})
 }
 
-// showTextPreview shows the start of a markdown or HTML file in a popover pointing at
-// x, y of the terminal, as showPreview shows an image: markdown formatted as the preview
-// pane formats it, and HTML as its text. A click opens the file: markdown in the preview
-// pane, and HTML as a double click on its link would.
-func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
+// showText shows the start of a markdown or HTML file, as showImage shows an image:
+// markdown formatted as the preview pane formats it, and HTML as its text. A click opens
+// the file: markdown in the preview pane, and HTML as a double click on its link would.
+func (hv *hoverer) showText(l link, data []byte, rect gdk.Rectangle) {
 	var view *gtk.TextView
 	caption := "Click to open it in the preview pane"
 	if isMarkdownPath(l.file) {
@@ -384,29 +390,22 @@ func (p *Pane) showTextPreview(l link, data []byte, x, y float64) {
 	scroll.Add(view)
 	hp := &hoverPreview{text: scroll, view: view, link: l, width: previewWidth, maxHeight: previewHeight}
 	// It's as tall as its text, up to maxHeight, once the text is laid out.
-	scroll.GetVAdjustment().Connect("changed", func() { glib.IdleAdd(func() { p.fitTextHeight(hp) }) })
-	p.popPreview(hp, scroll, caption, func() { p.win.openLinkDefault(l) }, x, y)
+	scroll.GetVAdjustment().Connect("changed", func() { glib.IdleAdd(func() { hv.fitTextHeight(hp) }) })
+	hv.pop(hp, scroll, caption, func() { hv.win.openLinkDefault(l) }, rect)
 }
 
-// popPreview shows a hover preview, its content above a caption, in a popover pointing at
-// x, y of the terminal, in place of any other. It doesn't take the focus, so typing still
-// goes to the terminal. With the pointer on it, it grows, and stays; the wheel scrolls
-// text, and a click calls open.
-func (p *Pane) popPreview(hp *hoverPreview, content gtk.IWidget, caption string, open func(), x, y float64) {
-	popover, err := gtk.PopoverNew(p.term)
+// pop shows a hover preview, its content above a caption, in a popover pointing at rect
+// of the anchor, in place of any other.
+func (hv *hoverer) pop(hp *hoverPreview, content gtk.IWidget, caption string, open func(), rect gdk.Rectangle) {
+	popover, err := gtk.PopoverNew(hv.anchor)
 	if err != nil {
 		return
 	}
 	hp.popover = popover
 	addClass(popover, "ttt-hover-preview")
 	popover.SetModal(false)
-	rect := gdk.Rectangle{}
-	rect.SetX(int(x))
-	rect.SetY(int(y))
-	rect.SetWidth(1)
-	rect.SetHeight(1)
 	popover.SetPointingTo(rect)
-	popover.SetPosition(gtk.POS_BOTTOM)
+	popover.SetPosition(hv.position())
 
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
 	box.PackStart(content, true, true, 0)
@@ -419,28 +418,27 @@ func (p *Pane) popPreview(hp *hoverPreview, content gtk.IWidget, caption string,
 	// would take them.
 	events, _ := gtk.EventBoxNew()
 	events.SetAboveChild(true)
-	events.AddEvents(int(gdk.SCROLL_MASK | gdk.SMOOTH_SCROLL_MASK))
+	events.AddEvents(int(gdk.SCROLL_MASK | gdk.SMOOTH_SCROLL_MASK | gdk.POINTER_MOTION_MASK | gdk.BUTTON_RELEASE_MASK))
 	events.Add(box)
 	popover.Add(events)
+	hp.events = events
 
 	events.Connect("enter-notify-event", func() bool {
-		if p.preview == hp {
-			p.keepPreview()
+		if hv.preview == hp {
+			hv.keep()
 			hp.engaged = true
-			p.growPreview(hp)
+			hv.grow(hp)
 		}
 		return false
 	})
 	events.Connect("leave-notify-event", func() bool {
-		if p.preview == hp {
-			p.hidePreviewSoon()
+		if hv.preview == hp {
+			hv.hideSoon()
 		}
 		return false
 	})
-	hp.events = events
-	events.AddEvents(int(gdk.POINTER_MOTION_MASK | gdk.BUTTON_RELEASE_MASK))
 	events.Connect("motion-notify-event", func(_ interface{}, ev *gdk.Event) bool {
-		p.onPreviewMotion(hp, gdk.EventMotionNewFromEvent(ev))
+		hv.onMotion(hp, gdk.EventMotionNewFromEvent(ev))
 		return true
 	})
 	events.Connect("button-release-event", func(_ interface{}, ev *gdk.Event) bool {
@@ -448,7 +446,7 @@ func (p *Pane) popPreview(hp *hoverPreview, content gtk.IWidget, caption string,
 			return false
 		}
 		hp.resizing = 0
-		p.refitImage(hp)
+		hv.refitImage(hp)
 		return true
 	})
 	events.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
@@ -470,16 +468,16 @@ func (p *Pane) popPreview(hp *hoverPreview, content gtk.IWidget, caption string,
 			}
 			return true
 		}
-		p.hidePreview()
+		hv.hide()
 		open()
 		return true
 	})
-	if old := p.preview; old != nil {
-		p.dropPreview(old)
+	if old := hv.preview; old != nil {
+		hv.drop(old)
 	}
 	events.ShowAll()
 	popover.Show()
-	p.preview = hp
+	hv.preview = hp
 }
 
 // scrollBy scrolls an adjustment by a wheel event, by a few lines a notch.
@@ -503,15 +501,15 @@ func scrollBy(adj *gtk.Adjustment, ev *gdk.EventScroll) {
 	adj.SetValue(max(adj.GetLower(), min(value, adj.GetUpper()-adj.GetPageSize())))
 }
 
-// growPreview shows a preview larger, up to previewGrownShare of the window, once.
-// Images already shown whole stay as they are, and text shows more of the file.
-func (p *Pane) growPreview(hp *hoverPreview) {
+// grow shows a preview larger, up to previewGrownShare of the window, once. Images
+// already shown whole stay as they are, and text shows more of the file.
+func (hv *hoverer) grow(hp *hoverPreview) {
 	if hp.grown {
 		return
 	}
 	hp.grown = true
-	width := int(float64(p.win.window.GetAllocatedWidth()) * previewGrownShare)
-	height := int(float64(p.win.window.GetAllocatedHeight()) * previewGrownShare)
+	width := min(int(float64(hv.win.window.GetAllocatedWidth())*previewGrownShare), hv.sideRoom())
+	height := int(float64(hv.win.window.GetAllocatedHeight()) * previewGrownShare)
 	if width <= previewWidth && height <= previewHeight {
 		return
 	}
@@ -519,23 +517,43 @@ func (p *Pane) growPreview(hp *hoverPreview) {
 		hp.width = max(min(width, previewReadWidth), previewWidth)
 		hp.maxHeight = max(height, previewHeight)
 		hp.text.SetSizeRequest(hp.width, previewHeight)
-		p.fitTextHeight(hp)
+		hv.fitTextHeight(hp)
 		return
 	}
-	runAsync(p.win.app, func(context.Context) (*gdk.Pixbuf, error) {
+	runAsync(hv.win.app, func(context.Context) (*gdk.Pixbuf, error) {
 		return gtkx.PixbufFit(hp.data, width, height)
 	}, func(pb *gdk.Pixbuf, err error) {
-		if err != nil || p.preview != hp {
+		if err != nil || hv.preview != hp {
 			return
 		}
 		hp.image.SetFromPixbuf(pb)
 	})
 }
 
+// sideRoom is how wide a preview shown beside the anchor can be without leaving the
+// window, which would flip it above or below; one shown above or below has the window's
+// width.
+func (hv *hoverer) sideRoom() int {
+	anchor := hv.anchor.ToWidget()
+	winWidth := hv.win.window.GetAllocatedWidth()
+	x, _, err := anchor.TranslateCoordinates(hv.win.window, 0, 0)
+	if err != nil {
+		return winWidth
+	}
+	switch hv.position() {
+	case gtk.POS_LEFT:
+		return x - previewSideMargin
+	case gtk.POS_RIGHT:
+		return winWidth - x - anchor.GetAllocatedWidth() - previewSideMargin
+	default:
+		return winWidth
+	}
+}
+
 // fitTextHeight makes a text preview as tall as its text, up to its maxHeight, so it
 // leaves no space below a short one. One resized by hand keeps its size.
-func (p *Pane) fitTextHeight(hp *hoverPreview) {
-	if hp.text == nil || hp.sized || p.preview != hp {
+func (hv *hoverer) fitTextHeight(hp *hoverPreview) {
+	if hp.text == nil || hp.sized || hv.preview != hp {
 		return
 	}
 	adj := hp.text.GetVAdjustment()
@@ -556,9 +574,9 @@ func (p *Pane) fitTextHeight(hp *hoverPreview) {
 	}
 }
 
-// onPreviewMotion shows a resizing cursor by the edges of a preview that can be dragged,
-// and resizes it while one is.
-func (p *Pane) onPreviewMotion(hp *hoverPreview, ev *gdk.EventMotion) {
+// onMotion shows a resizing cursor by the edges of a preview that can be dragged, and
+// resizes it while one is.
+func (hv *hoverer) onMotion(hp *hoverPreview, ev *gdk.EventMotion) {
 	x, y := ev.MotionVal()
 	w, h := float64(hp.events.GetAllocatedWidth()), float64(hp.events.GetAllocatedHeight())
 	if hp.resizing == 0 {
@@ -575,12 +593,8 @@ func (p *Pane) onPreviewMotion(hp *hoverPreview, ev *gdk.EventMotion) {
 		case y > h-previewEdge:
 			edges |= edgeBottom
 		}
-		// The edge by its link stays put: the one the popover points from.
-		if p.previewBelow(hp) {
-			edges &^= edgeTop
-		} else {
-			edges &^= edgeBottom
-		}
+		// The edge by what it points at stays put.
+		edges &^= hv.pinnedEdge(hp)
 		if edges != hp.edges {
 			hp.edges = edges
 			setCursor(&hp.events.Widget, edgeCursor(edges))
@@ -627,22 +641,34 @@ func (p *Pane) onPreviewMotion(hp *hoverPreview, ev *gdk.EventMotion) {
 	if ch <= 0 {
 		ch = content.GetAllocatedHeight()
 	}
-	maxW := int(float64(p.win.window.GetAllocatedWidth()) * previewMaxShare)
-	maxH := int(float64(p.win.window.GetAllocatedHeight()) * previewMaxShare)
+	maxW := int(float64(hv.win.window.GetAllocatedWidth()) * previewMaxShare)
+	maxH := int(float64(hv.win.window.GetAllocatedHeight()) * previewMaxShare)
 	cw = max(previewMinWidth, min(cw+dw, maxW))
 	ch = max(previewMinHeight, min(ch+dh, maxH))
 	hp.width = cw
 	content.SetSizeRequest(cw, ch)
 }
 
-// previewBelow reports whether a preview is below the point it points at.
-func (p *Pane) previewBelow(hp *hoverPreview) bool {
-	_, y, err := hp.events.TranslateCoordinates(p.term, 0, 0)
-	if err != nil {
-		return true
-	}
+// pinnedEdge returns the edge of a preview facing what it points at, which resizing
+// leaves where it is: the top of one below a link, or the side of one beside the shelf.
+func (hv *hoverer) pinnedEdge(hp *hoverPreview) int {
+	x, y, err := hp.events.TranslateCoordinates(hv.anchor, 0, 0)
 	rect, ok := hp.popover.GetPointingTo()
-	return !ok || y >= rect.GetY()
+	if err != nil || !ok {
+		return edgeTop
+	}
+	switch hv.position() {
+	case gtk.POS_LEFT, gtk.POS_RIGHT:
+		if x >= rect.GetX() {
+			return edgeLeft
+		}
+		return edgeRight
+	default:
+		if y >= rect.GetY() {
+			return edgeTop
+		}
+		return edgeBottom
+	}
 }
 
 // edgeCursor names the cursor for resizing by some edges, or the pointer's for none.
@@ -661,7 +687,7 @@ func edgeCursor(edges int) string {
 }
 
 // refitImage draws an image preview again to fit the size it's been resized to.
-func (p *Pane) refitImage(hp *hoverPreview) {
+func (hv *hoverer) refitImage(hp *hoverPreview) {
 	if hp.image == nil {
 		return
 	}
@@ -669,67 +695,119 @@ func (p *Pane) refitImage(hp *hoverPreview) {
 	if w <= 0 || h <= 0 {
 		return
 	}
-	runAsync(p.win.app, func(context.Context) (*gdk.Pixbuf, error) {
+	runAsync(hv.win.app, func(context.Context) (*gdk.Pixbuf, error) {
 		return gtkx.PixbufFit(hp.data, w, h)
 	}, func(pb *gdk.Pixbuf, err error) {
-		if err != nil || p.preview != hp {
+		if err != nil || hv.preview != hp {
 			return
 		}
 		hp.image.SetFromPixbuf(pb)
 	})
 }
 
-// keepPreview keeps the preview showing: the pointer is on its link or on it.
-func (p *Pane) keepPreview() {
-	if hp := p.preview; hp != nil && hp.hideTimer != 0 {
+// keep keeps the preview showing: the pointer is on what it's of, or on it.
+func (hv *hoverer) keep() {
+	if hp := hv.preview; hp != nil && hp.hideTimer != 0 {
 		glib.SourceRemove(hp.hideTimer)
 		hp.hideTimer = 0
 	}
 }
 
-// hidePreviewSoon hides the preview after previewGrace, unless the pointer comes back
-// to its link or to it. One the pointer has been on stays.
-func (p *Pane) hidePreviewSoon() {
-	hp := p.preview
+// hideSoon hides the preview after previewGrace, unless the pointer comes back to what
+// it's of, or to it. One the pointer has been on stays.
+func (hv *hoverer) hideSoon() {
+	hp := hv.preview
 	if hp == nil || hp.engaged || hp.hideTimer != 0 {
 		return
 	}
 	hp.hideTimer = glib.TimeoutAdd(uint(previewGrace/time.Millisecond), func() bool {
 		hp.hideTimer = 0
-		if p.preview == hp {
-			p.hidePreview()
+		if hv.preview == hp {
+			hv.hide()
 		}
 		return false
 	})
 }
 
-// hidePreview hides the hover preview, and forgets the link under the pointer.
-func (p *Pane) hidePreview() {
-	p.forgetHover()
-	if hp := p.preview; hp != nil {
-		p.dropPreview(hp)
+// hide hides the preview, and forgets what's under the pointer.
+func (hv *hoverer) hide() {
+	hv.forget()
+	if hp := hv.preview; hp != nil {
+		hv.drop(hp)
 	}
 }
 
-// forgetHover forgets the link under the pointer, so a lookup or load still under way for
-// it shows nothing.
-func (p *Pane) forgetHover() {
-	p.hoverGen++
-	p.hoverText, p.hoverSpan = "", cellSpan{}
-	if p.hoverTimer != 0 {
-		glib.SourceRemove(p.hoverTimer)
-		p.hoverTimer = 0
+// forget forgets what's under the pointer, so a lookup or load still under way for it
+// shows nothing.
+func (hv *hoverer) forget() {
+	hv.gen++
+	if hv.timer != 0 {
+		glib.SourceRemove(hv.timer)
+		hv.timer = 0
 	}
+	hv.forgotten()
 }
 
-// dropPreview takes a hover preview down.
-func (p *Pane) dropPreview(hp *hoverPreview) {
-	if p.preview == hp {
-		p.preview = nil
+// drop takes a preview down.
+func (hv *hoverer) drop(hp *hoverPreview) {
+	if hv.preview == hp {
+		hv.preview = nil
 	}
 	if hp.hideTimer != 0 {
 		glib.SourceRemove(hp.hideTimer)
 		hp.hideTimer = 0
 	}
 	hp.popover.Destroy()
+}
+
+// onMotion follows the pointer over links, and previews the image, markdown or HTML file
+// a link names once the pointer rests on it. Clicking the preview opens the file, which
+// works with the mouse alone even where the program in the pane has the mouse's clicks,
+// such as a coding agent. In a split window, where the terminal only sees the row of a link
+// tmux wrapped that the pointer is on, if that, tmux is asked whenever the pointer rests,
+// and the preview stays while the pointer is on the link it found.
+func (p *Pane) onMotion(event *gdk.Event) {
+	if !p.win.app.cfg.Links.ImagePreviews || !p.running {
+		return
+	}
+	m, matched := p.term.MatchAt(event)
+	x, y := gdk.EventMotionNewFromEvent(event).MotionVal()
+	col, row := p.term.CellAt(x, y)
+	if p.hoverSpan.contains(col, row) || (matched && p.hoverSpan == cellSpan{} && m.Text == p.hoverText) {
+		p.hover.keep()
+		return
+	}
+	_, _, readLines := p.readsPaneLines(m)
+	switch {
+	case p.hover.engaged():
+		// It stays until another link's preview takes its place.
+		p.hover.forget()
+		if !matched && !readLines {
+			return
+		}
+	case p.hover.preview != nil:
+		// Off the link with its preview showing: the pointer may be on its way to it.
+		p.hover.hideSoon()
+		return
+	default:
+		p.hover.hide()
+		if !matched && !readLines {
+			return
+		}
+	}
+	p.hoverText = m.Text
+	p.hover.rest(func(gen int) {
+		p.linkAt(m, matched, x, y, func(l link, ok bool) {
+			if ok && p.hover.current(gen) {
+				p.hoverSpan = l.span
+				h, _ := p.win.app.lookup(p.SessionKey())
+				p.hover.load(h, l, gen, pointRect(x, y))
+			}
+		})
+	})
+}
+
+// hidePreview hides the pane's hover preview, and forgets the link under the pointer.
+func (p *Pane) hidePreview() {
+	p.hover.hide()
 }

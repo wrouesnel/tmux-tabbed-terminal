@@ -92,7 +92,9 @@ or split the window to watch several sessions side by side.
   mentions, newest first: an image's thumbnail, or a document's title and the start of its
   text. It reads the panes' lines from tmux, a moment after their output changes, and the
   last 2,000 lines of history the first time, so files an agent wrote before are listed
-  too; files that can't be read, such as ones not written yet, are left off. Click a file
+  too; files that can't be read, such as ones not written yet, are left off. Rest the
+  pointer on a file for the same preview a link to it in a terminal gets, beside the
+  shelf, which stays for reading and opens the file when clicked. Click a file
   to preview it in the split, as a double-click on its path would, or drag it out to open
   it in a window of its own; right-click for Preview in Split, Preview in New Window, Open
   With Default Application (for a local file), Copy Path and Remove From Shelf. Local files are read again when they change. The title bar's shelf button,

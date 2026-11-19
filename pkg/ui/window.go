@@ -306,6 +306,9 @@ func (w *Window) setShelfVisible(visible bool) {
 		return
 	}
 	w.shelf.root.SetVisible(visible)
+	if !visible {
+		w.shelf.hover.hide()
+	}
 	if visible {
 		w.scanShelfNow()
 	}

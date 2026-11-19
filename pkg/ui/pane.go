@@ -55,15 +55,12 @@ type Pane struct {
 	term  *vte.Terminal
 	// linkTags are the kinds of the terminal's link patterns, by tag.
 	linkTags map[int]linkKind
-	// preview shows the image of the link under the pointer, if there is one. hoverText is
-	// the terminal's match under the pointer, hoverSpan where tmux said the link is, and
-	// hoverTimer waits for the pointer to rest. hoverGen increases whenever the pointer
-	// leaves a link, so a preview on the way for it is dropped.
-	preview    *hoverPreview
-	hoverText  string
-	hoverSpan  cellSpan
-	hoverTimer glib.SourceHandle
-	hoverGen   int
+	// hover previews the file of the link under the pointer, if there is one. hoverText
+	// is the terminal's match under the pointer, and hoverSpan where tmux said the link
+	// is.
+	hover     *hoverer
+	hoverText string
+	hoverSpan cellSpan
 	// shelfTimer waits to read the session for files for the shelf.
 	shelfTimer glib.SourceHandle
 	// file shows a file in place of the terminal, when the pane is a preview, or is nil.
@@ -192,6 +189,8 @@ func newPane(w *Window) *Pane {
 		w.app.requestPoll(p.hostName)
 		p.queueShelfScan()
 	})
+	p.hover = newHoverer(w, p.term, func() gtk.PositionType { return gtk.POS_BOTTOM }, func() bool { return p.closed })
+	p.hover.forgotten = func() { p.hoverText, p.hoverSpan = "", cellSpan{} }
 	var err error
 	if p.linkTags, err = addLinks(p.term); err != nil {
 		w.app.log.Warn("Some links won't be recognised", zap.Error(err))
@@ -200,12 +199,14 @@ func newPane(w *Window) *Pane {
 	// mouse option is on, and tmux's menu can't paste the clipboard.
 	p.term.Connect("button-press-event", func(_ interface{}, ev *gdk.Event) bool {
 		// A click that puts away a preview being read does only that.
-		if p.preview != nil && p.preview.engaged {
+		if p.hover.engaged() || w.shelf.hover.engaged() {
 			p.hidePreview()
+			w.shelf.hover.hide()
 			p.dismissClick = true
 			return true
 		}
 		p.hidePreview()
+		w.shelf.hover.hide()
 		return p.onButtonPress(ev)
 	})
 	p.term.Connect("button-release-event", func(_ interface{}, ev *gdk.Event) bool {
@@ -222,8 +223,8 @@ func newPane(w *Window) *Pane {
 	})
 	// Leaving the terminal may be for the preview, which is over it.
 	p.term.Connect("leave-notify-event", func() bool {
-		if p.preview != nil {
-			p.hidePreviewSoon()
+		if p.hover.preview != nil {
+			p.hover.hideSoon()
 		} else {
 			p.hidePreview()
 		}
@@ -231,6 +232,7 @@ func newPane(w *Window) *Pane {
 	})
 	p.term.Connect("key-press-event", func() bool {
 		p.hidePreview()
+		w.shelf.hover.hide()
 		return false
 	})
 
