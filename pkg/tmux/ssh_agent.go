@@ -53,7 +53,7 @@ func (s *SSH) agentClient() (*SSH, *agent.Client) {
 	}
 	select {
 	case <-root.agent.Done():
-		root.agent = nil
+		root.dropAgent()
 		return root, nil
 	default:
 		return root, root.agent
@@ -69,9 +69,17 @@ func (s *SSH) agentFailed(c *agent.Client, err error) {
 	s.agentMu.Lock()
 	defer s.agentMu.Unlock()
 	if s.agent == c {
-		s.agent = nil
-		_ = c.Close()
+		s.dropAgent()
 	}
+}
+
+// dropAgent closes the agent's client and forgets it, so the next command starts the
+// agent again. Its pipes may have closed already, but its gRPC connection hasn't: left
+// open, its goroutines would outlive it, one set for each time the agent was lost.
+// agentMu must be held.
+func (s *SSH) dropAgent() {
+	_ = s.agent.Close()
+	s.agent = nil
 }
 
 // ensureAgent starts the agent of a hop run from this machine, if it has agents and isn't
@@ -89,7 +97,7 @@ func (s *SSH) ensureAgent(ctx context.Context) error {
 	if s.agent != nil {
 		select {
 		case <-s.agent.Done():
-			s.agent = nil
+			s.dropAgent()
 		default:
 			return nil
 		}
