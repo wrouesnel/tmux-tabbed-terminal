@@ -10,6 +10,14 @@ package gtkx
 static GdkDragContext *to_drag_context(void *p) { return GDK_DRAG_CONTEXT(p); }
 static GtkWindow *to_window(void *p) { return GTK_WINDOW(p); }
 static GtkWidget *to_widget(void *p) { return GTK_WIDGET(p); }
+static void ttt_set_class(void *w, const char *class, int on) {
+	GtkStyleContext *ctx = gtk_widget_get_style_context(GTK_WIDGET(w));
+	if (on) {
+		gtk_style_context_add_class(ctx, class);
+	} else if (gtk_style_context_has_class(ctx, class)) {
+		gtk_style_context_remove_class(ctx, class);
+	}
+}
 static void ttt_set_source_pixbuf(uintptr_t cr, void *pb, double x, double y) {
 	gdk_cairo_set_source_pixbuf((cairo_t *)cr, GDK_PIXBUF(pb), x, y);
 }
@@ -194,4 +202,17 @@ func PixbufFit(data []byte, width, height int) (*gdk.Pixbuf, error) {
 // x, y.
 func CairoSetSourcePixbuf(cr *cairo.Context, pb *gdk.Pixbuf, x, y float64) {
 	C.ttt_set_source_pixbuf(C.uintptr_t(cr.Native()), unsafe.Pointer(pb.GObject), C.double(x), C.double(y))
+}
+
+// SetClass adds a CSS class to a widget, or removes it. Unlike going through gotk3's
+// StyleContext, it makes no Go wrapper, which would be one more GObject for the garbage
+// collector to finalize each call: on rows updated every poll, that adds up.
+func SetClass(w gtk.IWidget, class string, on bool) {
+	c := C.CString(class)
+	defer C.free(unsafe.Pointer(c))
+	flag := C.int(0)
+	if on {
+		flag = 1
+	}
+	C.ttt_set_class(unsafe.Pointer(w.ToWidget().GObject), c, flag)
 }

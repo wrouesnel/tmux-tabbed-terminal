@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,6 +35,22 @@ type sessionRow struct {
 	name      *gtk.Label
 	subtitle  *gtk.Label
 	indicator *gtk.Stack
+	// shown is what the row last showed, so an update that changes nothing leaves GTK
+	// alone. Rows are updated on every poll of every host.
+	shown rowShown
+	// session is the session shown, for the tooltip, which is made when it's asked for:
+	// it says how long ago each window was active, so it differs every second. tooltip
+	// is the tooltip instead, for a pinned session that isn't running.
+	session *tmux.Session
+	tooltip string
+}
+
+// rowShown is what a session row shows.
+type rowShown struct {
+	set                   bool
+	name, subtitle        string
+	indicator             string
+	unseen, here, missing bool
 }
 
 // sidebar lists the tmux sessions, optionally grouped by application, with a search
@@ -57,6 +74,14 @@ type sidebar struct {
 	hostFilter string
 	// settingFilter is set while the filter buttons are synced, to ignore their toggles.
 	settingFilter bool
+	// filtered is what the list was last filtered by.
+	filtered sidebarFilter
+}
+
+// sidebarFilter is what the list is filtered by, besides its rows.
+type sidebarFilter struct {
+	query, host string
+	hidePins    bool
 }
 
 // listEntry is one row of the list: a host, or a session of the host above it.
@@ -103,6 +128,13 @@ type pinHeaderRow struct {
 	hide   *gtk.ToggleButton
 	count  *gtk.Label
 	update func()
+	// shown is what it last showed: the arrow's icon, the count and whether unavailable
+	// pins are hidden.
+	shown struct {
+		set         bool
+		icon, count string
+		hide        bool
+	}
 }
 
 // hostRow heads a host's sessions. It isn't selectable: its menu acts on the host.
@@ -113,6 +145,12 @@ type hostRow struct {
 	icon   *gtk.Image
 	// filter shows only this host's sessions while it's active.
 	filter *gtk.ToggleButton
+	// shown is what it last showed: its status, tooltip and whether it's in error.
+	shown struct {
+		set             bool
+		status, tooltip string
+		failed          bool
+	}
 }
 
 func newSidebar(w *Window) *sidebar {
@@ -430,23 +468,31 @@ func newHostRow(name string, local bool, newSession func(string)) *hostRow {
 
 // update shows a host's connection state.
 func (r *hostRow) update(h *Host) {
+	var status, tooltip string
 	switch {
 	case h.err != nil:
-		status := hostKeyStatus(h.err)
+		status = hostKeyStatus(h.err)
 		if status == "" {
 			status = "unreachable"
 		}
-		r.status.SetText(status)
-		r.row.SetTooltipText(h.err.Error())
+		tooltip = h.err.Error()
 	case !h.polled:
-		r.status.SetText("connecting…")
-		r.row.SetTooltipText("")
+		status = "connecting…"
 	default:
 		n := len(h.snapshot.Sessions)
-		r.status.SetText(fmt.Sprintf("%d", n))
-		r.row.SetTooltipText(fmt.Sprintf("%d sessions", n))
+		status, tooltip = strconv.Itoa(n), fmt.Sprintf("%d sessions", n)
 	}
-	setClass(r.row, "ttt-host-error", h.err != nil)
+	was := r.shown
+	if !was.set || was.status != status {
+		r.status.SetText(status)
+	}
+	if !was.set || was.tooltip != tooltip {
+		r.row.SetTooltipText(tooltip)
+	}
+	if !was.set || was.failed != (h.err != nil) {
+		setClass(r.row, "ttt-host-error", h.err != nil)
+	}
+	r.shown.set, r.shown.status, r.shown.tooltip, r.shown.failed = true, status, tooltip, h.err != nil
 }
 
 // hostMenu is the menu of a host row. Its actions take the host name.
@@ -514,35 +560,84 @@ func newSessionRow(key string) *sessionRow {
 	r.row.Add(box)
 	r.row.ShowAll()
 	r.indicator.SetVisibleChildName(indicatorNone)
+
+	// The tooltip is made when it's about to show.
+	_ = r.row.SetProperty("has-tooltip", true)
+	r.row.Connect("query-tooltip", func(_ *gtk.ListBoxRow, _, _ int, _ bool, tip interface{}) bool {
+		text := r.tooltip
+		if r.session != nil {
+			text = sessionTooltip(r.session)
+		}
+		return setTooltipText(tip, text)
+	})
 	return r
 }
 
-// update shows a session's state in its row.
-func (r *sessionRow) update(s *tmux.Session, state activity.State, shown bool, othersAttached int) {
-	r.name.SetText(s.Name)
-	r.subtitle.SetText(sessionSubtitle(s, othersAttached))
-	r.row.SetTooltipText(sessionTooltip(s))
+// setTooltipText sets a tooltip's text, as a query-tooltip handler gets the tooltip,
+// and reports whether there is any to show.
+func setTooltipText(tip interface{}, text string) bool {
+	var tooltip *gtk.Tooltip
+	switch t := tip.(type) {
+	case *gtk.Tooltip:
+		tooltip = t
+	case *glib.Object:
+		tooltip = &gtk.Tooltip{Widget: gtk.Widget{InitiallyUnowned: glib.InitiallyUnowned{Object: t}}}
+	}
+	if tooltip == nil || text == "" {
+		return false
+	}
+	tooltip.SetText(text)
+	return true
+}
 
+// show shows what a session row should, changing only what differs from before.
+func (r *sessionRow) show(now rowShown) {
+	was := r.shown
+	if !was.set || was.name != now.name {
+		r.name.SetText(now.name)
+	}
+	if !was.set || was.subtitle != now.subtitle {
+		r.subtitle.SetText(now.subtitle)
+	}
+	if !was.set || was.indicator != now.indicator {
+		r.indicator.SetVisibleChildName(now.indicator)
+	}
+	if !was.set || was.unseen != now.unseen {
+		setClass(r.row, "ttt-unseen", now.unseen)
+	}
+	if !was.set || was.here != now.here {
+		setClass(r.row, "ttt-shown", now.here)
+	}
+	if !was.set || was.missing != now.missing {
+		setClass(r.row, "ttt-unavailable", now.missing)
+	}
+	now.set = true
+	r.shown = now
+}
+
+// update shows a session's state in its row. A pinned session's subtitle starts with
+// its host, given as prefix, where there are several hosts.
+func (r *sessionRow) update(s *tmux.Session, state activity.State, shown bool, othersAttached int, prefix string) {
+	r.session, r.tooltip = s, ""
+	indicator := indicatorNone
 	switch {
 	case state.Active:
-		r.indicator.SetVisibleChildName(indicatorBusy)
+		indicator = indicatorBusy
 	case state.Unseen:
-		r.indicator.SetVisibleChildName(indicatorUnseen)
-	default:
-		r.indicator.SetVisibleChildName(indicatorNone)
+		indicator = indicatorUnseen
 	}
-	setClass(r.row, "ttt-unseen", state.Unseen)
-	setClass(r.row, "ttt-shown", shown)
+	subtitle := sessionSubtitle(s, othersAttached)
+	if prefix != "" {
+		subtitle = prefix + " · " + subtitle
+	}
+	r.show(rowShown{name: s.Name, subtitle: subtitle, indicator: indicator, unseen: state.Unseen, here: shown})
 }
 
 // showUnavailable shows a pinned session which isn't running.
 func (r *sessionRow) showUnavailable(pin PinnedSession) {
-	r.name.SetText(pin.Name)
-	r.subtitle.SetText(pin.Host + " · not running")
-	r.row.SetTooltipText(fmt.Sprintf("%s isn't running on %s. Click to start it.", pin.Name, pin.Host))
-	r.indicator.SetVisibleChildName(indicatorNone)
-	setClass(r.row, "ttt-unseen", false)
-	setClass(r.row, "ttt-shown", false)
+	r.session = nil
+	r.tooltip = fmt.Sprintf("%s isn't running on %s. Click to start it.", pin.Name, pin.Host)
+	r.show(rowShown{name: pin.Name, subtitle: pin.Host + " · not running", indicator: indicatorNone, missing: true})
 }
 
 // sessionSubtitle describes what a session is running. othersAttached counts clients
@@ -634,14 +729,15 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 				sb.rows[key] = row
 				sb.rowKeys[row.row.Native()] = key
 			}
-			row.update(s, app.tracker.State(key, now), shown[key], others[s.ID])
+			row.update(s, app.tracker.State(key, now), shown[key], others[s.ID], "")
 		}
 		for _, e := range sessionlist.Order(h.snapshot.Sessions, groups, app.grouped) {
 			order = append(order, listEntry{key: sessionKey(h.Name, e.ID), host: h.Name, group: e.Group})
 		}
 	}
 
-	if !equalEntries(order, sb.order) {
+	reordered := !equalEntries(order, sb.order)
+	if reordered {
 		// Rebuild in display order. The rows are kept, so only their position changes.
 		keep := map[string]bool{}
 		for _, e := range order {
@@ -672,8 +768,13 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 		}
 		sb.list.InvalidateHeaders()
 	}
-	// Names, commands, pins and filter settings may have changed what's shown.
-	sb.list.InvalidateFilter()
+	// Filter again when what it goes by may have changed: the rows, a filter setting, or,
+	// while searching, anything about the sessions. Filtering wraps every row for Go.
+	filtered := sidebarFilter{query: sb.query, host: sb.hostFilter, hidePins: app.state.HideUnavailablePins}
+	if reordered || filtered != sb.filtered || strings.TrimSpace(sb.query) != "" {
+		sb.list.InvalidateFilter()
+		sb.filtered = filtered
+	}
 
 	sb.selectSession(selected)
 }
@@ -738,14 +839,14 @@ func (sb *sidebar) pinEntries(now time.Time, shown map[string]bool) []listEntry 
 		e := listEntry{key: key, host: pin.Host, pin: true}
 		if s := app.findSession(pin.Host, pin.Name); s != nil {
 			e.target = sessionKey(pin.Host, s.ID)
-			row.update(s, app.tracker.State(e.target, now), shown[e.target], 0)
+			prefix := ""
 			if multipleHosts {
-				row.subtitle.SetText(pin.Host + " · " + row.subtitle.GetLabel())
+				prefix = pin.Host
 			}
+			row.update(s, app.tracker.State(e.target, now), shown[e.target], 0, prefix)
 		} else {
 			row.showUnavailable(pin)
 		}
-		setClass(row.row, "ttt-unavailable", e.target == "")
 		entries = append(entries, e)
 	}
 	return entries
@@ -793,18 +894,27 @@ func newPinHeaderRow(app *App) *pinHeaderRow {
 		if app.state.PinsCollapsed {
 			icon = "pan-end-symbolic"
 		}
-		h.arrow.SetFromIconName(icon, gtk.ICON_SIZE_MENU)
 		running := 0
 		for _, pin := range app.state.Pinned {
 			if app.findSession(pin.Host, pin.Name) != nil {
 				running++
 			}
 		}
-		h.count.SetText(fmt.Sprintf("%d/%d", running, len(app.state.Pinned)))
-		h.row.SetTooltipText(fmt.Sprintf("%d of %d pinned sessions running", running, len(app.state.Pinned)))
-		settingHide = true
-		h.hide.SetActive(app.state.HideUnavailablePins)
-		settingHide = false
+		count := fmt.Sprintf("%d/%d", running, len(app.state.Pinned))
+		was := h.shown
+		if !was.set || was.icon != icon {
+			h.arrow.SetFromIconName(icon, gtk.ICON_SIZE_MENU)
+		}
+		if !was.set || was.count != count {
+			h.count.SetText(count)
+			h.row.SetTooltipText(fmt.Sprintf("%d of %d pinned sessions running", running, len(app.state.Pinned)))
+		}
+		if !was.set || was.hide != app.state.HideUnavailablePins {
+			settingHide = true
+			h.hide.SetActive(app.state.HideUnavailablePins)
+			settingHide = false
+		}
+		h.shown.set, h.shown.icon, h.shown.count, h.shown.hide = true, icon, count, app.state.HideUnavailablePins
 	}
 	return h
 }

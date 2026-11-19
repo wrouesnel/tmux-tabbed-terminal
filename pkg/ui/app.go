@@ -134,8 +134,8 @@ type App struct {
 // Run runs the application until its last window closes or ctx is cancelled.
 func Run(ctx context.Context, cfg Config, opts Options) error {
 	// gotk3 releases GObject references from Go finalizers, which run on another thread.
-	// Do it on the main loop instead.
-	glib.FinalizerStrategy = func(f glib.Finalizer) { glib.IdleAdd(func() { f() }) }
+	// Do it on the main loop instead, in batches.
+	installFinalizerQueue()
 	setUpFonts()
 
 	if cfg.Activity.PollInterval < minPollInterval {

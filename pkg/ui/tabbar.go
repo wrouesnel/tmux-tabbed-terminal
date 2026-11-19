@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -54,6 +55,21 @@ type tab struct {
 	indicator *gtk.Stack
 	index     *gtk.Label
 	name      *gtk.Label
+	// shown is what the tab last showed, so an update that changes nothing leaves GTK
+	// alone.
+	shown tabShown
+	// window is the window shown, and position its place in the bar, for the tooltip,
+	// which is made when it's asked for: it says how long ago the window was active.
+	window   tmux.Window
+	position int
+}
+
+// tabShown is what a tab shows.
+type tabShown struct {
+	set              bool
+	index            int
+	name, indicator  string
+	unseen, selected bool
 }
 
 // windowKey identifies a window to the activity tracker. Window IDs start with @ and
@@ -135,6 +151,14 @@ func newTab(tb *tabBar, id string) *tab {
 	t.button.ShowAll()
 	t.indicator.SetVisibleChildName(indicatorNone)
 
+	_ = t.button.SetProperty("has-tooltip", true)
+	t.button.Connect("query-tooltip", func(_ *gtk.Button, _, _ int, _ bool, tip interface{}) bool {
+		text := windowTooltip(&t.window, timeNow())
+		if t.position < tabShortcuts {
+			text += fmt.Sprintf("\nAlt+%d", t.position+1)
+		}
+		return setTooltipText(tip, text)
+	})
 	t.button.Connect("clicked", func() {
 		tb.clicked()
 		tb.selectWindow(id)
@@ -278,28 +302,17 @@ func (tb *tabBar) update(session string) {
 	for i := range windows {
 		win := &windows[i]
 		t := tb.tabs[win.ID]
-		t.index.SetText(fmt.Sprintf("%d", win.Index))
-		t.name.SetText(win.Name)
-		// Names keep their width, up to tabMaxChars, so tabs that don't fit scroll
-		// rather than shrink.
-		t.name.SetWidthChars(min(utf8.RuneCountInString(win.Name), tabMaxChars))
-		tip := windowTooltip(win, now)
-		if i < tabShortcuts {
-			tip += fmt.Sprintf("\nAlt+%d", i+1)
-		}
-		t.button.SetTooltipText(tip)
-
+		t.window, t.position = *win, i
 		state := app.tracker.State(windowKey(h.Name, win.ID), now)
+		indicator := indicatorNone
 		switch {
 		case state.Active:
-			t.indicator.SetVisibleChildName(indicatorBusy)
+			indicator = indicatorBusy
 		case state.Unseen:
-			t.indicator.SetVisibleChildName(indicatorUnseen)
-		default:
-			t.indicator.SetVisibleChildName(indicatorNone)
+			indicator = indicatorUnseen
 		}
-		setClass(t.button, "ttt-unseen", state.Unseen)
-		setClass(t.button, "ttt-selected", win.Active)
+		t.show(tabShown{index: win.Index, name: win.Name, indicator: indicator, unseen: state.Unseen,
+			selected: win.Active})
 		if win.Active {
 			selected = win.ID
 		}
@@ -312,6 +325,31 @@ func (tb *tabBar) update(session string) {
 			glib.IdleAdd(func() { tb.scrollTo(t) })
 		}
 	}
+}
+
+// show shows what a tab should, changing only what differs from before.
+func (t *tab) show(now tabShown) {
+	was := t.shown
+	if !was.set || was.index != now.index {
+		t.index.SetText(strconv.Itoa(now.index))
+	}
+	if !was.set || was.name != now.name {
+		t.name.SetText(now.name)
+		// Names keep their width, up to tabMaxChars, so tabs that don't fit scroll
+		// rather than shrink.
+		t.name.SetWidthChars(min(utf8.RuneCountInString(now.name), tabMaxChars))
+	}
+	if !was.set || was.indicator != now.indicator {
+		t.indicator.SetVisibleChildName(now.indicator)
+	}
+	if !was.set || was.unseen != now.unseen {
+		setClass(t.button, "ttt-unseen", now.unseen)
+	}
+	if !was.set || was.selected != now.selected {
+		setClass(t.button, "ttt-selected", now.selected)
+	}
+	now.set = true
+	t.shown = now
 }
 
 // windowTooltip describes a tmux window for its tab.

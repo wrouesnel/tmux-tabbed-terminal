@@ -8,6 +8,7 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 	"go.uber.org/zap"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/theme"
 )
 
@@ -373,23 +374,13 @@ type styled interface {
 }
 
 // addClass adds a CSS class to a widget.
-func addClass(w styled, class string) {
-	if ctx, err := w.GetStyleContext(); err == nil {
-		ctx.AddClass(class)
-	}
+func addClass(w gtk.IWidget, class string) {
+	gtkx.SetClass(w, class, true)
 }
 
 // setClass adds or removes a CSS class.
-func setClass(w styled, class string, on bool) {
-	ctx, err := w.GetStyleContext()
-	if err != nil {
-		return
-	}
-	if on {
-		ctx.AddClass(class)
-	} else {
-		ctx.RemoveClass(class)
-	}
+func setClass(w gtk.IWidget, class string, on bool) {
+	gtkx.SetClass(w, class, on)
 }
 
 // timeNow is the clock, for activity states.
