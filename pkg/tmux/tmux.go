@@ -6,12 +6,13 @@ package tmux
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,6 +48,10 @@ type Client struct {
 	// version is the server's version as last asked, at versionAt.
 	version   string
 	versionAt time.Time
+	// lastOutput is the snapshot command's last output, and lastSnapshot what it parsed
+	// to. Snapshots are only read, so the same one can be returned again.
+	lastOutput   string
+	lastSnapshot *Snapshot
 }
 
 // versionTTL is how long the server's version is taken as known. It changes only when
@@ -400,7 +405,8 @@ var (
 )
 
 // Snapshot reads every session, window and client on the server. A server which isn't
-// running has no sessions.
+// running has no sessions. The snapshot may be the one returned last time, when nothing
+// changed, so it must not be modified.
 func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 	out, err := c.run(ctx,
 		"list-sessions", "-F", sessionFormat, ";",
@@ -414,11 +420,21 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 		}
 		return nil, err
 	}
-	return ParseSnapshot(out), nil
+	// Most polls find nothing new: then the last snapshot is the same, and parsing it
+	// again would only make garbage.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lastSnapshot == nil || out != c.lastOutput {
+		c.lastOutput, c.lastSnapshot = out, ParseSnapshot(out)
+	}
+	return c.lastSnapshot, nil
 }
 
 // parseUnix parses a decimal unix timestamp, returning the zero time if it's invalid.
 func parseUnix(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
 	secs, err := strconv.ParseInt(s, 10, 64)
 	if err != nil || secs == 0 {
 		return time.Time{}
@@ -443,32 +459,42 @@ func programName(s string) string {
 //nolint:mnd // field counts are fixed by the format strings
 func ParseSnapshot(out string) *Snapshot {
 	snap := &Snapshot{}
-	index := map[string]int{}
-	windows := map[string][]Window{}
-
-	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Split(line, fieldSep)
+	// The fields of each line, which are substrings of out, so splitting copies nothing.
+	var buf [windowFields]string
+	var windows []windowLine
+	sessions := 0
+	for rest := out; rest != ""; {
+		var line string
+		line, rest, _ = strings.Cut(rest, "\n")
+		if strings.HasPrefix(line, "S"+fieldSep) {
+			sessions++
+		}
+	}
+	if sessions > 0 {
+		snap.Sessions = make([]Session, 0, sessions)
+	}
+	for rest := out; rest != ""; {
+		var line string
+		line, rest, _ = strings.Cut(rest, "\n")
+		fields := splitFields(line, buf[:0])
 		switch fields[0] {
 		case "S":
 			if len(fields) < 5 {
 				continue
 			}
-			attached, _ := strconv.Atoi(fields[4])
-			index[fields[1]] = len(snap.Sessions)
 			snap.Sessions = append(snap.Sessions, Session{
 				ID:       fields[1],
 				Name:     fields[2],
 				Created:  parseUnix(fields[3]),
-				Attached: attached,
+				Attached: atoi(fields[4]),
 			})
 		case "W":
-			if len(fields) < 19 {
+			if len(fields) < windowFields {
 				continue
 			}
-			idx, _ := strconv.Atoi(fields[3])
-			windows[fields[1]] = append(windows[fields[1]], Window{
+			windows = append(windows, windowLine{session: fields[1], window: Window{
 				ID:       fields[2],
-				Index:    idx,
+				Index:    atoi(fields[3]),
 				Active:   fields[4] == "1",
 				Activity: parseUnix(fields[5]),
 				Command:  programName(fields[6]),
@@ -482,9 +508,9 @@ func ParseSnapshot(out string) *Snapshot {
 				Scroll:          parseScroll(fields[13], fields[14], fields[15]),
 				Panes:           atoi(fields[16]),
 				Width:           atoi(fields[17]),
-				// The title may contain the separator: keep the rest of the line.
-				Title: strings.Join(fields[18:], fieldSep),
-			})
+				// The title may contain the separator: splitFields left it in the last field.
+				Title: fields[18],
+			}})
 		case "C":
 			if len(fields) < 3 {
 				continue
@@ -495,20 +521,67 @@ func ParseSnapshot(out string) *Snapshot {
 			if len(fields) < 4 || snap.Buffer != nil {
 				continue
 			}
-			size, _ := strconv.Atoi(fields[3])
-			snap.Buffer = &Buffer{Name: fields[1], Created: parseUnix(fields[2]), Size: size}
+			snap.Buffer = &Buffer{Name: fields[1], Created: parseUnix(fields[2]), Size: atoi(fields[3])}
 		}
 	}
 
-	for id, ws := range windows {
-		i, ok := index[id]
-		if !ok {
-			continue
+	// Each session's windows, in index order, share one slice.
+	index := make(map[string]int, len(snap.Sessions))
+	for i := range snap.Sessions {
+		index[snap.Sessions[i].ID] = i
+	}
+	rank := func(session string) int {
+		if i, ok := index[session]; ok {
+			return i
 		}
-		sort.Slice(ws, func(a, b int) bool { return ws[a].Index < ws[b].Index })
-		snap.Sessions[i].Windows = ws
+		// Windows of sessions not listed go last, and are dropped.
+		return len(snap.Sessions)
+	}
+	slices.SortStableFunc(windows, func(a, b windowLine) int {
+		if c := cmp.Compare(rank(a.session), rank(b.session)); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.window.Index, b.window.Index)
+	})
+	all := make([]Window, 0, len(windows))
+	for _, w := range windows {
+		all = append(all, w.window)
+	}
+	for start := 0; start < len(windows); {
+		end := start + 1
+		for end < len(windows) && windows[end].session == windows[start].session {
+			end++
+		}
+		if i, ok := index[windows[start].session]; ok {
+			snap.Sessions[i].Windows = all[start:end:end]
+		}
+		start = end
 	}
 	return snap
+}
+
+// windowFields is how many fields a window's line has. The last, its title, may itself
+// contain the separator.
+const windowFields = 19
+
+// windowLine is a window as read, with the ID of its session.
+type windowLine struct {
+	session string
+	window  Window
+}
+
+// splitFields splits a line of the snapshot at the separator into dst, which it returns.
+// Once dst is full, the rest of the line, separators and all, is its last field.
+func splitFields(line string, dst []string) []string {
+	for len(dst) < cap(dst)-1 {
+		field, rest, found := strings.Cut(line, fieldSep)
+		if !found {
+			break
+		}
+		dst = append(dst, field)
+		line = rest
+	}
+	return append(dst, line)
 }
 
 // NewSession creates a detached session and returns its ID. An empty name lets tmux pick
@@ -602,6 +675,11 @@ type ScrollState struct {
 
 // atoi parses a decimal number, returning 0 if it's invalid.
 func atoi(s string) int {
+	if s == "" {
+		// tmux prints nothing for unset numbers, such as scroll_position outside copy
+		// mode: don't make an error to throw away.
+		return 0
+	}
 	n, _ := strconv.Atoi(s)
 	return n
 }
@@ -610,9 +688,7 @@ func atoi(s string) int {
 // mode.
 func parseScroll(history, height, position string) ScrollState {
 	var st ScrollState
-	st.History, _ = strconv.Atoi(history)
-	st.Height, _ = strconv.Atoi(height)
-	st.Position, _ = strconv.Atoi(position)
+	st.History, st.Height, st.Position = atoi(history), atoi(height), atoi(position)
 	return st
 }
 

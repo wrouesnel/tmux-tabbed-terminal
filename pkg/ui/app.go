@@ -87,6 +87,14 @@ type App struct {
 	grouper *sessionlist.Grouper
 	// groups maps session keys to their application group.
 	groups map[string]string
+	// keys, seen and spareGroups are applySnapshot's scratch space, kept between polls:
+	// the session and window keys made so far, the keys found by the poll, and the groups
+	// before last, to be filled in next.
+	keys        keyCache
+	seen        map[string]bool
+	spareGroups map[string]string
+	// groupSeen is updateGroups' scratch space: the sessions it found.
+	groupSeen map[string]bool
 	// grouped is whether session lists are grouped by application.
 	grouped bool
 	// sidebarRight puts session lists on the right of windows.
@@ -751,11 +759,15 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 
 	visible := a.visibleSessions()
 	now := time.Now()
-	keys := map[string]bool{}
+	if a.seen == nil {
+		a.seen = map[string]bool{}
+	}
+	keys := a.seen
+	clear(keys)
 	for _, host := range a.hosts {
 		for i := range host.snapshot.Sessions {
 			s := &host.snapshot.Sessions[i]
-			key := sessionKey(host.Name, s.ID)
+			key := a.key(host.Name, s.ID)
 			keys[key] = true
 			if host == h {
 				a.tracker.Observe(key, s.Activity(), visible[key], now)
@@ -763,7 +775,7 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 			// Windows for the tab bar: one is on screen if it's the current window of a
 			// session in a pane.
 			for _, win := range s.Windows {
-				wkey := windowKey(host.Name, win.ID)
+				wkey := a.key(host.Name, win.ID)
 				keys[wkey] = true
 				if host == h {
 					a.tracker.Observe(wkey, win.Activity, visible[key] && win.Active, now)
@@ -774,9 +786,16 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 	a.tracker.Retain(keys)
 	groups := a.groups
 	a.updateGroups()
-	if a.tracker.Changed(now) || !unchanged || !maps.Equal(groups, a.groups) {
+	changed := !maps.Equal(groups, a.groups)
+	a.spareGroups = groups
+	if a.tracker.Changed(now) || !unchanged || changed {
 		a.refreshAll()
 	}
+}
+
+// key returns the key of a host's session or window, made once and kept.
+func (a *App) key(host, id string) string {
+	return a.keys.key(host, id, 2*len(a.seen)+64) //nolint:mnd // a little slack
 }
 
 // sameError reports whether two errors from polling a host say the same.
@@ -790,12 +809,22 @@ func sameError(a, b error) bool {
 // updateGroups assigns every session to its application group.
 func (a *App) updateGroups() {
 	now := time.Now()
-	groups := map[string]string{}
-	keys := map[string]bool{}
+	// The map before last is filled in again: the last is kept for comparing.
+	groups := a.spareGroups
+	a.spareGroups = nil
+	if groups == nil {
+		groups = map[string]string{}
+	}
+	clear(groups)
+	if a.groupSeen == nil {
+		a.groupSeen = map[string]bool{}
+	}
+	keys := a.groupSeen
+	clear(keys)
 	for _, h := range a.hosts {
 		for i := range h.snapshot.Sessions {
 			s := &h.snapshot.Sessions[i]
-			key := sessionKey(h.Name, s.ID)
+			key := a.key(h.Name, s.ID)
 			// The grouper remembers sessions by ID: give it the key instead.
 			keyed := *s
 			keyed.ID = key

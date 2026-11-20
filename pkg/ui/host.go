@@ -30,6 +30,29 @@ func sessionKey(host, id string) string {
 	return host + keySep + id
 }
 
+// keyCache keeps session and window keys by host and ID, so that polls, which look up
+// every session's key several times a second, don't make them again each time.
+type keyCache struct {
+	m map[[2]string]string
+}
+
+// key returns the key of host's session or window id. The cache is emptied, to forget
+// sessions gone, once it holds more than limit keys.
+func (c *keyCache) key(host, id string, limit int) string {
+	k := [2]string{host, id}
+	if key, ok := c.m[k]; ok {
+		return key
+	}
+	if c.m == nil {
+		c.m = map[[2]string]string{}
+	} else if len(c.m) > limit {
+		clear(c.m)
+	}
+	key := sessionKey(host, id)
+	c.m[k] = key
+	return key
+}
+
 // splitKey returns the host and session ID of a key.
 func splitKey(key string) (string, string) {
 	host, id, _ := strings.Cut(key, keySep)

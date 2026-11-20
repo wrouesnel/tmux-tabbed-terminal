@@ -43,6 +43,17 @@ type sessionRow struct {
 	// is the tooltip instead, for a pinned session that isn't running.
 	session *tmux.Session
 	tooltip string
+	// subtitleOf is what the subtitle shown was made from, so it's made again only when
+	// that changes.
+	subtitleOf subtitleOf
+}
+
+// subtitleOf is what a session's subtitle says.
+type subtitleOf struct {
+	set, active   bool
+	label, prefix string
+	windows       int
+	elsewhere     bool
 }
 
 // rowShown is what a session row shows.
@@ -79,7 +90,7 @@ type sidebar struct {
 	// keys are the session keys of hosts' sessions, by host and ID, kept rather than made
 	// again on each update. The rest are update's scratch space, kept between updates:
 	// spare is the order before last, for the next order.
-	keys   map[[2]string]string
+	keys   keyCache
 	others map[string]int
 	groups map[string]string
 	keep   map[string]bool
@@ -88,17 +99,7 @@ type sidebar struct {
 
 // sessionKey returns the key of a host's session, kept from earlier updates.
 func (sb *sidebar) sessionKey(host, id string) string {
-	k := [2]string{host, id}
-	if key, ok := sb.keys[k]; ok {
-		return key
-	}
-	// Forget keys of sessions gone, now and then.
-	if len(sb.keys) > 2*len(sb.rows)+64 { //nolint:mnd // a little slack
-		clear(sb.keys)
-	}
-	key := sessionKey(host, id)
-	sb.keys[k] = key
-	return key
+	return sb.keys.key(host, id, 2*len(sb.rows)+64) //nolint:mnd // a little slack
 }
 
 // sidebarFilter is what the list is filtered by, besides its rows.
@@ -179,7 +180,7 @@ type hostRow struct {
 func newSidebar(w *Window) *sidebar {
 	sb := &sidebar{
 		win: w, rows: map[string]*sessionRow{}, hostRows: map[string]*hostRow{}, pinRows: map[string]*sessionRow{},
-		rowKeys: map[uintptr]string{}, keys: map[[2]string]string{}, others: map[string]int{},
+		rowKeys: map[uintptr]string{}, others: map[string]int{},
 		groups: map[string]string{}, keep: map[string]bool{},
 	}
 
@@ -650,16 +651,21 @@ func (r *sessionRow) update(s *tmux.Session, state activity.State, shown bool, o
 	case state.Unseen:
 		indicator = indicatorUnseen
 	}
-	subtitle := sessionSubtitle(s, othersAttached)
-	if prefix != "" {
-		subtitle = prefix + " · " + subtitle
+	of := subtitleOf{set: true, active: s.ActiveWindow() != nil, label: activeLabel(s), prefix: prefix, windows: len(s.Windows), elsewhere: othersAttached > 0}
+	subtitle := r.shown.subtitle
+	if of != r.subtitleOf {
+		subtitle = sessionSubtitle(s, othersAttached)
+		if prefix != "" {
+			subtitle = prefix + " · " + subtitle
+		}
+		r.subtitleOf = of
 	}
 	r.show(rowShown{name: s.Name, subtitle: subtitle, indicator: indicator, unseen: state.Unseen, here: shown})
 }
 
 // showUnavailable shows a pinned session which isn't running.
 func (r *sessionRow) showUnavailable(pin PinnedSession) {
-	r.session = nil
+	r.session, r.subtitleOf = nil, subtitleOf{}
 	r.tooltip = fmt.Sprintf("%s isn't running on %s. Click to start it.", pin.Name, pin.Host)
 	r.show(rowShown{name: pin.Name, subtitle: pin.Host + " · not running", indicator: indicatorNone, missing: true})
 }
@@ -669,11 +675,7 @@ func (r *sessionRow) showUnavailable(pin PinnedSession) {
 func sessionSubtitle(s *tmux.Session, othersAttached int) string {
 	parts := []string{}
 	if w := s.ActiveWindow(); w != nil {
-		label := w.Name
-		if label == "" {
-			label = w.Command
-		}
-		parts = append(parts, label)
+		parts = append(parts, activeLabel(s))
 	}
 	if n := len(s.Windows); n != 1 {
 		parts = append(parts, fmt.Sprintf("%d windows", n))
@@ -682,6 +684,19 @@ func sessionSubtitle(s *tmux.Session, othersAttached int) string {
 		parts = append(parts, "attached elsewhere")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// activeLabel is what a session's active window is called: its name, or else its
+// command. It's "" without one.
+func activeLabel(s *tmux.Session) string {
+	w := s.ActiveWindow()
+	if w == nil {
+		return ""
+	}
+	if w.Name == "" {
+		return w.Command
+	}
+	return w.Name
 }
 
 // sessionTooltip lists a session's windows.

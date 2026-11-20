@@ -2,8 +2,10 @@ package tmux
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -19,7 +21,8 @@ const waitDelay = 2 * time.Second
 // tmux, expands braces and globs in the arguments it's started with by a Windows program,
 // and so would make tmux's #{format} strings into #format, but leaves quoted ones alone.
 func Command(ctx context.Context, argv []string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // tmux and ssh are configured by the user
+	cmd := exec.CommandContext(ctx, lookPath(argv[0]), argv[1:]...) //nolint:gosec // tmux and ssh are configured by the user
+	cmd.Args[0] = argv[0]
 	cmd.WaitDelay = waitDelay
 	quoteArgs(cmd)
 	return cmd
@@ -53,4 +56,48 @@ func QuotedCommandLine(args []string) string {
 		b.WriteByte('"')
 	}
 	return b.String()
+}
+
+// lookPathTTL is how long a program found in PATH is taken to stay where it was found.
+const lookPathTTL = time.Minute
+
+// lookPathKey is a program looked up in a PATH.
+type lookPathKey struct{ name, path string }
+
+// lookPathEntry is where a program was found, and when.
+type lookPathEntry struct {
+	file string
+	at   time.Time
+}
+
+//nolint:gochecknoglobals // a cache of lookups, shared by every command
+var lookPaths struct {
+	sync.Mutex
+	m map[lookPathKey]lookPathEntry
+}
+
+// lookPath returns where name is in PATH, as exec.Command would find it. Polling runs
+// tmux several times a second, and searching PATH each time stats every directory in it,
+// so where it's found is remembered for a while. A name with a directory, or one which
+// isn't found, is returned as it is, for exec.Command to deal with.
+func lookPath(name string) string {
+	if strings.ContainsAny(name, `/\`) {
+		return name
+	}
+	key := lookPathKey{name, os.Getenv("PATH")}
+	now := time.Now()
+	lookPaths.Lock()
+	defer lookPaths.Unlock()
+	if e, ok := lookPaths.m[key]; ok && now.Sub(e.at) < lookPathTTL {
+		return e.file
+	}
+	file, err := exec.LookPath(name)
+	if err != nil {
+		return name
+	}
+	if lookPaths.m == nil {
+		lookPaths.m = map[lookPathKey]lookPathEntry{}
+	}
+	lookPaths.m[key] = lookPathEntry{file, now}
+	return file
 }

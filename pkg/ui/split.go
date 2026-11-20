@@ -54,6 +54,10 @@ func (s *split) setChild(old, n node) {
 type layout struct {
 	area *gtk.Box
 	root node
+	// panes is Panes' result, kept until the layout changes: the panes are looked
+	// through on every poll. It's replaced, never changed in place, so a caller going
+	// through it while closing panes goes through them all.
+	panes []*Pane
 }
 
 func newLayout(first *Pane) *layout {
@@ -73,6 +77,7 @@ func (l *layout) detach(n node) {
 
 // replace puts n where old was. old must already be detached.
 func (l *layout) replace(old node, parent *split, n node) {
+	l.panes = nil
 	if parent != nil {
 		parent.setChild(old, n)
 		return
@@ -130,6 +135,10 @@ func (l *layout) Remove(p *Pane) node {
 }
 
 // Panes returns every pane, left to right and top to bottom.
+// The slice is shared: it must not be changed.
 func (l *layout) Panes() []*Pane {
-	return l.root.appendLeaves(make([]*Pane, 0, 4)) //nolint:mnd // most windows have a few panes
+	if l.panes == nil {
+		l.panes = l.root.appendLeaves(make([]*Pane, 0, 4)) //nolint:mnd // most windows have a few panes
+	}
+	return l.panes
 }

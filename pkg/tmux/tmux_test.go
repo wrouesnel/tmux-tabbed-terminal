@@ -218,6 +218,8 @@ func TestParseSnapshot(t *testing.T) {
 	out := strings.ReplaceAll("S\t$1\tmain\t100\t1\n"+
 		"S\t$2\tother\t200\t0\n"+
 		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\t%5\t1\t0\t1\t500\t40\t12\t2\t120\ttitle\twith sep\n"+
+		// Windows of different sessions may come in any order.
+		"W\t$2\t@3\t0\t1\t0\tbash\tsecond\t/\t%6\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t%4\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t%9\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"C\t/dev/pts/4\t$1\n"+
@@ -256,8 +258,11 @@ func TestParseSnapshot(t *testing.T) {
 	if got := snap.ClientSession("/dev/pts/4"); got != "$1" {
 		t.Errorf("client session: got %q, want $1", got)
 	}
+	if ws := snap.Session("$2").Windows; len(ws) != 1 || ws[0].ID != "@3" {
+		t.Errorf("other session's windows: got %+v, want @3", ws)
+	}
 	if snap.Session("$2").Activity() != (time.Time{}) {
-		t.Error("session without windows should have no activity")
+		t.Error("session without window activity should have no activity")
 	}
 	if b := snap.Buffer; b == nil || b.Name != "buffer2" || b.Created.Unix() != 400 || b.Size != 11 {
 		t.Errorf("newest buffer: got %+v, want buffer2", b)
