@@ -19,6 +19,8 @@ type entry struct {
 	activity   time.Time
 	lastChange time.Time
 	unseen     bool
+	// reported is the state Changed last saw.
+	reported State
 }
 
 // Tracker remembers session activity between polls. It isn't safe for concurrent use.
@@ -26,6 +28,8 @@ type Tracker struct {
 	// Timeout is how long a session stays active after its activity time last changed.
 	Timeout time.Duration
 	entries map[string]*entry
+	// reported is how many sessions Changed last saw.
+	reported int
 }
 
 // NewTracker returns a tracker with the given timeout.
@@ -71,6 +75,22 @@ func (t *Tracker) State(id string, now time.Time) State {
 		Active: !e.lastChange.IsZero() && now.Sub(e.lastChange) < t.Timeout,
 		Unseen: e.unseen,
 	}
+}
+
+// Changed reports whether any session's state at now differs from what it was at the
+// last call, or sessions were added or forgotten since: whether what shows the states
+// needs updating. Sessions go from active to idle with time alone, so it can report a
+// change though nothing was observed.
+func (t *Tracker) Changed(now time.Time) bool {
+	changed := len(t.entries) != t.reported
+	t.reported = len(t.entries)
+	for id, e := range t.entries {
+		if st := t.State(id, now); st != e.reported {
+			e.reported = st
+			changed = true
+		}
+	}
+	return changed
 }
 
 // Retain forgets every session not in ids.

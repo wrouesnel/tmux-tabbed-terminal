@@ -68,3 +68,36 @@ func TestTrackerMarkSeenAndRetain(t *testing.T) {
 		t.Fatalf("after Retain: got %+v, want baseline", s)
 	}
 }
+
+// TestChanged reports a change when a session is added, becomes active or unseen, and
+// when it goes idle with time alone, and none otherwise.
+func TestChanged(t *testing.T) {
+	tr := activity.NewTracker(2 * time.Second)
+	t0 := time.Unix(1000, 0)
+	tr.Observe("s", t0, false, t0)
+	if !tr.Changed(t0) {
+		t.Error("no change for a new session")
+	}
+	if tr.Changed(t0) {
+		t.Error("a change with nothing new")
+	}
+	t1 := t0.Add(time.Second)
+	tr.Observe("s", t1, false, t1)
+	if !tr.Changed(t1) {
+		t.Error("no change for output")
+	}
+	if tr.Changed(t1.Add(time.Second)) {
+		t.Error("a change while still active")
+	}
+	if !tr.Changed(t1.Add(3 * time.Second)) {
+		t.Error("no change on going idle")
+	}
+	tr.MarkSeen("s")
+	if !tr.Changed(t1.Add(3 * time.Second)) {
+		t.Error("no change on being seen")
+	}
+	tr.Retain(map[string]bool{})
+	if !tr.Changed(t1.Add(3 * time.Second)) {
+		t.Error("no change when forgotten")
+	}
+}

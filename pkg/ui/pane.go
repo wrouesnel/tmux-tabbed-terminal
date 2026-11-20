@@ -71,9 +71,11 @@ type Pane struct {
 	scrollbar *gtk.Scrollbar
 	scrollAdj *gtk.Adjustment
 
-	emptyTitle    *gtk.Label
-	emptyHint     *gtk.Label
-	reattachBtn   *gtk.Button
+	emptyTitle  *gtk.Label
+	emptyHint   *gtk.Label
+	reattachBtn *gtk.Button
+	// key is the key SessionKey last made, and the host and session it's of.
+	key           struct{ host, id, key string }
 	newSessionBtn *gtk.Button
 
 	// hostName and sessionID are the session shown, or last shown.
@@ -117,18 +119,22 @@ type Pane struct {
 	settingBar bool
 }
 
-func (p *Pane) widget() gtk.IWidget { return p.root }
-func (p *Pane) getParent() *split   { return p.parent }
-func (p *Pane) setParent(s *split)  { p.parent = s }
-func (p *Pane) leaves() []*Pane     { return []*Pane{p} }
-func (p *Pane) firstLeaf() *Pane    { return p }
+func (p *Pane) widget() gtk.IWidget              { return p.root }
+func (p *Pane) getParent() *split                { return p.parent }
+func (p *Pane) setParent(s *split)               { p.parent = s }
+func (p *Pane) appendLeaves(dst []*Pane) []*Pane { return append(dst, p) }
+func (p *Pane) firstLeaf() *Pane                 { return p }
 
 // SessionKey returns the key of the session the pane shows, or last showed, or "".
 func (p *Pane) SessionKey() string {
 	if p.sessionID == "" {
 		return ""
 	}
-	return sessionKey(p.hostName, p.sessionID)
+	// It's asked for many times a refresh: make it once for each session shown.
+	if p.key.host != p.hostName || p.key.id != p.sessionID {
+		p.key.host, p.key.id, p.key.key = p.hostName, p.sessionID, sessionKey(p.hostName, p.sessionID)
+	}
+	return p.key.key
 }
 
 // Running reports whether the pane's tmux client is running.

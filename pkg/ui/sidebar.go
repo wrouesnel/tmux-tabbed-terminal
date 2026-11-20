@@ -76,6 +76,29 @@ type sidebar struct {
 	settingFilter bool
 	// filtered is what the list was last filtered by.
 	filtered sidebarFilter
+	// keys are the session keys of hosts' sessions, by host and ID, kept rather than made
+	// again on each update. The rest are update's scratch space, kept between updates:
+	// spare is the order before last, for the next order.
+	keys   map[[2]string]string
+	others map[string]int
+	groups map[string]string
+	keep   map[string]bool
+	spare  []listEntry
+}
+
+// sessionKey returns the key of a host's session, kept from earlier updates.
+func (sb *sidebar) sessionKey(host, id string) string {
+	k := [2]string{host, id}
+	if key, ok := sb.keys[k]; ok {
+		return key
+	}
+	// Forget keys of sessions gone, now and then.
+	if len(sb.keys) > 2*len(sb.rows)+64 { //nolint:mnd // a little slack
+		clear(sb.keys)
+	}
+	key := sessionKey(host, id)
+	sb.keys[k] = key
+	return key
 }
 
 // sidebarFilter is what the list is filtered by, besides its rows.
@@ -156,7 +179,8 @@ type hostRow struct {
 func newSidebar(w *Window) *sidebar {
 	sb := &sidebar{
 		win: w, rows: map[string]*sessionRow{}, hostRows: map[string]*hostRow{}, pinRows: map[string]*sessionRow{},
-		rowKeys: map[uintptr]string{},
+		rowKeys: map[uintptr]string{}, keys: map[[2]string]string{}, others: map[string]int{},
+		groups: map[string]string{}, keep: map[string]bool{},
 	}
 
 	sb.search, _ = gtk.SearchEntryNew()
@@ -683,7 +707,7 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 	now := time.Now()
 	ownTTYs, ownClients := app.ownTTYs(), app.ownClients()
 
-	order := sb.pinEntries(now, shown)
+	order := sb.pinEntries(sb.spare[:0], now, shown)
 	for _, h := range app.hosts {
 		hr, ok := sb.hostRows[h.Name]
 		if !ok {
@@ -707,7 +731,8 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 
 		// Clients attached from elsewhere: by tty locally, by count remotely, where the
 		// ttys are on the other host.
-		others := map[string]int{}
+		others := sb.others
+		clear(others)
 		if h.Local() {
 			for _, c := range h.snapshot.Clients {
 				if !ownTTYs[c.TTY] {
@@ -715,10 +740,11 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 				}
 			}
 		}
-		groups := map[string]string{}
+		groups := sb.groups
+		clear(groups)
 		for i := range h.snapshot.Sessions {
 			s := &h.snapshot.Sessions[i]
-			key := sessionKey(h.Name, s.ID)
+			key := sb.sessionKey(h.Name, s.ID)
 			groups[s.ID] = app.groups[key]
 			if !h.Local() {
 				others[s.ID] = max(s.Attached-ownClients[key], 0)
@@ -732,14 +758,15 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 			row.update(s, app.tracker.State(key, now), shown[key], others[s.ID], "")
 		}
 		for _, e := range sessionlist.Order(h.snapshot.Sessions, groups, app.grouped) {
-			order = append(order, listEntry{key: sessionKey(h.Name, e.ID), host: h.Name, group: e.Group})
+			order = append(order, listEntry{key: sb.sessionKey(h.Name, e.ID), host: h.Name, group: e.Group})
 		}
 	}
 
 	reordered := !equalEntries(order, sb.order)
 	if reordered {
 		// Rebuild in display order. The rows are kept, so only their position changes.
-		keep := map[string]bool{}
+		keep := sb.keep
+		clear(keep)
 		for _, e := range order {
 			keep[e.key] = true
 		}
@@ -762,12 +789,14 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 				}
 			}
 		}
-		sb.order = order
-		for i, e := range order {
+		sb.order, order = order, sb.order
+		for i, e := range sb.order {
 			sb.list.Insert(sb.rowOf(e), i)
 		}
 		sb.list.InvalidateHeaders()
 	}
+	// The order not kept is the next update's to fill.
+	sb.spare = order
 	// Filter again when what it goes by may have changed: the rows, a filter setting, or,
 	// while searching, anything about the sessions. Filtering wraps every row for Go.
 	filtered := sidebarFilter{query: sb.query, host: sb.hostFilter, hidePins: app.state.HideUnavailablePins}
@@ -811,18 +840,19 @@ func (sb *sidebar) rowOf(e listEntry) *gtk.ListBoxRow {
 }
 
 // pinEntries makes the rows of the pinned section, updating them from the hosts' state,
-// and returns their entries: the heading, and the pins unless they're folded away.
-func (sb *sidebar) pinEntries(now time.Time, shown map[string]bool) []listEntry {
+// and appends their entries to entries: the heading, and the pins unless they're folded
+// away.
+func (sb *sidebar) pinEntries(entries []listEntry, now time.Time, shown map[string]bool) []listEntry {
 	app := sb.win.app
 	if len(app.state.Pinned) == 0 {
-		return nil
+		return entries
 	}
 	if sb.pinHead == nil {
 		sb.pinHead = newPinHeaderRow(app)
 		sb.rowKeys[sb.pinHead.row.Native()] = pinHeaderKey
 	}
 	sb.pinHead.update()
-	entries := []listEntry{{key: pinHeaderKey, pinHeader: true}}
+	entries = append(entries, listEntry{key: pinHeaderKey, pinHeader: true})
 	if app.state.PinsCollapsed {
 		return entries
 	}

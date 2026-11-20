@@ -9,7 +9,8 @@ type node interface {
 	widget() gtk.IWidget
 	getParent() *split
 	setParent(s *split)
-	leaves() []*Pane
+	// appendLeaves appends the node's panes to dst, in order.
+	appendLeaves(dst []*Pane) []*Pane
 	firstLeaf() *Pane
 }
 
@@ -24,8 +25,10 @@ type split struct {
 func (s *split) widget() gtk.IWidget { return s.paned }
 func (s *split) getParent() *split   { return s.parent }
 func (s *split) setParent(p *split)  { s.parent = p }
-func (s *split) leaves() []*Pane     { return append(s.first.leaves(), s.second.leaves()...) }
-func (s *split) firstLeaf() *Pane    { return s.first.firstLeaf() }
+func (s *split) appendLeaves(dst []*Pane) []*Pane {
+	return s.second.appendLeaves(s.first.appendLeaves(dst))
+}
+func (s *split) firstLeaf() *Pane { return s.first.firstLeaf() }
 
 // sibling returns the other child of the split.
 func (s *split) sibling(n node) node {
@@ -128,5 +131,5 @@ func (l *layout) Remove(p *Pane) node {
 
 // Panes returns every pane, left to right and top to bottom.
 func (l *layout) Panes() []*Pane {
-	return l.root.leaves()
+	return l.root.appendLeaves(make([]*Pane, 0, 4)) //nolint:mnd // most windows have a few panes
 }

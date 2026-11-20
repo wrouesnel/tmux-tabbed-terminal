@@ -7,8 +7,10 @@ package ui
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -721,6 +723,9 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 		// The host was removed while the poll ran.
 		return
 	}
+	// Polls mostly find nothing new: then, unless a session's activity state moved on
+	// with time, the windows are left as they are (issue #17).
+	unchanged := h.polled && sameError(h.err, err) && (err != nil || reflect.DeepEqual(h.snapshot, snap))
 	h.polled, h.err = true, err
 	a.offerHostKeyFixOnce(h)
 	if err == nil {
@@ -767,8 +772,19 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 		}
 	}
 	a.tracker.Retain(keys)
+	groups := a.groups
 	a.updateGroups()
-	a.refreshAll()
+	if a.tracker.Changed(now) || !unchanged || !maps.Equal(groups, a.groups) {
+		a.refreshAll()
+	}
+}
+
+// sameError reports whether two errors from polling a host say the same.
+func sameError(a, b error) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Error() == b.Error()
 }
 
 // updateGroups assigns every session to its application group.
