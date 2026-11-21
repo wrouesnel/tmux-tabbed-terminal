@@ -5,14 +5,12 @@ package agent
 import (
 	"os"
 	"syscall"
-
-	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent/agentpb"
 )
 
 // exitOf says how a program that ran ended.
-func exitOf(state *os.ProcessState) *agentpb.Exit {
+func exitOf(state *os.ProcessState) *exit {
 	if ws, ok := state.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-		return &agentpb.Exit{Code: -1, Signal: ws.Signal().String()}
+		return &exit{Code: -1, Signal: ws.Signal().String()}
 	}
-	return &agentpb.Exit{Code: int32(state.ExitCode())} //nolint:gosec // exit statuses are small
+	return &exit{Code: state.ExitCode()}
 }

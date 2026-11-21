@@ -86,7 +86,7 @@ func TestHello(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hello.GetVersion() != "v1.2.3" || hello.GetOs() != runtime.GOOS || hello.GetArch() != runtime.GOARCH || hello.GetHome() == "" {
+	if hello.Version != "v1.2.3" || hello.OS != runtime.GOOS || hello.Arch != runtime.GOARCH || hello.Home == "" {
 		t.Errorf("hello %v", hello)
 	}
 }
@@ -108,7 +108,7 @@ func TestRun(t *testing.T) {
 	if err := res.Err(); !errors.As(err, &exitErr) || exitErr.Stderr != " it's\n" {
 		t.Errorf("err %v", err)
 	}
-	// Big output, beyond gRPC's default message size.
+	// Big output, in many frames.
 	res, err = c.Run(ctx, []string{"head", "-c", "10000000", "/dev/zero"}, nil)
 	if err != nil || len(res.Stdout) != 10000000 || res.Err() != nil {
 		t.Errorf("big output: %d bytes, %v, %v", len(res.Stdout), err, res.Err())
@@ -198,7 +198,8 @@ func TestAttach(t *testing.T) {
 	}
 	out, _ := io.ReadAll(term)
 	text := strings.ReplaceAll(string(out), "\r\n", "\n")
-	for _, want := range []string{"30 100\n", "bar\n", term.Name() + "\n", "got hello\n"} {
+	// uutils' tty doesn't end its line.
+	for _, want := range []string{"30 100\n", "bar\n", term.Name(), "got hello\n"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("output %q lacks %q", text, want)
 		}

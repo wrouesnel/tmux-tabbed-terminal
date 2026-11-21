@@ -426,8 +426,10 @@ through another run their ssh on the first host, through its agent.
 it, and `always` uses it on Linux too, for remote commands and previews (panes there keep their own ssh, as VTE
 reads only its own pty). On Linux, "Reach remote hosts through the agent" in Preferences
 chooses too, from the next start. On a host there's no agent for, Windows connects once per
-command. The protocol is gRPC, defined in
-[`proto/`](proto/tmuxtabbedterminal/agent/v1/agent.proto).
+command. The two ends multiplex calls over the ssh connection with
+[stdiomux](https://github.com/wrouesnel/stdiomux), a yamux that keeps typing in a pane
+quick while a download shares the connection; the calls are described in
+[`pkg/agent/protocol.go`](pkg/agent/protocol.go).
 
 ## Building
 
@@ -561,7 +563,7 @@ MIT: see [LICENSE](LICENSE). The binary links
 | `pkg/vte` | cgo bindings for the parts of VTE the UI uses, or on Windows the same API over `pkg/termwidget`. |
 | `pkg/termwidget` | A prototype terminal widget for where VTE isn't available: an emulator, a pty (ConPTY on Windows) and a GTK drawing area. Kept free of the rest of the repository, to be split out. |
 | `pkg/tmux` | Runs tmux commands, locally or over ssh, and parses their format output into snapshots of sessions, windows and clients. |
-| `pkg/agent`, `cmd/ttt-agent` | The agent run on remote hosts, serving the gRPC service in `proto/` over its standard input and output, and the application's side: installing it over ssh, and running commands and terminals through it. |
+| `pkg/agent`, `cmd/ttt-agent` | The agent run on remote hosts, serving calls multiplexed with stdiomux over its standard input and output, and the application's side: installing it over ssh, and running commands and terminals through it. |
 | `pkg/gtkx` | cgo bindings for the few GTK functions gotk3 lacks (drag and drop, showing URIs, loading and drawing pixbufs). |
 | `pkg/askpass` | The dialog ssh runs as its `SSH_ASKPASS`, and the in-memory store of remembered passphrases. |
 | `pkg/filewatch` | Watches previewed files for changes, with inotify, kqueue or ReadDirectoryChangesW. |

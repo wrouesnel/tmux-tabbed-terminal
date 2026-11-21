@@ -5,8 +5,6 @@ import (
 	"os/exec"
 
 	"github.com/pkg/errors"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 )
@@ -63,7 +61,7 @@ func (s *SSH) agentClient() (*SSH, *agent.Client) {
 // agentFailed drops the agent's client if a call failed because the connection to it did,
 // so the next command starts it again.
 func (s *SSH) agentFailed(c *agent.Client, err error) {
-	if code := status.Code(err); code != codes.Unavailable && code != codes.Internal {
+	if !agent.IsConnError(err) {
 		return
 	}
 	s.agentMu.Lock()
@@ -74,8 +72,8 @@ func (s *SSH) agentFailed(c *agent.Client, err error) {
 }
 
 // dropAgent closes the agent's client and forgets it, so the next command starts the
-// agent again. Its pipes may have closed already, but its gRPC connection hasn't: left
-// open, its goroutines would outlive it, one set for each time the agent was lost.
+// agent again. Its pipes may have closed already, but its client should still be closed,
+// so nothing of it outlives it, once for each time the agent was lost.
 // agentMu must be held.
 func (s *SSH) dropAgent() {
 	_ = s.agent.Close()
@@ -160,7 +158,7 @@ func (s *SSH) Watch(ctx context.Context, name string, started, changed func()) e
 		return ErrNoWatch
 	}
 	err = c.Watch(ctx, name, started, changed)
-	if status.Code(err) == codes.Unimplemented {
+	if agent.IsUnimplemented(err) {
 		return ErrNoWatch
 	}
 	if err != nil && ctx.Err() == nil {

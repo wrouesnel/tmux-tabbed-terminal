@@ -12,7 +12,7 @@ import (
 )
 
 // TestLostAgentIsClosed closes the client of an agent whose pipes closed when it's
-// dropped, so a host that keeps losing its agent doesn't keep each lost client's gRPC
+// dropped, so a host that keeps losing its agent doesn't keep each lost client's
 // goroutines (issue #15).
 func TestLostAgentIsClosed(t *testing.T) {
 	s := &tmux.SSH{Destination: "example"}
@@ -35,7 +35,7 @@ func TestLostAgentIsClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		s.SetAgent(c)
-		// A call connects; the agent then goes away, and gRPC closes the pipes.
+		// A call connects; the agent then goes away, and the client closes the pipes.
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		go func() { _, _ = c.Hello(ctx, "test") }()
 		time.Sleep(10 * time.Millisecond)

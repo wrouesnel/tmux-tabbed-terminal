@@ -18,6 +18,7 @@ require (
 	github.com/wrouesnel/ctxstdio v0.0.0-20260925000958-306c83092f60
 	github.com/wrouesnel/go.logutil v0.0.0-20260831004131-2c91cc3e879a
 	github.com/wrouesnel/kongutil v0.0.0-20260819130755-29108a76e5f7
+	github.com/wrouesnel/stdiomux v0.1.0
 	github.com/yuin/goldmark v1.8.7
 	github.com/zkrebbekx/go-mermaid v0.1.6
 	go.uber.org/zap v1.28.0
@@ -25,8 +26,6 @@ require (
 	golang.org/x/mod v0.41.0
 	golang.org/x/sys v0.48.0
 	golang.org/x/text v0.42.0
-	google.golang.org/grpc v1.85.0
-	google.golang.org/protobuf v1.36.12
 )
 
 require (
@@ -36,6 +35,8 @@ require (
 	github.com/frankban/quicktest v1.14.6 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
+	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/libp2p/go-buffer-pool v0.0.2 // indirect
 	github.com/nwaples/rardecode v1.1.3 // indirect
 	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/pierrec/lz4 v2.6.1+incompatible // indirect
@@ -48,7 +49,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/image v0.45.0 // indirect
 	golang.org/x/net v0.60.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 )
 
 replace go.yaml.in/yaml/v4 => github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-20260918015114-84d82f5038cd

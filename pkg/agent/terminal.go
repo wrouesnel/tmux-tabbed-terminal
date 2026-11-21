@@ -2,31 +2,29 @@ package agent
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"io"
 	"sync"
 
 	"github.com/pkg/errors"
-	"google.golang.org/grpc"
-
-	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent/agentpb"
 )
 
 // Terminal is a program running on a pseudo-terminal on the agent's host. Reading it
 // returns what the program writes, and writing it types into the program. It has the
 // methods of a termwidget pty.
 type Terminal struct {
-	stream grpc.BidiStreamingClient[agentpb.AttachRequest, agentpb.AttachResponse]
-	cancel context.CancelFunc
-	tty    string
-
-	// sendMu serializes sends: a gRPC stream allows one sender at a time.
-	sendMu sync.Mutex
+	call *clientCall
+	tty  string
 
 	// pending is output received but not yet read.
 	pending []byte
 	readErr error
 	exited  chan struct{}
-	exit    *agentpb.Exit
+	exit    *exit
+
+	resizeMu  sync.Mutex
+	resizeBuf [resizeSize]byte
 }
 
 // TerminalOptions are how to start a program on a terminal.
@@ -39,36 +37,13 @@ type TerminalOptions struct {
 // Attach runs a program on a new pseudo-terminal on the agent's host. Cancelling ctx, or
 // closing the terminal, hangs the program up.
 func (c *Client) Attach(ctx context.Context, argv []string, opts TerminalOptions) (*Terminal, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	stream, err := c.agent.Attach(ctx)
+	cc, rep, err := c.open(ctx, &request{
+		Call: callAttach, Argv: argv, Cols: max(opts.Cols, 0), Rows: max(opts.Rows, 0), Env: opts.Env,
+	})
 	if err != nil {
-		cancel()
 		return nil, err
 	}
-	err = stream.Send(&agentpb.AttachRequest{Event: &agentpb.AttachRequest_Start{Start: &agentpb.AttachStart{
-		Command: &agentpb.Command{Argv: argv},
-		Size:    terminalSize(opts.Cols, opts.Rows),
-		Env:     opts.Env,
-	}}})
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	resp, err := stream.Recv()
-	if err != nil {
-		cancel()
-		return nil, err
-	}
-	started := resp.GetStarted()
-	if started == nil {
-		cancel()
-		return nil, errors.New("the agent didn't say the program started")
-	}
-	return &Terminal{stream: stream, cancel: cancel, tty: started.GetTty(), exited: make(chan struct{})}, nil
-}
-
-func terminalSize(cols, rows int) *agentpb.TerminalSize {
-	return &agentpb.TerminalSize{Cols: uint32(max(cols, 0)), Rows: uint32(max(rows, 0))} //nolint:gosec // clamped
+	return &Terminal{call: cc, tty: rep.TTY, exited: make(chan struct{})}, nil
 }
 
 // Read returns what the program wrote. It returns io.EOF once the program has exited and
@@ -78,16 +53,26 @@ func (t *Terminal) Read(p []byte) (int, error) {
 		if t.readErr != nil {
 			return 0, t.readErr
 		}
-		resp, err := t.stream.Recv()
+		typ, payload, err := t.call.r.Next()
 		if err != nil {
-			t.finish(nil, err)
+			if errors.Is(err, io.EOF) {
+				err = errors.New("the agent ended the terminal without saying how the program exited")
+			}
+			t.finish(nil, t.call.fail(err))
 			continue
 		}
-		switch ev := resp.GetEvent().(type) {
-		case *agentpb.AttachResponse_Output:
-			t.pending = ev.Output
-		case *agentpb.AttachResponse_Exit:
-			t.finish(ev.Exit, io.EOF)
+		switch typ {
+		case frameOutput:
+			t.pending = payload
+		case frameExit:
+			var ex exit
+			if err := json.Unmarshal(payload, &ex); err != nil {
+				t.finish(nil, &ConnError{Err: err})
+				continue
+			}
+			t.finish(&ex, io.EOF)
+		case frameReply:
+			t.finish(nil, replyError(payload))
 		}
 	}
 	n := copy(p, t.pending)
@@ -97,35 +82,37 @@ func (t *Terminal) Read(p []byte) (int, error) {
 
 // finish records the end of the program's output: how it exited, if it did, and the
 // error further reads return.
-func (t *Terminal) finish(exit *agentpb.Exit, err error) {
+func (t *Terminal) finish(ex *exit, err error) {
 	t.readErr = err
-	if exit != nil {
-		t.exit = exit
+	if ex != nil {
+		t.exit = ex
 	}
 	select {
 	case <-t.exited:
 	default:
 		close(t.exited)
+		t.call.close()
 	}
 }
 
 // Write types into the program.
 func (t *Terminal) Write(p []byte) (int, error) {
-	if err := t.send(&agentpb.AttachRequest{Event: &agentpb.AttachRequest_Input{Input: append([]byte(nil), p...)}}); err != nil {
-		return 0, err
+	if err := t.call.w.Write(frameInput, p); err != nil {
+		return 0, t.call.fail(err)
 	}
 	return len(p), nil
 }
 
 // Resize tells the program the terminal's new size in cells.
 func (t *Terminal) Resize(cols, rows int) error {
-	return t.send(&agentpb.AttachRequest{Event: &agentpb.AttachRequest_Resize{Resize: terminalSize(cols, rows)}})
-}
-
-func (t *Terminal) send(req *agentpb.AttachRequest) error {
-	t.sendMu.Lock()
-	defer t.sendMu.Unlock()
-	return t.stream.Send(req)
+	t.resizeMu.Lock()
+	defer t.resizeMu.Unlock()
+	binary.BigEndian.PutUint32(t.resizeBuf[:], uint32(max(cols, 0)))  //nolint:gosec // clamped
+	binary.BigEndian.PutUint32(t.resizeBuf[4:], uint32(max(rows, 0))) //nolint:gosec // clamped
+	if err := t.call.w.Write(frameResize, t.resizeBuf[:]); err != nil {
+		return t.call.fail(err)
+	}
+	return nil
 }
 
 // Name is the terminal device on the agent's host, such as /dev/pts/3.
@@ -133,7 +120,7 @@ func (t *Terminal) Name() string { return t.tty }
 
 // Close hangs the program up.
 func (t *Terminal) Close() error {
-	t.cancel()
+	t.call.abort()
 	return nil
 }
 
@@ -148,5 +135,5 @@ func (t *Terminal) Wait() error {
 		}
 		return t.readErr
 	}
-	return exitError(int(t.exit.GetCode()), t.exit.GetSignal(), nil)
+	return exitError(t.exit.Code, t.exit.Signal, nil)
 }

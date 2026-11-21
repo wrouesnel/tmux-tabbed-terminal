@@ -10,22 +10,25 @@ import (
 	"os/exec"
 	"runtime"
 
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent/agentpb"
+	"github.com/wrouesnel/stdiomux"
+	"github.com/wrouesnel/stdiomux/yamux"
 )
 
-// maxMessage is the largest message either side sends: a Run's whole output, such as a
-// file being previewed, is one message.
-const maxMessage = 64 << 20
-
-// streamChunk is the most of a program's output one response carries.
+// streamChunk is the most of a program's output, or input, one frame carries.
 const streamChunk = 32 << 10
 
 // maxStderr is the most of a program's standard error kept, from its start.
 const maxStderr = 64 << 10
+
+// linkConfig is the multiplexer's configuration, at either end.
+func linkConfig(keepAlive bool) *yamux.Config {
+	c := stdiomux.DefaultConfig()
+	// The application checks the agent is alive. The agent ends when its standard
+	// input does, and doesn't give up on an application that's slow to answer, such as
+	// on a laptop that's asleep.
+	c.EnableKeepAlive = keepAlive
+	return c
+}
 
 // Serve serves the agent over r and w, such as standard input and output, until r ends or
 // ctx is done. version is the application version the agent was built with. It first
@@ -34,148 +37,184 @@ func Serve(ctx context.Context, r io.Reader, w io.Writer, version string) error 
 	if _, err := fmt.Fprintf(w, "%s %s\n", markerStart, version); err != nil {
 		return err
 	}
-	conn := newPipeConn(r, w)
-	l := newOneConnListener(conn)
-	s := grpc.NewServer(grpc.MaxRecvMsgSize(maxMessage), grpc.MaxSendMsgSize(maxMessage))
-	agentpb.RegisterAgentServiceServer(s, &server{version: version})
-	errs := make(chan error, 1)
-	go func() { errs <- s.Serve(l) }()
+	session, err := stdiomux.Server(stdiomux.NewConn(r, w), linkConfig(false))
+	if err != nil {
+		return err
+	}
+	s := &server{version: version}
+	go func() {
+		for {
+			stream, err := session.AcceptStream()
+			if err != nil {
+				return
+			}
+			go s.serve(stream)
+		}
+	}()
 	select {
-	case <-conn.closed:
+	case <-session.CloseChan():
 		// The application went away: its end of the pipe closed.
 	case <-ctx.Done():
 		// As for a signal, when the agent is ending. The application's end may still be
-		// open, and gRPC's Stop would wait for a read from it which never returns.
-		return nil
-	case err := <-errs:
-		return err
+		// open: closing the session would wait for a read from it which never returns.
 	}
-	s.Stop()
-	_ = l.Close()
 	return nil
 }
 
 type server struct {
-	agentpb.UnimplementedAgentServiceServer
-
 	version string
 }
 
-func (s *server) Hello(context.Context, *agentpb.HelloRequest) (*agentpb.HelloResponse, error) {
-	home, _ := os.UserHomeDir()
-	return &agentpb.HelloResponse{Version: s.version, Os: runtime.GOOS, Arch: runtime.GOARCH, Home: home}, nil
+// call is a call being served.
+type call struct {
+	stream *yamux.Stream
+	r      *stdiomux.FrameReader
+	w      *stdiomux.FrameWriter
+	// ctx is cancelled once the application stops sending, or resets the stream.
+	ctx     context.Context
+	cancel  context.CancelFunc
+	replied bool
+}
+
+func (s *server) serve(stream *yamux.Stream) {
+	c := &call{stream: stream, r: stdiomux.NewFrameReader(stream), w: stdiomux.NewFrameWriter(stream)}
+	var req request
+	if err := c.r.NextJSON(frameRequest, &req); err != nil {
+		stdiomux.Reset(stream)
+		return
+	}
+	c.ctx, c.cancel = context.WithCancel(context.Background())
+	defer c.cancel()
+	var err error
+	switch req.Call {
+	case callHello:
+		home, _ := os.UserHomeDir()
+		err = c.reply(&reply{Version: s.version, OS: runtime.GOOS, Arch: runtime.GOARCH, Home: home})
+		c.cancel()
+	case callRun:
+		err = c.run(&req)
+	case callAttach:
+		err = c.attach(&req)
+	case callWatch:
+		err = c.watch(&req)
+	default:
+		err = &Error{Code: CodeUnimplemented, Message: "the agent can't " + req.Call}
+	}
+	if err != nil {
+		c.fail(err)
+	}
+	_ = stream.Close()
+}
+
+// reply says the call has started, or failed.
+func (c *call) reply(r *reply) error {
+	c.replied = true
+	return c.w.WriteJSON(frameReply, r)
+}
+
+// fail says the call failed: in its reply, or after it, in another.
+func (c *call) fail(err error) {
+	var e *Error
+	if !errors.As(err, &e) {
+		e = &Error{Code: CodeInternal, Message: err.Error()}
+	}
+	_ = c.reply(&reply{Error: e.Message, Code: e.Code})
+}
+
+// readInput reads what the application sends, handing it to input, until it ends the
+// call by closing or resetting the stream, which cancels it. A frame for none of the
+// handlers is ignored.
+func (c *call) readInput(input func(typ byte, payload []byte)) {
+	defer c.cancel()
+	for {
+		typ, payload, err := c.r.Next()
+		if err != nil {
+			return
+		}
+		input(typ, payload)
+	}
 }
 
 // command makes the program a request names.
-func command(ctx context.Context, c *agentpb.Command) (*exec.Cmd, error) {
-	argv := c.GetArgv()
+func command(ctx context.Context, argv []string) (*exec.Cmd, error) {
 	if len(argv) == 0 {
-		return nil, status.Error(codes.InvalidArgument, "no program to run")
+		return nil, &Error{Code: CodeInvalidArgument, Message: "no program to run"}
 	}
 	return exec.CommandContext(ctx, argv[0], argv[1:]...), nil //nolint:gosec // running programs is the agent's job
 }
 
-func (s *server) Run(ctx context.Context, req *agentpb.RunRequest) (*agentpb.RunResponse, error) {
-	cmd, err := command(ctx, req.GetCommand())
-	if err != nil {
-		return nil, err
-	}
-	var stdout bytes.Buffer
-	stderr := &limitedBuffer{max: maxStderr}
-	cmd.Stdin = bytes.NewReader(req.GetStdin())
-	cmd.Stdout, cmd.Stderr = &stdout, stderr
-	exit, err := runExit(cmd.Run())
-	if err != nil {
-		return nil, err
-	}
-	return &agentpb.RunResponse{Stdout: stdout.Bytes(), Stderr: stderr.Bytes(), Exit: exit}, nil
-}
-
-func (s *server) Stream(req *agentpb.StreamRequest, stream grpc.ServerStreamingServer[agentpb.StreamResponse]) error {
-	cmd, err := command(stream.Context(), req.GetCommand())
-	if err != nil {
-		return err
-	}
-	return streamOutput(cmd, func(stdout []byte) error {
-		return stream.Send(&agentpb.StreamResponse{Event: &agentpb.StreamResponse_Stdout{Stdout: stdout}})
-	}, func(exit *agentpb.StreamExit) error {
-		return stream.Send(&agentpb.StreamResponse{Event: &agentpb.StreamResponse_Exit{Exit: exit}})
-	})
-}
-
-func (s *server) Pipe(stream grpc.BidiStreamingServer[agentpb.PipeRequest, agentpb.PipeResponse]) error {
-	first, err := stream.Recv()
-	if err != nil {
-		return err
-	}
-	cmd, err := command(stream.Context(), first.GetCommand())
+// run runs a program, with input frames as its standard input, sending its standard
+// output as it's written, and then how it exited.
+func (c *call) run(req *request) error {
+	cmd, err := command(c.ctx, req.Argv)
 	if err != nil {
 		return err
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return status.Error(codes.Internal, err.Error())
+		return err
 	}
-	go func() {
-		defer stdin.Close()
-		for {
-			req, err := stream.Recv()
-			if err != nil {
-				// io.EOF is the end of the input. Anything else cancels the call, which
-				// kills the program.
-				return
-			}
-			if _, err := stdin.Write(req.GetStdin()); err != nil {
-				return
-			}
-		}
-	}()
-	return streamOutput(cmd, func(stdout []byte) error {
-		return stream.Send(&agentpb.PipeResponse{Event: &agentpb.PipeResponse_Stdout{Stdout: stdout}})
-	}, func(exit *agentpb.StreamExit) error {
-		return stream.Send(&agentpb.PipeResponse{Event: &agentpb.PipeResponse_Exit{Exit: exit}})
-	})
-}
-
-// streamOutput starts cmd, sends its standard output as it's written, and then how it
-// exited, with sendStdout and sendExit.
-func streamOutput(cmd *exec.Cmd, sendStdout func([]byte) error, sendExit func(*agentpb.StreamExit) error) error {
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return status.Error(codes.Internal, err.Error())
+		return err
 	}
 	stderr := &limitedBuffer{max: maxStderr}
 	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return startError(err)
 	}
+	if err := c.reply(&reply{}); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return err
+	}
+	go c.readInput(func(typ byte, payload []byte) {
+		switch typ {
+		case frameInput:
+			// A program that stops reading its input, or has exited, drops the rest.
+			if stdin != nil {
+				if _, err := stdin.Write(payload); err != nil {
+					_ = stdin.Close()
+					stdin = nil
+				}
+			}
+		case frameEnd:
+			if stdin != nil {
+				_ = stdin.Close()
+				stdin = nil
+			}
+		}
+	})
 	buf := make([]byte, streamChunk)
+	var sendErr error
 	for {
 		n, rerr := stdout.Read(buf)
-		if n > 0 {
-			chunk := bytes.Clone(buf[:n])
-			if err := sendStdout(chunk); err != nil {
+		if n > 0 && sendErr == nil {
+			if sendErr = c.w.Write(frameOutput, buf[:n]); sendErr != nil {
 				_ = cmd.Process.Kill()
-				_ = cmd.Wait()
-				return err
 			}
 		}
 		if rerr != nil {
 			break
 		}
 	}
-	exit, err := runExit(cmd.Wait())
+	waitErr := cmd.Wait()
+	if sendErr != nil {
+		return sendErr
+	}
+	ex, err := runExit(waitErr)
 	if err != nil {
 		return err
 	}
-	return sendExit(&agentpb.StreamExit{Exit: exit, Stderr: stderr.Bytes()})
+	ex.Stderr = stderr.Bytes()
+	return c.w.WriteJSON(frameExit, ex)
 }
 
 // runExit turns what running a program returned into how it exited, or the error of a
 // program that couldn't run.
-func runExit(err error) (*agentpb.Exit, error) {
+func runExit(err error) (*exit, error) {
 	if err == nil {
-		return &agentpb.Exit{}, nil
+		return &exit{}, nil
 	}
 	var exitErr *exec.ExitError
 	if !errors.As(err, &exitErr) {
@@ -187,9 +226,9 @@ func runExit(err error) (*agentpb.Exit, error) {
 // startError is the error of a program that couldn't start.
 func startError(err error) error {
 	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
-		return status.Error(codes.NotFound, err.Error())
+		return &Error{Code: CodeNotFound, Message: err.Error()}
 	}
-	return status.Error(codes.FailedPrecondition, err.Error())
+	return &Error{Code: CodeFailedPrecondition, Message: err.Error()}
 }
 
 // limitedBuffer keeps the first max bytes written to it, and drops the rest.
