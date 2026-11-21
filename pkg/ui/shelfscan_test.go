@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -17,6 +18,11 @@ import (
 // TestShelfScannerRead reads a real pane for the files it mentions, twice: the second
 // read finds the same files, with the strings the first made.
 func TestShelfScannerRead(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// MSYS2 tmux's panes name Windows directories, and local paths are taken as
+		// Windows ones: the reading this tests doesn't differ by platform.
+		t.Skip("the paths here are Unix ones")
+	}
 	if _, err := exec.LookPath("tmux"); err != nil {
 		t.Skip("no tmux")
 	}
