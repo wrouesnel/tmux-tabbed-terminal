@@ -126,15 +126,30 @@ func TestControlArgumentsAndErrors(t *testing.T) {
 	c := controlTestClient(t, "one")
 	ctx := context.Background()
 	const format = `it's "#{session_name}" ; \ $HOME ~ {x}`
-	out, err := c.Run(ctx, "list-sessions", "-F", format, ";", "list-sessions", "-F", "#{session_name}")
+	args := []string{"list-sessions", "-F", format, ";", "list-sessions", "-F", "#{session_name}"}
+	// The arguments reach tmux as they would run directly. What tmux then prints
+	// depends on its version: 3.4 prints a format's $ as \$.
+	c.SetControl(false)
+	want, err := c.Run(ctx, args...)
+	if err != nil {
+		t.Fatalf("Run without the control client: %v", err)
+	}
+	if !strings.HasPrefix(want, `it's "one" ; \ `) || !strings.HasSuffix(want, " ~ {x}\none\n") {
+		t.Fatalf("run directly: %q", want)
+	}
+	c.SetControl(true)
+	if _, err := c.Snapshot(ctx); err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	out, err := c.Run(ctx, args...)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if c.ControlName() == "" {
 		t.Fatal("not run through the control client")
 	}
-	if want := "it's \"one\" ; \\ $HOME ~ {x}\none\n"; out != want {
-		t.Errorf("got %q, want %q", out, want)
+	if out != want {
+		t.Errorf("got %q, want %q as run directly", out, want)
 	}
 	if _, err := c.Run(ctx, "list-windows", "-t", "nosuch"); !errors.Is(err, tmux.ErrNoSession) {
 		t.Errorf("missing session: got %v, want ErrNoSession", err)
