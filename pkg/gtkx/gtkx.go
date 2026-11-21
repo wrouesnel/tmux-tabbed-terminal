@@ -18,6 +18,9 @@ static void ttt_set_class(void *w, const char *class, int on) {
 		gtk_style_context_remove_class(ctx, class);
 	}
 }
+static int ttt_row_selected(void *list, void *row) {
+	return gtk_list_box_get_selected_row(GTK_LIST_BOX(list)) == GTK_LIST_BOX_ROW(row);
+}
 static void ttt_set_source_pixbuf(uintptr_t cr, void *pb, double x, double y) {
 	gdk_cairo_set_source_pixbuf((cairo_t *)cr, GDK_PIXBUF(pb), x, y);
 }
@@ -215,4 +218,11 @@ func SetClass(w gtk.IWidget, class string, on bool) {
 		flag = 1
 	}
 	C.ttt_set_class(unsafe.Pointer(w.ToWidget().GObject), c, flag)
+}
+
+// RowSelected reports whether row is the list's selected row. Unlike comparing with
+// gotk3's GetSelectedRow, it makes no Go wrapper: it's asked on every poll, and the
+// wrappers, each a GObject for the garbage collector to finalize, add up on long runs.
+func RowSelected(list *gtk.ListBox, row *gtk.ListBoxRow) bool {
+	return C.ttt_row_selected(unsafe.Pointer(list.GObject), unsafe.Pointer(row.GObject)) != 0
 }

@@ -81,16 +81,33 @@ func (p *pulser) stop() {
 	}
 }
 
+// animations is whether the desktop wants animations, once known, kept up to date as
+// the setting changes. The pulse timer asks several times a second, and reading the
+// setting each time made garbage that added up on long runs. It's only used on the main
+// thread.
+var animations struct {
+	known, enabled bool
+}
+
 // animationsEnabled is whether the desktop wants animations, as GTK's own do.
 func animationsEnabled() bool {
+	if animations.known {
+		return animations.enabled
+	}
 	settings, err := gtk.SettingsGetDefault()
 	if err != nil {
 		return true
 	}
-	v, err := settings.GetProperty("gtk-enable-animations")
-	if err != nil {
-		return true
+	read := func() {
+		animations.enabled = true
+		if v, err := settings.GetProperty("gtk-enable-animations"); err == nil {
+			if enabled, ok := v.(bool); ok {
+				animations.enabled = enabled
+			}
+		}
 	}
-	enabled, ok := v.(bool)
-	return !ok || enabled
+	read()
+	settings.Connect("notify::gtk-enable-animations", read)
+	animations.known = true
+	return animations.enabled
 }

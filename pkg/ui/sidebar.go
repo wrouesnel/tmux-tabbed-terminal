@@ -12,6 +12,7 @@ import (
 	"github.com/gotk3/gotk3/pango"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/activity"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/sessionlist"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
@@ -977,7 +978,7 @@ func newPinHeaderRow(app *App) *pinHeaderRow {
 // selectSession highlights the session in the focused pane.
 func (sb *sidebar) selectSession(id string) {
 	if row, ok := sb.rows[id]; ok {
-		if current := sb.list.GetSelectedRow(); current == nil || current.Native() != row.row.Native() {
+		if !gtkx.RowSelected(sb.list, row.row) {
 			sb.list.SelectRow(row.row)
 		}
 		return
