@@ -8,6 +8,7 @@ import (
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/gtk"
 
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/termwidget"
 )
 
@@ -16,6 +17,13 @@ import (
 type Terminal struct {
 	*gtk.Widget
 	t *termwidget.Terminal
+}
+
+//nolint:gochecknoinits // before any terminal is made
+func init() {
+	// Terminals hand their program's output to the main loop many times a second:
+	// gtkx.Invoke does it without the garbage glib.IdleAdd makes each time.
+	termwidget.Invoke = gtkx.Invoke
 }
 
 // New creates a terminal widget.

@@ -42,6 +42,13 @@ type Terminal struct {
 	mu        sync.Mutex
 	pending   []byte
 	scheduled bool
+	// spare is the space of the output fed last, for the next to be gathered in, and
+	// flushFunc is flush, made once: a busy program's output is handed over many times
+	// a second.
+	spare     []byte
+	flushFunc func()
+	// runText is where draw gathers a run of text.
+	runText []byte
 	// generation counts started programs, so that output a replaced one wrote late is
 	// dropped.
 	generation int
@@ -73,6 +80,7 @@ func New() (*Terminal, error) {
 		audibleBell: true,
 	}
 	t.emu.Respond = t.write
+	t.flushFunc = t.flush
 	t.emu.OnBell = t.bell
 	t.applyThemeToEmulator()
 	t.SetCanFocus(true)
@@ -161,7 +169,7 @@ func (t *Terminal) read(p pty.Pty, generation int) {
 			t.scheduled = true
 			t.mu.Unlock()
 			if schedule {
-				glib.IdleAdd(t.flush)
+				Invoke(t.flushFunc)
 			}
 		}
 		if err != nil {
@@ -174,10 +182,26 @@ func (t *Terminal) read(p pty.Pty, generation int) {
 func (t *Terminal) flush() {
 	t.mu.Lock()
 	data := t.pending
-	t.pending, t.scheduled = nil, false
+	t.pending, t.spare, t.scheduled = t.spare[:0], nil, false
 	t.mu.Unlock()
 	t.Feed(data)
+	t.mu.Lock()
+	if t.spare == nil && cap(data) <= maxSpareOutput {
+		t.spare = data[:0]
+	}
+	t.mu.Unlock()
 }
+
+// maxSpareOutput is the most space kept for gathering output: a burst's isn't kept.
+const maxSpareOutput = 1 << 20
+
+// Invoke runs fn on the GLib main loop soon, as glib.IdleAdd does, and is safe to call
+// from any goroutine. It's glib.IdleAdd unless set: an application with its own way,
+// which doesn't allocate a closure and call back through reflection each time, as
+// gotk3's does, can set it before making terminals.
+//
+//nolint:gochecknoglobals // set once by the application
+var Invoke = func(fn func()) { glib.IdleAdd(fn) }
 
 // Feed shows data as if the terminal's program had written it.
 func (t *Terminal) Feed(data []byte) {

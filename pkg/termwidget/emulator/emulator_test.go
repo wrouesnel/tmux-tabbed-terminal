@@ -285,3 +285,41 @@ func TestEncodePaste(t *testing.T) {
 		t.Errorf("bracketed paste %q", got)
 	}
 }
+
+// TestScrollingReusesLines checks that output scrolling the screen allocates nothing
+// once warm, and that scrolling regions and erasing, which reuse lines too, leave the
+// screen as they should.
+func TestScrollingReusesLines(t *testing.T) {
+	e := New(20, 5)
+	lines := []byte("one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n")
+	_, _ = e.Write(lines)
+	if allocs := testing.AllocsPerRun(20, func() { _, _ = e.Write(lines) }); allocs != 0 {
+		t.Errorf("scrolling allocated %v objects", allocs)
+	}
+	if got := strings.TrimRight(lineText(e.Line(3)), " "); got != "six" {
+		t.Errorf("line 3 %q, want %q", got, "six")
+	}
+
+	// A region of rows 2 to 4 scrolled up from its bottom: "seven" there, the rest kept.
+	_, _ = e.Write([]byte("\x1b[H\x1b[2Ja\r\nb\r\nc\r\nd\r\ne\x1b[2;4r\x1b[4;1H\nseven\x1b[r"))
+	want := []string{"a", "c", "d", "seven", "e"}
+	for y, w := range want {
+		if got := strings.TrimRight(lineText(e.Line(y)), " "); got != w {
+			t.Errorf("after the region scrolled, line %d %q, want %q", y, got, w)
+		}
+	}
+	_, _ = e.Write([]byte("\x1b[2J"))
+	for y := range 5 {
+		if got := strings.TrimSpace(lineText(e.Line(y))); got != "" {
+			t.Errorf("after erasing, line %d %q, want blank", y, got)
+		}
+	}
+}
+
+func lineText(l *Line) string {
+	var b strings.Builder
+	for _, c := range l.Cells {
+		b.WriteRune(c.Rune)
+	}
+	return b.String()
+}

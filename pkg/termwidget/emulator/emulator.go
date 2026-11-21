@@ -8,6 +8,8 @@
 package emulator
 
 import (
+	"slices"
+
 	vtparser "github.com/danielgatis/go-vte"
 )
 
@@ -413,19 +415,39 @@ func (e *Emulator) scrollRegion(top, bottom, n int) {
 	if n < -height {
 		n = -height
 	}
+	// The lines scrolled off are blanked and reused for those scrolled in: a busy
+	// program scrolls many times a second, and a new line for each was most of what the
+	// emulator allocated.
 	switch {
 	case n > 0:
-		copy(lines[top:], lines[top+n:bottom+1])
+		slices.Reverse(lines[top : top+n])
+		slices.Reverse(lines[top+n : bottom+1])
+		slices.Reverse(lines[top : bottom+1])
 		for i := bottom - n + 1; i <= bottom; i++ {
-			lines[i] = newLine(e.cols, e.cur.style)
+			e.blankLine(&lines[i])
 		}
 	case n < 0:
 		n = -n
-		copy(lines[top+n:bottom+1], lines[top:bottom+1-n])
+		slices.Reverse(lines[top : bottom+1-n])
+		slices.Reverse(lines[bottom+1-n : bottom+1])
+		slices.Reverse(lines[top : bottom+1])
 		for i := top; i < top+n; i++ {
-			lines[i] = newLine(e.cols, e.cur.style)
+			e.blankLine(&lines[i])
 		}
 	}
+}
+
+// blankLine erases a line in the current style, in place, if it's as wide as the screen.
+func (e *Emulator) blankLine(l *Line) {
+	if len(l.Cells) != e.cols {
+		*l = newLine(e.cols, e.cur.style)
+		return
+	}
+	b := blank(e.cur.style)
+	for i := range l.Cells {
+		l.Cells[i] = b
+	}
+	l.Wrapped = false
 }
 
 // eraseCells blanks cells x0 to x1 of row y.
@@ -437,8 +459,9 @@ func (e *Emulator) eraseCells(y, x0, x1 int) {
 }
 
 func (e *Emulator) eraseLines(y0, y1 int) {
+	lines := e.buf().lines
 	for y := y0; y <= y1; y++ {
-		e.buf().lines[y] = newLine(e.cols, e.cur.style)
+		e.blankLine(&lines[y])
 	}
 }
 

@@ -2,6 +2,7 @@ package termwidget
 
 import (
 	"math"
+	"unsafe"
 
 	"github.com/gotk3/gotk3/cairo"
 	"github.com/gotk3/gotk3/gdk"
@@ -246,17 +247,26 @@ func (t *Terminal) draw(_ interface{}, cr *cairo.Context) bool {
 			selected := t.sel.contains(x, y)
 			fg, _ := t.cellColors(c.Style, selected)
 			start := x
-			text := c.Text()
 			x += int(c.Width)
+			var text string
 			if isPlain(c) {
+				// A run is gathered in space kept between draws, and given to pango,
+				// which copies it, as a string over that space: the screen is drawn
+				// many times a second, and making a string per run, let alone per
+				// character, was most of what the application allocated.
+				run := append(t.runText[:0], byte(c.Rune))
 				for x < cols {
 					n := &line.Cells[x]
 					if !isPlain(n) || n.Style != c.Style || t.sel.contains(x, y) != selected {
 						break
 					}
-					text += string(n.Rune)
+					run = append(run, byte(n.Rune))
 					x++
 				}
+				t.runText = run
+				text = unsafe.String(unsafe.SliceData(run), len(run))
+			} else {
+				text = c.Text()
 			}
 			left := float64(start) * f.cellW
 			setColor(fg)
