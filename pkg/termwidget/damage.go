@@ -76,8 +76,7 @@ func (t *Terminal) queueChanges() {
 		t.QueueDraw()
 		return
 	}
-	// Runs of changed rows, with a row each side for text overhanging them, the width of
-	// the widget.
+	// Runs of changed rows, the width of the widget.
 	width := t.GetAllocatedWidth()
 	for y := 0; y < rows; {
 		if !dirty[y] {
@@ -88,9 +87,8 @@ func (t *Terminal) queueChanges() {
 		for y < rows && dirty[y] {
 			y++
 		}
-		first, end := max(start-1, 0), min(y+1, rows)
-		top := int(math.Floor(float64(first) * t.fonts.cellH))
-		bottom := int(math.Ceil(float64(end) * t.fonts.cellH))
+		top := int(math.Floor(float64(start) * t.fonts.cellH))
+		bottom := int(math.Ceil(float64(y) * t.fonts.cellH))
 		t.QueueDrawArea(0, top, width, bottom-top)
 	}
 }

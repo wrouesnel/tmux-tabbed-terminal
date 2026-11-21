@@ -8,7 +8,7 @@ import (
 )
 
 // backing is the screen as rendered, kept between draws, so that a draw paints it and
-// renders only the rows that changed. When output scrolls, what was rendered is moved
+// renders only the rows that changed, each clipped to itself. When output scrolls, what was rendered is moved
 // rather than rendered again: laying out every row with Pango as a program writes a
 // line was most of the time the terminal took to draw.
 //
@@ -33,15 +33,13 @@ type backing struct {
 // change.
 func (b *backing) invalidate() { b.all = true }
 
-// mark has rows y-1 to y+1 rendered again: a row's text can overhang its neighbours.
+// mark has row y rendered again.
 func (b *backing) mark(y, rows int) {
 	if len(b.dirty) != rows {
 		b.dirty = make([]bool, rows)
 		b.all = true
 	}
-	for r := max(y-1, 0); r <= min(y+1, rows-1); r++ {
-		b.dirty[r] = true
-	}
+	b.dirty[y] = true
 }
 
 // ensure makes the backing the widget's size and scale, reporting whether there is one:
@@ -151,10 +149,10 @@ func (b *backing) render(t *Terminal) {
 		cr.Clip()
 		cr.SetSourceRGBA(bg.R, bg.G, bg.B, bg.A)
 		cr.Paint()
-		// The rows each side too, for their text overhanging this one.
-		for r := max(y-1, 0); r <= min(y+1, rows-1); r++ {
-			t.drawRow(cr, layout, r, cols)
-		}
+		// A row is as tall as the font's lines, so its text stays in it: a glyph reaching
+		// past, as some combining marks do, is cut at the row's edge. Drawing the rows
+		// each side too, for that, tripled what a line of output cost.
+		t.drawRow(cr, layout, y, cols)
 		cr.Restore()
 	}
 }
