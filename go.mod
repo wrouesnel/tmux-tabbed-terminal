@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/alecthomas/chroma/v2 v2.27.0
-	github.com/alecthomas/kong v1.16.1
+	github.com/alecthomas/kong v1.17.0
 	github.com/chigopher/pathlib v0.19.1
 	github.com/creack/pty v1.1.24
 	github.com/danielgatis/go-vte v1.0.11
