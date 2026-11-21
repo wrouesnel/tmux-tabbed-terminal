@@ -82,6 +82,8 @@ type Emulator struct {
 	linkIDs     map[string]uint32
 
 	parser *vtparser.Parser
+	// oscText is where an OSC sequence's text is put together, kept between them.
+	oscText []byte
 
 	// Respond receives replies to the program's queries, to be written to it.
 	Respond func([]byte)
@@ -513,14 +515,16 @@ func (e *Emulator) setAltScreen(on, saveCursor, clear bool) {
 	}
 }
 
-// linkID returns the ID of a hyperlink URI, adding it if it's new.
-func (e *Emulator) linkID(uri string) uint32 {
-	if uri == "" {
+// linkID returns the ID of a hyperlink URI, given as its bytes, adding it if it's new.
+func (e *Emulator) linkID(b []byte) uint32 {
+	if len(b) == 0 {
 		return 0
 	}
-	if id, ok := e.linkIDs[uri]; ok {
+	// Looking a string made from bytes up in a map makes no string.
+	if id, ok := e.linkIDs[string(b)]; ok {
 		return id
 	}
+	uri := string(b)
 	e.links = append(e.links, uri)
 	id := uint32(len(e.links)) //nolint:gosec // the links don't number 4 billion
 	e.linkIDs[uri] = id

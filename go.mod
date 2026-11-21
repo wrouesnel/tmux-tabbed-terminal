@@ -58,3 +58,7 @@ replace go.yaml.in/yaml/v4 => github.com/wrouesnel/yaml.go-yaml/v4 v4.0.0-202609
 // branch fix-callback-id-pointers, for upstream). It also adds ReleaseStrategy, so
 // finalizing GTK objects makes no function value for each.
 replace github.com/gotk3/gotk3 => github.com/wrouesnel/gotk3 v0.0.0-20261121100017-bd51e0f16d03
+
+// The fork's ttt branch: the parser hands its performer slices it keeps, rather than
+// allocating them for every control sequence, which a terminal's output is full of.
+replace github.com/danielgatis/go-vte => github.com/wrouesnel/go-vte v1.0.12-0.20261121130648-a6920cb85e21

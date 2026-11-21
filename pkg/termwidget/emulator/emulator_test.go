@@ -323,3 +323,15 @@ func lineText(l *Line) string {
 	}
 	return b.String()
 }
+
+// TestStyledOutputDoesntAllocate checks that output full of control sequences, as tmux
+// writes, allocates nothing in the emulator or its parser once warm.
+func TestStyledOutputDoesntAllocate(t *testing.T) {
+	e := New(40, 5)
+	out := []byte("\x1b[1;31mred\x1b[0m \x1b[38;5;33mblue\x1b[m\x1b[2;5H\x1b[K\x1b[?25l\x1b[?25h" +
+		"\x1b]0;title\x07\x1b(0q\x1b(B text\r\n")
+	_, _ = e.Write(out)
+	if allocs := testing.AllocsPerRun(50, func() { _, _ = e.Write(out) }); allocs != 0 {
+		t.Errorf("styled output allocated %v objects", allocs)
+	}
+}

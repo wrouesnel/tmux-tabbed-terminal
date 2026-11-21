@@ -492,19 +492,23 @@ func (p *performer) OscDispatch(params [][]byte, _ bool) {
 	}
 	switch string(params[0]) {
 	case "0", "2":
+		// tmux sets the title over and over: it's only made a string when it changed.
 		if len(params) > 1 {
-			e.title = string(joinOSC(params[1:]))
-			if e.OnTitle != nil {
-				e.OnTitle(e.title)
+			e.oscText = appendOSC(e.oscText[:0], params[1:])
+			if string(e.oscText) != e.title {
+				e.title = string(e.oscText)
+				if e.OnTitle != nil {
+					e.OnTitle(e.title)
+				}
 			}
 		}
 	case "8":
 		// OSC 8 ; params ; URI. The URI may hold semicolons.
-		uri := ""
+		e.oscText = e.oscText[:0]
 		if len(params) > 2 { //nolint:mnd // 8, params, URI
-			uri = string(joinOSC(params[2:]))
+			e.oscText = appendOSC(e.oscText, params[2:])
 		}
-		e.cur.style.Link = e.linkID(uri)
+		e.cur.style.Link = e.linkID(e.oscText)
 	case "10", "11":
 		if len(params) > 1 && string(params[1]) == "?" {
 			c := e.DefaultFg
@@ -517,12 +521,16 @@ func (p *performer) OscDispatch(params [][]byte, _ bool) {
 	}
 }
 
-func joinOSC(parts [][]byte) []byte {
-	strs := make([]string, len(parts))
+// appendOSC appends OSC parameters to dst, joined again with the semicolons that
+// separated them.
+func appendOSC(dst []byte, parts [][]byte) []byte {
 	for i, p := range parts {
-		strs[i] = string(p)
+		if i > 0 {
+			dst = append(dst, ';')
+		}
+		dst = append(dst, p...)
 	}
-	return []byte(strings.Join(strs, ";"))
+	return dst
 }
 
 // String renders the screen as text, one line per row with trailing blanks trimmed, for
