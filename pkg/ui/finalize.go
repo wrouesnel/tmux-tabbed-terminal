@@ -4,6 +4,8 @@ import (
 	"sync"
 
 	"github.com/gotk3/gotk3/glib"
+
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 )
 
 // finalizerBatch is how many GObject releases run in one go on the main loop, so a
@@ -16,45 +18,79 @@ const finalizerBatch = 4096
 // wakes the main loop once per object, which at tens of thousands of objects a second
 // is a loop of its own (issue #15). The queue keeps at most one idle source pending.
 type finalizerQueue struct {
-	// schedule adds the drain to the main loop, which calls it until it returns false.
-	schedule func(drain func() bool)
+	// schedule has the main loop call drain soon.
+	schedule func(drain func())
 
-	mu        sync.Mutex
-	pending   []glib.Finalizer
-	scheduled bool
+	mu sync.Mutex
+	// pending is the finalizers queued, and spare the space of the batch run last,
+	// kept so that queueing allocates nothing once warm.
+	pending, spare []glib.Released
+	scheduled      bool
+	// drainFunc is drain as a func value, made once.
+	drainFunc func()
 }
 
-// add queues a finalizer, scheduling a drain if none is pending.
-func (q *finalizerQueue) add(f glib.Finalizer) {
+// finalizerFunc is a finalizer as a glib.Released. A func is pointer-shaped, so making
+// one an interface allocates nothing.
+type finalizerFunc glib.Finalizer
+
+func (f finalizerFunc) ReleaseFinalized() { f() }
+
+// addFinalizer queues a finalizer, as gotk3's FinalizerStrategy.
+func (q *finalizerQueue) addFinalizer(f glib.Finalizer) { q.add(finalizerFunc(f)) }
+
+// add queues what a finalizer releases, as gotk3's ReleaseStrategy, scheduling a drain if
+// none is pending.
+func (q *finalizerQueue) add(f glib.Released) {
 	q.mu.Lock()
 	q.pending = append(q.pending, f)
 	schedule := !q.scheduled
 	q.scheduled = true
 	q.mu.Unlock()
 	if schedule {
-		q.schedule(q.drain)
+		if q.drainFunc == nil {
+			q.drainFunc = func() { q.drain() }
+		}
+		q.schedule(q.drainFunc)
 	}
 }
 
-// drain runs up to a batch of the queued finalizers, and reports whether more are left.
+// drain runs up to a batch of the queued finalizers, scheduling itself again if more are
+// left, which it reports.
 func (q *finalizerQueue) drain() bool {
 	q.mu.Lock()
 	n := min(len(q.pending), finalizerBatch)
 	batch := q.pending[:n:n]
-	q.pending = q.pending[n:]
-	more := len(q.pending) > 0
-	if !more {
-		q.pending, q.scheduled = nil, false
+	more := n < len(q.pending)
+	if more {
+		q.pending = q.pending[n:]
+	} else {
+		// The queue starts again in the spare space, and this batch's becomes the spare
+		// once it's run.
+		q.pending, q.spare = q.spare[:0], nil
+		q.scheduled = false
 	}
 	q.mu.Unlock()
-	for _, f := range batch {
-		f()
+	for i, f := range batch {
+		batch[i] = nil
+		f.ReleaseFinalized()
+	}
+	q.mu.Lock()
+	if !more && q.spare == nil {
+		q.spare = batch[:0:cap(batch)]
+	}
+	q.mu.Unlock()
+	if more {
+		q.schedule(q.drainFunc)
 	}
 	return more
 }
 
 // installFinalizerQueue has gotk3 release GObjects on the main loop, in batches.
 func installFinalizerQueue() {
-	q := &finalizerQueue{schedule: func(drain func() bool) { glib.IdleAdd(drain) }}
-	glib.FinalizerStrategy = q.add
+	// gtkx.Invoke, unlike glib.IdleAdd, allocates nothing to schedule a drain.
+	q := &finalizerQueue{schedule: gtkx.Invoke}
+	glib.FinalizerStrategy = q.addFinalizer
+	// Objects and values come as themselves, so no function value is made for each.
+	glib.ReleaseStrategy = q.add
 }

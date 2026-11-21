@@ -89,8 +89,8 @@ github.com/wrouesnel/ctxstdio v0.0.0-20260925000958-306c83092f60 h1:X3Kli/meI5xR
 github.com/wrouesnel/ctxstdio v0.0.0-20260925000958-306c83092f60/go.mod h1:OMZ+l1BGZLWO2U/ZMMQEKpMLsGJm7zSMCftWOc0+4w0=
 github.com/wrouesnel/go.logutil v0.0.0-20260831004131-2c91cc3e879a h1:1Nx2LDe4WUIaZI0YQklyUWuJCdm/Iy9H5vtqNGTonJk=
 github.com/wrouesnel/go.logutil v0.0.0-20260831004131-2c91cc3e879a/go.mod h1:JZK1fnM0HWZ17AIp5/nuVdKqbnXoaiQIRvG9aKpkCVc=
-github.com/wrouesnel/gotk3 v0.0.0-20261006015250-723b6184112f h1:KqNMwwvfpCA7nB/Q2RlxG62O4tMMjNMoJ1unVJ7g3GY=
-github.com/wrouesnel/gotk3 v0.0.0-20261006015250-723b6184112f/go.mod h1:/hqFpkNa9T3JgNAE2fLvCdov7c5bw//FHNZrZ3Uv9/Q=
+github.com/wrouesnel/gotk3 v0.0.0-20261121100017-bd51e0f16d03 h1:Im7ITX+7b+N5tkjazgT7WX+FOAIui02bcfvXAt7ZUe4=
+github.com/wrouesnel/gotk3 v0.0.0-20261121100017-bd51e0f16d03/go.mod h1:/hqFpkNa9T3JgNAE2fLvCdov7c5bw//FHNZrZ3Uv9/Q=
 github.com/wrouesnel/kongutil v0.0.0-20260819130755-29108a76e5f7 h1:1GWJR3WipDvaAOio5nNRT3i7QAnb7QYF+7K7u67sePk=
 github.com/wrouesnel/kongutil v0.0.0-20260819130755-29108a76e5f7/go.mod h1:yLI6EtInRLAcAg10KKpfF+/TpAUKeU1EiEkbzu1anko=
 github.com/wrouesnel/stdiomux v0.1.0 h1:CkMJlz/H8ihnTIO/Tnv9YOIsxJHtyyEilBRcpUbagYg=
