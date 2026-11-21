@@ -21,11 +21,15 @@ const (
 )
 
 // pulser fades every busy dot shown in and out together, with one timer that runs only
-// while one is shown.
+// while one is shown and one of the application's windows is active. While none is, the
+// dots stand still: repainting them is most of what busy sessions cost when nobody is
+// looking at the application, a percent or two of a core on Windows.
 type pulser struct {
 	shown map[*gtk.Widget]struct{}
 	timer gtkx.Timer
 	step  int
+	// active is whether one of the application's windows is active.
+	active bool
 }
 
 var busyPulse = pulser{shown: map[*gtk.Widget]struct{}{}}
@@ -36,7 +40,7 @@ func pulse(w *gtk.Widget) {
 	w.Connect("map", func() {
 		busyPulse.shown[w] = struct{}{}
 		w.SetOpacity(busyPulse.opacity())
-		busyPulse.start()
+		busyPulse.update()
 	})
 	w.Connect("unmap", func() {
 		delete(busyPulse.shown, w)
@@ -55,10 +59,35 @@ func pulseOpacity(step int) float64 {
 }
 
 func (p *pulser) opacity() float64 {
-	if !animationsEnabled() {
+	if !p.active || !animationsEnabled() {
 		return 1
 	}
 	return pulseOpacity(p.step)
+}
+
+// setActive says whether one of the application's windows is active, starting or
+// stopping the pulse.
+func (p *pulser) setActive(active bool) {
+	if active == p.active {
+		return
+	}
+	p.active = active
+	if !active {
+		// Still, at full strength.
+		for w := range p.shown {
+			w.SetOpacity(1)
+		}
+	}
+	p.update()
+}
+
+// update starts the pulse if dots are shown and a window is active, and stops it if not.
+func (p *pulser) update() {
+	if p.active && len(p.shown) > 0 {
+		p.start()
+	} else {
+		p.stop()
+	}
 }
 
 func (p *pulser) start() {

@@ -605,11 +605,26 @@ func (a *App) commandContext() (context.Context, context.CancelFunc) {
 func (a *App) addWindow() *Window {
 	w := newWindow(a)
 	a.windows[w] = struct{}{}
+	// The busy dots pulse only while a window is active.
+	w.window.Connect("notify::is-active", a.updatePulse)
 	w.window.Connect("destroy", func() {
 		w.destroyed()
 		delete(a.windows, w)
+		a.updatePulse()
 	})
 	return w
+}
+
+// updatePulse has the busy dots pulse if one of the application's windows is active.
+func (a *App) updatePulse() {
+	active := false
+	for w := range a.windows {
+		if w.window.IsActive() {
+			active = true
+			break
+		}
+	}
+	busyPulse.setActive(active)
 }
 
 // NewWindowFor opens a window showing one session, with the session list hidden, with its
