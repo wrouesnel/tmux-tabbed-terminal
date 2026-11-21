@@ -1,6 +1,9 @@
 package tmux_tabbed_terminal
 
 import (
+	"errors"
+	"io"
+
 	"github.com/chigopher/pathlib"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/ui"
 	"go.yaml.in/yaml/v4"
@@ -20,7 +23,11 @@ func UnmarshalConfig(path *pathlib.Path, config *EntrypointConfig) error {
 	if err != nil {
 		return err
 	}
-	return loader.Load(config)
+	// A file with nothing in it, or only comments, has no document: it changes nothing.
+	if err := loader.Load(config); err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	return nil
 }
 
 // YamlOption returns the correct YAML options for decoding entrypoint configuration.
