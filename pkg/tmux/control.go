@@ -65,8 +65,51 @@ type controlCall struct {
 	deadline time.Time
 }
 
+// controlCalls keeps calls, with their buffers, for reuse, to spare the garbage. It's a
+// free list rather than a sync.Pool, which the garbage collector empties: calls made again
+// after each collection, and their buffers grown again to a snapshot's size, were most of
+// what polling allocated.
+//
 //nolint:gochecknoglobals // calls are reused, with their buffers, to spare the garbage
-var controlCalls = sync.Pool{New: func() any { return &controlCall{done: make(chan struct{}, 1)} }}
+var controlCalls callList
+
+// callList is a free list of calls. It keeps a few: about as many as run at once.
+type callList struct {
+	mu    sync.Mutex
+	calls []*controlCall
+}
+
+// maxFreeCalls is the most calls kept, and maxKeptOutput the largest output buffer kept
+// with one: a long capture's isn't, to be held until the next.
+const (
+	maxFreeCalls  = 8
+	maxKeptOutput = 1 << 20
+)
+
+// Get returns a free call, or a new one.
+func (l *callList) Get() *controlCall {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if n := len(l.calls); n > 0 {
+		call := l.calls[n-1]
+		l.calls[n-1] = nil
+		l.calls = l.calls[:n-1]
+		return call
+	}
+	return &controlCall{done: make(chan struct{}, 1)}
+}
+
+// Put frees a call for reuse.
+func (l *callList) Put(call *controlCall) {
+	if cap(call.out) > maxKeptOutput {
+		call.out = nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if len(l.calls) < maxFreeCalls {
+		l.calls = append(l.calls, call)
+	}
+}
 
 // controlConn is a running control client.
 type controlConn struct {
@@ -131,7 +174,7 @@ func (cc *controlConn) close() {
 // has none, within timeout, if that isn't zero, or the client is ended. If use isn't nil,
 // it's given the output instead, which is only good until it returns.
 func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout time.Duration, use func([]byte)) (string, error) {
-	call := controlCalls.Get().(*controlCall) //nolint:forcetypeassert // only calls are pooled
+	call := controlCalls.Get()
 	call.remaining, call.out, call.failed, call.closed = len(commands), call.out[:0], call.failed[:0], false
 	call.deadline = time.Time{}
 	if deadline, ok := ctx.Deadline(); ok {
@@ -398,7 +441,7 @@ func controllable(commands [][]string) bool {
 // targetedPrint reports whether display-message arguments print, with -p, about a target
 // named with -t. Only then is it sent through the control connection: without a target it
 // would print about the control client's own session. ServerVersion's, which has none,
-// mustn't be either, as starting a control connection asks it.
+// isn't either, as starting a control connection asks it: it uses a running one itself.
 func targetedPrint(args []string) bool {
 	var print, target bool
 	for i := 0; i < len(args); i++ {
@@ -440,7 +483,7 @@ func (c *Client) controlFor(ctx context.Context) *controlConn {
 		if c.control.alive() {
 			return c.control
 		}
-		c.control = nil
+		c.setControl(nil)
 	}
 	if c.controlOff || time.Now().Before(c.controlRetryAt) {
 		return nil
@@ -467,7 +510,8 @@ func (c *Client) controlFor(ctx context.Context) *controlConn {
 		c.controlFailures = min(c.controlFailures+1, 16) //nolint:mnd // far past the maximum
 		return nil
 	}
-	c.control, c.controlFailures = cc, 0
+	c.setControl(cc)
+	c.controlFailures = 0
 	return cc
 }
 
@@ -581,6 +625,22 @@ func (c *Client) runControl(ctx context.Context, args []string, use func([]byte)
 	}
 }
 
+// setControl sets the control connection. controlMu must be held.
+func (c *Client) setControl(cc *controlConn) {
+	c.control = cc
+	c.running.Store(cc)
+}
+
+// runningControl returns the client's control connection if one is running, without
+// starting one, or waiting for one starting.
+func (c *Client) runningControl() *controlConn {
+	cc := c.running.Load()
+	if cc == nil || !cc.alive() {
+		return nil
+	}
+	return cc
+}
+
 // controlName returns the name of the client's control client, if it has one running.
 func (c *Client) controlName() string {
 	c.controlMu.Lock()
@@ -600,7 +660,7 @@ func (c *Client) SetControl(on bool) {
 	c.controlRetryAt, c.controlFailures = time.Time{}, 0
 	if !on && c.control != nil {
 		c.control.close()
-		c.control = nil
+		c.setControl(nil)
 	}
 }
 
@@ -611,6 +671,6 @@ func (c *Client) Close() {
 	defer c.controlMu.Unlock()
 	if c.control != nil {
 		c.control.close()
-		c.control = nil
+		c.setControl(nil)
 	}
 }

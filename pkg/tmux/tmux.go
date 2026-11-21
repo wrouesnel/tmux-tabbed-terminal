@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pkg/errors"
@@ -68,6 +69,9 @@ type Client struct {
 	controlMu      sync.Mutex
 	control        *controlConn
 	controlRetryAt time.Time
+	// running is control, for runningControl to read without controlMu, which is held
+	// while one starts, and starting one asks ServerVersion, which reads it.
+	running atomic.Pointer[controlConn]
 	// controlFailures counts control connections which failed to start in a row.
 	controlFailures uint
 	// controlOff turns control connections off.
@@ -1220,6 +1224,11 @@ func CaptureCrashes(version string) bool {
 	return strings.HasPrefix(strings.TrimSpace(version), "next-3.4")
 }
 
+// versionCommand asks the server's version.
+//
+//nolint:gochecknoglobals // a fixed command
+var versionCommand = [][]string{{"display-message", "-p", "#{version}"}}
+
 // ServerVersion returns the version of the tmux server, as #{version} reports it. It's
 // asked again at most once a minute.
 func (c *Client) ServerVersion(ctx context.Context) (string, error) {
@@ -1229,7 +1238,17 @@ func (c *Client) ServerVersion(ctx context.Context) (string, error) {
 	if version != "" && time.Since(at) < versionTTL {
 		return version, nil
 	}
-	out, err := c.run(ctx, "display-message", "-p", "#{version}")
+	// A running control client can say, as the version is the server's, not a
+	// session's, without starting tmux: on a long run, asking each minute adds up. It's
+	// never started for this, as starting one asks the version.
+	var out string
+	err := errControlClosed
+	if cc := c.runningControl(); cc != nil {
+		out, err = cc.run(ctx, versionCommand, c.Timeout, nil)
+	}
+	if err != nil {
+		out, err = c.run(ctx, versionCommand[0]...)
+	}
 	version = strings.TrimSpace(out)
 	if err == nil && version != "" {
 		c.mu.Lock()
