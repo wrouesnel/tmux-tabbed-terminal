@@ -13,6 +13,10 @@ tmux:
   # default-shell. Empty leaves tmux's own setting, except that the tmux installed with
   # the application runs PowerShell.
   default-shell: ""
+  # Poll each host through a tmux control client (tmux -C) kept running, on tmux 3.2 and
+  # later, rather than starting tmux, or ssh, several times a second. tmux counts it as a
+  # client of one of the sessions.
+  control-mode: true
   # Select a tmux server other than the default one, as with tmux -L or tmux -S.
   socket-name: ""
   socket-path: ""

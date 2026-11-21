@@ -216,14 +216,16 @@ func TestNewAndRenameWindow(t *testing.T) {
 }
 
 func TestParseSnapshot(t *testing.T) {
-	out := strings.ReplaceAll("S\t$1\tmain\t100\t1\n"+
+	out := strings.ReplaceAll("S\t$1\tmain\t100\t2\n"+
 		"S\t$2\tother\t200\t0\n"+
 		"W\t$1\t@2\t1\t1\t150\tvim\teditor\t/src\t%5\t1\t0\t1\t500\t40\t12\t2\t120\ttitle\twith sep\n"+
 		// Windows of different sessions may come in any order.
 		"W\t$2\t@3\t0\t1\t0\tbash\tsecond\t/\t%6\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"W\t$1\t@1\t0\t0\t300\tbash\tshell\t/home\t%4\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
 		"W\t$9\t@9\t0\t1\t1\tbash\torphan\t/\t%9\t0\t0\t0\t0\t40\t\t1\t80\t\n"+
-		"C\t/dev/pts/4\t$1\n"+
+		"C\t/dev/pts/4\t$1\tattached,focused,UTF-8\n"+
+		// Control clients which take no output only watch: they're left out.
+		"C\t\t$1\tattached,control-mode,ignore-size,no-output,UTF-8\n"+
 		"B\tbuffer2\t400\t11\n"+
 		"B\tbuffer1\t350\t5\n"+
 		"garbage\n", "\t", "^|^")
@@ -255,6 +257,9 @@ func TestParseSnapshot(t *testing.T) {
 	}
 	if got := main.Activity().Unix(); got != 300 {
 		t.Errorf("activity: got %d, want 300", got)
+	}
+	if len(snap.Clients) != 1 || main.Attached != 1 {
+		t.Errorf("clients: got %+v, %d attached; want the watching control client left out", snap.Clients, main.Attached)
 	}
 	if got := snap.ClientSession("/dev/pts/4"); got != "$1" {
 		t.Errorf("client session: got %q, want $1", got)

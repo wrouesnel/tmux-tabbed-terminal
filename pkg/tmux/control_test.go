@@ -180,3 +180,25 @@ func TestControlReplies(t *testing.T) {
 		t.Error("a command after the client ended succeeded")
 	}
 }
+
+func TestSetControl(t *testing.T) {
+	c := controlTestClient(t, "one")
+	ctx := context.Background()
+	if _, err := c.Snapshot(ctx); err != nil || c.ControlName() == "" {
+		t.Fatalf("no control client to begin with: %v", err)
+	}
+	c.SetControl(false)
+	for range 3 {
+		snap, err := c.Snapshot(ctx)
+		if err != nil || len(snap.Sessions) != 1 {
+			t.Fatalf("Snapshot with control off: %+v, %v", snap, err)
+		}
+		if c.ControlName() != "" {
+			t.Fatal("a control client with control off")
+		}
+	}
+	c.SetControl(true)
+	if _, err := c.Snapshot(ctx); err != nil || c.ControlName() == "" {
+		t.Fatalf("no control client once turned on again: %v", err)
+	}
+}

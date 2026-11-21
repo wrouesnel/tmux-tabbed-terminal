@@ -53,3 +53,22 @@ func (a *App) setDefaultShell(shell string) {
 		local.client.SetDefaultShell(a.defaultShell())
 	}
 }
+
+// controlMode reports whether hosts are polled through a tmux control client: as chosen
+// in Preferences, or the configuration.
+func (a *App) controlMode() bool {
+	if a.state.ControlMode != nil {
+		return *a.state.ControlMode
+	}
+	return a.cfg.Tmux.ControlMode
+}
+
+// setControlMode remembers whether hosts are polled through a tmux control client, and
+// starts or ends theirs now.
+func (a *App) setControlMode(on bool) {
+	a.state.ControlMode = &on
+	a.saveState()
+	for _, h := range a.hosts {
+		h.client.SetControl(on)
+	}
+}

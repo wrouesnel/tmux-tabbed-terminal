@@ -21,7 +21,8 @@ import (
 //
 // A control client must be attached to a session. It's attached with no-output, so it's
 // sent none of the panes' output, and ignore-size, so it doesn't change windows' sizes.
-// tmux counts it among the session's clients: Snapshot leaves it out. It ends when its
+// tmux counts it among the session's clients: Snapshot leaves out such clients, which only
+// watch. It ends when its
 // session does; the next command starts another, on another session.
 
 // errControlClosed is returned for commands a control connection could not answer
@@ -38,12 +39,6 @@ var controlCommands = map[string]bool{
 	"list-sessions": true, "list-windows": true, "list-panes": true,
 	"list-clients": true, "list-buffers": true, "capture-pane": true,
 }
-
-// controlDisabled turns control connections off, for comparing, when TTT_NO_CONTROL is
-// set.
-//
-//nolint:gochecknoglobals // read once
-var controlDisabled = os.Getenv("TTT_NO_CONTROL") != ""
 
 // controlRetry is how long after a control connection first fails to start commands are
 // run without one. It doubles with each failure in a row, up to controlRetryMax: the first
@@ -358,7 +353,7 @@ func (c *Client) controlFor(ctx context.Context) *controlConn {
 		}
 		c.control = nil
 	}
-	if controlDisabled || time.Now().Before(c.controlRetryAt) {
+	if c.controlOff || time.Now().Before(c.controlRetryAt) {
 		return nil
 	}
 	c.mu.Lock()
@@ -500,6 +495,19 @@ func (c *Client) controlName() string {
 		return ""
 	}
 	return c.control.name
+}
+
+// SetControl turns the control connection on or off. Off, the running one is ended, and
+// every command starts tmux. It's on to begin with.
+func (c *Client) SetControl(on bool) {
+	c.controlMu.Lock()
+	defer c.controlMu.Unlock()
+	c.controlOff = !on
+	c.controlRetryAt, c.controlFailures = time.Time{}, 0
+	if !on && c.control != nil {
+		c.control.close()
+		c.control = nil
+	}
 }
 
 // Close ends the client's control connection, if it has one. The client can still be

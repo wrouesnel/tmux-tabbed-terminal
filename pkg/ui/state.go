@@ -36,6 +36,9 @@ type uiState struct {
 	// UseSystemTmux and DefaultShell are the tmux choices made in Preferences.
 	UseSystemTmux *bool   `yaml:"use-system-tmux,omitempty"`
 	DefaultShell  *string `yaml:"default-shell,omitempty"`
+	// ControlMode is whether hosts are polled through a tmux control client, as chosen
+	// in Preferences.
+	ControlMode *bool `yaml:"control-mode,omitempty"`
 	// UseAgent is whether remote hosts are reached through the agent, as chosen in
 	// Preferences.
 	UseAgent *bool `yaml:"use-agent,omitempty"`

@@ -52,8 +52,6 @@ type Client struct {
 	// to. Snapshots are only read, so the same one can be returned again.
 	lastOutput   string
 	lastSnapshot *Snapshot
-	// lastControl is the control client's name when lastSnapshot was parsed.
-	lastControl string
 
 	// control is the control connection, if one is running, and controlRetryAt when to
 	// try starting one again after one couldn't be.
@@ -62,6 +60,8 @@ type Client struct {
 	controlRetryAt time.Time
 	// controlFailures counts control connections which failed to start in a row.
 	controlFailures uint
+	// controlOff turns control connections off.
+	controlOff bool
 }
 
 // versionTTL is how long the server's version is taken as known. It changes only when
@@ -345,8 +345,6 @@ func (s *Session) ActiveWindow() *Window {
 type ClientInfo struct {
 	TTY       string
 	SessionID string
-	// Name is tmux's name for the client.
-	Name string
 }
 
 // Snapshot is the state of the tmux server at one moment.
@@ -415,7 +413,7 @@ var (
 		"#{history_size}", "#{pane_height}", "#{scroll_position}", "#{window_panes}", "#{window_width}",
 		"#{pane_title}",
 	}, fieldSep)
-	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}", "#{client_name}"}, fieldSep)
+	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}", "#{client_flags}"}, fieldSep)
 	bufferFormat = strings.Join([]string{"B", "#{buffer_name}", "#{buffer_created}", "#{buffer_size}"}, fieldSep)
 )
 
@@ -437,15 +435,10 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 	}
 	// Most polls find nothing new: then the last snapshot is the same, and parsing it
 	// again would only make garbage.
-	// The control client, if there's one, is left out: it's this program's, and it isn't
-	// showing anything.
-	control := c.controlName()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.lastSnapshot == nil || out != c.lastOutput || control != c.lastControl {
-		snap := ParseSnapshot(out)
-		snap.dropClient(control)
-		c.lastOutput, c.lastSnapshot, c.lastControl = out, snap, control
+	if c.lastSnapshot == nil || out != c.lastOutput {
+		c.lastOutput, c.lastSnapshot = out, ParseSnapshot(out)
 	}
 	return c.lastSnapshot, nil
 }
@@ -482,6 +475,8 @@ func ParseSnapshot(out string) *Snapshot {
 	// The fields of each line, which are substrings of out, so splitting copies nothing.
 	var buf [windowFields]string
 	var windows []windowLine
+	// monitors are the sessions of control clients which take no output.
+	var monitors []string
 	sessions := 0
 	for rest := out; rest != ""; {
 		var line string
@@ -535,11 +530,11 @@ func ParseSnapshot(out string) *Snapshot {
 			if len(fields) < 3 {
 				continue
 			}
-			ci := ClientInfo{TTY: fields[1], SessionID: fields[2]}
-			if len(fields) > 3 {
-				ci.Name = fields[3]
+			if len(fields) > 3 && monitorFlags(fields[3]) {
+				monitors = append(monitors, fields[2])
+				continue
 			}
-			snap.Clients = append(snap.Clients, ci)
+			snap.Clients = append(snap.Clients, ClientInfo{TTY: fields[1], SessionID: fields[2]})
 		case "B":
 			// Buffers are listed newest first: keep the first.
 			if len(fields) < 4 || snap.Buffer != nil {
@@ -553,6 +548,11 @@ func ParseSnapshot(out string) *Snapshot {
 	index := make(map[string]int, len(snap.Sessions))
 	for i := range snap.Sessions {
 		index[snap.Sessions[i].ID] = i
+	}
+	for _, id := range monitors {
+		if i, ok := index[id]; ok && snap.Sessions[i].Attached > 0 {
+			snap.Sessions[i].Attached--
+		}
 	}
 	rank := func(session string) int {
 		if i, ok := index[session]; ok {
@@ -584,22 +584,12 @@ func ParseSnapshot(out string) *Snapshot {
 	return snap
 }
 
-// dropClient leaves the client called name out of the snapshot, and out of its session's
-// count of attached clients.
-func (s *Snapshot) dropClient(name string) {
-	if name == "" {
-		return
-	}
-	for i, ci := range s.Clients {
-		if ci.Name != name {
-			continue
-		}
-		s.Clients = slices.Delete(s.Clients, i, i+1)
-		if sess := s.Session(ci.SessionID); sess != nil && sess.Attached > 0 {
-			sess.Attached--
-		}
-		return
-	}
+// monitorFlags reports whether a client's flags, as tmux's client_flags gives them, are
+// a control client's which takes no output: one which only watches the server, as this
+// program's own control clients do, or those of another copy of it. It isn't showing a
+// session to anyone, so it isn't counted among the session's clients.
+func monitorFlags(flags string) bool {
+	return strings.Contains(flags, "control-mode") && strings.Contains(flags, "no-output")
 }
 
 // windowFields is how many fields a window's line has. The last, its title, may itself

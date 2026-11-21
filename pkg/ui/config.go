@@ -36,6 +36,10 @@ type TmuxConfig struct {
 	// installed with the application runs PowerShell. Preferences changes it, and that
 	// choice is remembered.
 	DefaultShell string `yaml:"default-shell"`
+	// ControlMode sends polls, and other commands that only read, to a tmux control
+	// client kept running for each host, on tmux 3.2 and later, rather than starting tmux
+	// (or ssh) for each. Preferences changes it, and that choice is remembered.
+	ControlMode bool `yaml:"control-mode"`
 	// SocketName selects a server by name, as with tmux -L.
 	SocketName string `yaml:"socket-name"`
 	// SocketPath selects a server by socket path, as with tmux -S.
@@ -195,7 +199,7 @@ const (
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
-		Tmux: TmuxConfig{Binary: "tmux"},
+		Tmux: TmuxConfig{Binary: "tmux", ControlMode: true},
 		Appearance: AppearanceConfig{
 			UseGnomeTerminalProfile: true,
 			ScrollbackLines:         defaultScrollback,

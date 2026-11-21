@@ -42,6 +42,8 @@ type preferences struct {
 	shell      *gtk.ComboBoxText
 	systemTmux *gtk.CheckButton
 	useAgent   *gtk.CheckButton
+	// controlMode is whether hosts are polled through a tmux control client.
+	controlMode *gtk.CheckButton
 	// loading is set while the widgets are filled in, so their signals don't apply.
 	loading bool
 }
@@ -313,6 +315,19 @@ func newPreferences(a *App) *preferences {
 		})
 		add("tmux", p.systemTmux)
 	}
+
+	p.controlMode, _ = gtk.CheckButtonNewWithLabel("Poll tmux through a control client")
+	p.controlMode.SetActive(a.controlMode())
+	p.controlMode.SetTooltipText("Keep a tmux control client (tmux -C) running for each host, and " +
+		"read its sessions through it, rather than starting tmux, or ssh, several times a second. " +
+		"It needs tmux 3.2 or later: older ones are polled the other way. tmux counts it as a " +
+		"client of one of the sessions, which runs client-attached hooks.")
+	p.controlMode.Connect("toggled", func() {
+		if !p.loading {
+			a.setControlMode(p.controlMode.GetActive())
+		}
+	})
+	add("Polling", p.controlMode)
 
 	hint, _ := gtk.LabelNew("Changes apply to every terminal straight away. A GNOME Terminal profile " +
 		"is followed as it's edited in GNOME Terminal.")
