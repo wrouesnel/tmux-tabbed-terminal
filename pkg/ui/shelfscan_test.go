@@ -46,21 +46,20 @@ func TestShelfScannerRead(t *testing.T) {
 	sc.h = &Host{client: client}
 	sc.single, sc.only = true, tmux.Pane{ID: aw.PaneID, Path: dir}
 	want := []string{"/tmp/notes.md", dir + "/pic.png"}
+	// Read until the pane has settled, with what's typed and what it prints on screen,
+	// and two reads in a row find the same files.
 	var files []string
 	for deadline := time.Now().Add(5 * time.Second); ; {
 		sc.read()
-		files = slices.Clone(sc.files)
-		if sc.ok && slices.Contains(files, want[0]) && slices.Contains(files, want[1]) {
+		if sc.ok && slices.Contains(sc.files, want[0]) && slices.Contains(sc.files, want[1]) &&
+			slices.Equal(sc.files, files) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("read %v (ok %v), want %v", files, sc.ok, want)
+			t.Fatalf("read %v (ok %v), want %v", sc.files, sc.ok, want)
 		}
+		files = slices.Clone(sc.files)
 		time.Sleep(50 * time.Millisecond)
-	}
-	sc.read()
-	if !sc.ok || !slices.Equal(sc.files, files) {
-		t.Fatalf("second read %v, want %v", sc.files, files)
 	}
 	for i := range files {
 		if unsafe.StringData(sc.files[i]) != unsafe.StringData(files[i]) {
