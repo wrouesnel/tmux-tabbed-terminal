@@ -337,7 +337,16 @@ type Session struct {
 	Created time.Time
 	// Attached is the number of clients attached to the session.
 	Attached int
-	Windows  []Window
+	// Windows are the session's windows, in index order. They may be shared with the
+	// last snapshot's session, if they haven't changed: like the rest of a snapshot,
+	// they're only read.
+	Windows []Window
+
+	// windowLines is the text of the session's windows in the snapshot's output, for the
+	// next snapshot to tell whether they changed. windowsMerged is set if they weren't
+	// listed together, so can't be told by it.
+	windowLines   string
+	windowsMerged bool
 }
 
 // Activity is when any window in the session last had output.
@@ -398,8 +407,11 @@ func (b *Buffer) NewerThan(old *Buffer) bool {
 	return b.Name != old.Name
 }
 
-// Session returns the session with the given ID, or nil.
+// Session returns the session with the given ID, or nil. The snapshot may be nil.
 func (s *Snapshot) Session(id string) *Session {
+	if s == nil {
+		return nil
+	}
 	for i := range s.Sessions {
 		if s.Sessions[i].ID == id {
 			return &s.Sessions[i]
@@ -461,7 +473,7 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.lastSnapshot == nil || out != c.lastOutput {
-		c.lastOutput, c.lastSnapshot = out, ParseSnapshot(out)
+		c.lastOutput, c.lastSnapshot = out, parseSnapshot(out, c.lastSnapshot)
 	}
 	return c.lastSnapshot, nil
 }
@@ -491,29 +503,61 @@ func programName(s string) string {
 }
 
 // ParseSnapshot parses the output of the snapshot command. Malformed lines are skipped.
+func ParseSnapshot(out string) *Snapshot {
+	return parseSnapshot(out, nil)
+}
+
+// windowGroup is a run of window lines of one session in the snapshot's output.
+type windowGroup struct {
+	session string
+	// start and end are where its lines are in the output, and count how many there are.
+	start, end, count int
+}
+
+// parseSnapshot parses the output of the snapshot command, taking the windows of
+// sessions whose window lines are just as they were from prev, the last snapshot, if
+// it isn't nil.
+//
+// It's written to keep allocations down on long runs. Busy sessions change the output
+// on almost every poll, as their history grows, so it's parsed again several times a
+// second, and the windows were most of what the program allocated. Each session's
+// windows are now their own slice, made to size, and a session whose window lines
+// haven't changed shares its windows with the last snapshot: snapshots are only read.
 //
 //nolint:mnd // field counts are fixed by the format strings
-func ParseSnapshot(out string) *Snapshot {
+func parseSnapshot(out string, prev *Snapshot) *Snapshot {
 	snap := &Snapshot{}
-	// The fields of each line, which are substrings of out, so splitting copies nothing.
-	var buf [windowFields]string
-	var windows []windowLine
-	// monitors are the sessions of control clients which take no output.
-	var monitors []string
-	sessions := 0
+	var sessions, clients int
 	for rest := out; rest != ""; {
 		var line string
 		line, rest, _ = strings.Cut(rest, "\n")
-		if strings.HasPrefix(line, "S"+fieldSep) {
+		switch {
+		case strings.HasPrefix(line, "S"+fieldSep):
 			sessions++
+		case strings.HasPrefix(line, "C"+fieldSep):
+			clients++
 		}
 	}
 	if sessions > 0 {
 		snap.Sessions = make([]Session, 0, sessions)
 	}
-	for rest := out; rest != ""; {
-		var line string
-		line, rest, _ = strings.Cut(rest, "\n")
+	if clients > 0 {
+		snap.Clients = make([]ClientInfo, 0, clients)
+	}
+
+	// The fields of each line, which are substrings of out, so splitting copies nothing.
+	var buf [windowFields]string
+	// tmux lists windows session by session, so each session's lines are one group:
+	// room for the usual number is kept on the stack.
+	var groupBuf [64]windowGroup
+	groups := groupBuf[:0]
+	// monitors are the sessions of control clients which take no output.
+	var monitorBuf [4]string
+	monitors := monitorBuf[:0]
+	for offset := 0; offset < len(out); {
+		line, _, _ := strings.Cut(out[offset:], "\n")
+		lineStart := offset
+		offset += len(line) + 1
 		fields := splitFields(line, buf[:0])
 		switch fields[0] {
 		case "S":
@@ -530,25 +574,13 @@ func ParseSnapshot(out string) *Snapshot {
 			if len(fields) < windowFields {
 				continue
 			}
-			windows = append(windows, windowLine{session: fields[1], window: Window{
-				ID:       fields[2],
-				Index:    atoi(fields[3]),
-				Active:   fields[4] == "1",
-				Activity: parseUnix(fields[5]),
-				Command:  programName(fields[6]),
-				Name:     programName(fields[7]),
-				Path:     fields[8],
-				PaneID:   fields[9],
-				// tmux prints 1 for set flags.
-				AlternateScreen: fields[10] == "1",
-				MouseReporting:  fields[11] == "1",
-				InMode:          fields[12] == "1",
-				Scroll:          parseScroll(fields[13], fields[14], fields[15]),
-				Panes:           atoi(fields[16]),
-				Width:           atoi(fields[17]),
-				// The title may contain the separator: splitFields left it in the last field.
-				Title: fields[18],
-			}})
+			lineEnd := min(offset, len(out))
+			if n := len(groups); n > 0 && groups[n-1].session == fields[1] && groups[n-1].end == lineStart {
+				groups[n-1].end = lineEnd
+				groups[n-1].count++
+			} else {
+				groups = append(groups, windowGroup{session: fields[1], start: lineStart, end: lineEnd, count: 1})
+			}
 		case "C":
 			if len(fields) < 3 {
 				continue
@@ -567,44 +599,69 @@ func ParseSnapshot(out string) *Snapshot {
 		}
 	}
 
-	// Each session's windows, in index order, share one slice.
-	index := make(map[string]int, len(snap.Sessions))
-	for i := range snap.Sessions {
-		index[snap.Sessions[i].ID] = i
-	}
 	for _, id := range monitors {
-		if i, ok := index[id]; ok && snap.Sessions[i].Attached > 0 {
-			snap.Sessions[i].Attached--
+		if s := snap.Session(id); s != nil && s.Attached > 0 {
+			s.Attached--
 		}
 	}
-	rank := func(session string) int {
-		if i, ok := index[session]; ok {
-			return i
+	for _, g := range groups {
+		s := snap.Session(g.session)
+		if s == nil {
+			// Windows of sessions not listed are dropped.
+			continue
 		}
-		// Windows of sessions not listed go last, and are dropped.
-		return len(snap.Sessions)
-	}
-	slices.SortStableFunc(windows, func(a, b windowLine) int {
-		if c := cmp.Compare(rank(a.session), rank(b.session)); c != 0 {
-			return c
+		lines := out[g.start:g.end]
+		if s.windowLines == "" && s.Windows == nil && !s.windowsMerged {
+			s.windowLines = lines
+			if p := prev.Session(s.ID); p != nil && !p.windowsMerged && p.windowLines == lines {
+				s.Windows = p.Windows
+				continue
+			}
+			s.Windows = make([]Window, 0, g.count)
+		} else {
+			// Another group of the same session's: not as tmux lists them, but read all
+			// the same. The windows can't be compared as one text, so aren't shared.
+			s.windowsMerged = true
+			s.windowLines = ""
+			// They may be the last snapshot's: appending must copy them, not add to them.
+			s.Windows = slices.Clip(s.Windows)
 		}
-		return cmp.Compare(a.window.Index, b.window.Index)
-	})
-	all := make([]Window, 0, len(windows))
-	for _, w := range windows {
-		all = append(all, w.window)
-	}
-	for start := 0; start < len(windows); {
-		end := start + 1
-		for end < len(windows) && windows[end].session == windows[start].session {
-			end++
+		for rest := lines; rest != ""; {
+			var line string
+			line, rest, _ = strings.Cut(rest, "\n")
+			s.Windows = append(s.Windows, parseWindow(splitFields(line, buf[:0])))
 		}
-		if i, ok := index[windows[start].session]; ok {
-			snap.Sessions[i].Windows = all[start:end:end]
+		if !slices.IsSortedFunc(s.Windows, compareWindowIndex) {
+			slices.SortStableFunc(s.Windows, compareWindowIndex)
 		}
-		start = end
 	}
 	return snap
+}
+
+// compareWindowIndex orders windows by index.
+func compareWindowIndex(a, b Window) int { return cmp.Compare(a.Index, b.Index) }
+
+// parseWindow parses the fields of a window's line.
+func parseWindow(fields []string) Window {
+	return Window{
+		ID:       fields[2],
+		Index:    atoi(fields[3]),
+		Active:   fields[4] == "1",
+		Activity: parseUnix(fields[5]),
+		Command:  programName(fields[6]),
+		Name:     programName(fields[7]),
+		Path:     fields[8],
+		PaneID:   fields[9],
+		// tmux prints 1 for set flags.
+		AlternateScreen: fields[10] == "1",
+		MouseReporting:  fields[11] == "1",
+		InMode:          fields[12] == "1",
+		Scroll:          parseScroll(fields[13], fields[14], fields[15]),
+		Panes:           atoi(fields[16]),
+		Width:           atoi(fields[17]),
+		// The title may contain the separator: splitFields left it in the last field.
+		Title: fields[18],
+	}
 }
 
 // monitorFlags reports whether a client's flags, as tmux's client_flags gives them, are
@@ -618,12 +675,6 @@ func monitorFlags(flags string) bool {
 // windowFields is how many fields a window's line has. The last, its title, may itself
 // contain the separator.
 const windowFields = 19
-
-// windowLine is a window as read, with the ID of its session.
-type windowLine struct {
-	session string
-	window  Window
-}
 
 // splitFields splits a line of the snapshot at the separator into dst, which it returns.
 // Once dst is full, the rest of the line, separators and all, is its last field.

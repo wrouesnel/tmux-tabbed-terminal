@@ -44,6 +44,9 @@ func (c *Client) Run(ctx context.Context, args ...string) (string, error) { retu
 // Controllable reports whether args would be sent through a control connection.
 func Controllable(args []string) bool { return controllable(splitCommands(nil, args)) }
 
+// ParseSnapshotAfter exposes parseSnapshot, which shares unchanged windows with prev.
+var ParseSnapshotAfter = parseSnapshot
+
 // QuoteControlArg exposes quoteControlArg to the tests.
 var QuoteControlArg = quoteControlArg
 

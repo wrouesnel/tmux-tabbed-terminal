@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -272,6 +273,39 @@ func TestParseSnapshot(t *testing.T) {
 	}
 	if b := snap.Buffer; b == nil || b.Name != "buffer2" || b.Created.Unix() != 400 || b.Size != 11 {
 		t.Errorf("newest buffer: got %+v, want buffer2", b)
+	}
+}
+
+func TestParseSnapshotSharesUnchangedWindows(t *testing.T) {
+	lines := func(s ...string) string {
+		return strings.ReplaceAll(strings.Join(s, "\n")+"\n", "\t", "^|^")
+	}
+	const (
+		s1  = "S\t$1\tmain\t100\t0"
+		s2  = "S\t$2\tbusy\t200\t0"
+		w1a = "W\t$1\t@1\t0\t1\t300\tbash\tshell\t/\t%1\t0\t0\t0\t10\t40\t\t1\t80\t"
+		w1b = "W\t$1\t@2\t1\t0\t300\tvim\tedit\t/\t%2\t0\t0\t0\t10\t40\t\t1\t80\t"
+		w2  = "W\t$2\t@3\t0\t1\t400\tmake\tbuild\t/\t%%3\t0\t0\t0\t%d\t40\t\t1\t80\t"
+	)
+	first := tmux.ParseSnapshotAfter(lines(s1, s2, w1a, w1b, fmt.Sprintf(w2, 10)), nil)
+	// The busy session's history grew; the other's windows are as they were.
+	second := tmux.ParseSnapshotAfter(lines(s1, s2, w1a, w1b, fmt.Sprintf(w2, 11)), first)
+
+	was, now := first.Session("$1").Windows, second.Session("$1").Windows
+	if len(now) != 2 || &now[0] != &was[0] {
+		t.Errorf("unchanged session's windows weren't shared: %+v", now)
+	}
+	busy := second.Session("$2").Windows
+	if len(busy) != 1 || busy[0].Scroll.History != 11 || &busy[0] == &first.Session("$2").Windows[0] {
+		t.Errorf("changed session's windows: got %+v, want new ones with history 11", busy)
+	}
+	if first.Session("$2").Windows[0].Scroll.History != 10 {
+		t.Error("the last snapshot changed")
+	}
+	// Parsed afresh, the same output gives the same snapshot.
+	if fresh := tmux.ParseSnapshot(lines(s1, s2, w1a, w1b, fmt.Sprintf(w2, 11))); !reflect.DeepEqual(
+		fresh.Session("$1").Windows, now) || !reflect.DeepEqual(fresh.Session("$2").Windows, busy) {
+		t.Errorf("shared windows differ from parsing afresh: %+v", fresh)
 	}
 }
 
