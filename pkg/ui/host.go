@@ -159,6 +159,7 @@ func (a *App) newRemoteHost(cfg HostConfig) (*Host, error) {
 		}
 	}
 	client := tmux.NewClient()
+	client.Timeout = commandTimeout
 	client.SocketName = cfg.SocketName
 	client.SSH = ssh
 	return newHost(ssh.Name(), cfg, client), nil
@@ -250,9 +251,9 @@ func (a *App) pollHost(ctx context.Context, h *Host) {
 	var lastErr string
 
 	for {
-		cmdCtx, cancel := context.WithTimeout(ctx, commandTimeout)
-		snap, err := h.client.Snapshot(cmdCtx)
-		cancel()
+		// The client's Timeout bounds the poll: a context with a deadline would be one
+		// more made for every poll.
+		snap, err := h.client.Snapshot(ctx)
 		if ctx.Err() != nil {
 			return
 		}

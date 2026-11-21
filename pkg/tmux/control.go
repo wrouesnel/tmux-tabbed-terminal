@@ -61,6 +61,8 @@ type controlCall struct {
 	failed    []string
 	closed    bool
 	done      chan struct{}
+	// deadline is when the call's replies must have come by, or zero for no limit.
+	deadline time.Time
 }
 
 //nolint:gochecknoglobals // calls are reused, with their buffers, to spare the garbage
@@ -80,6 +82,10 @@ type controlConn struct {
 	mu      sync.Mutex
 	// pending are the calls waiting for replies, in the order their commands were sent.
 	pending []*controlCall
+	// watchdog ends the client if the earliest deadline of the pending calls passes:
+	// it's stuck, as a remote one whose network went away. It's one timer, reset as
+	// calls come and go, rather than one made with each call.
+	watchdog *time.Timer
 	// closed is set once the client has ended, when done is closed.
 	closed bool
 	done   chan struct{}
@@ -89,10 +95,12 @@ type controlConn struct {
 // already running as start says, and asks it its name.
 func startControl(ctx context.Context, stdin io.WriteCloser, stdout io.Reader, stop func()) (*controlConn, error) {
 	cc := &controlConn{stdin: stdin, stop: stop, done: make(chan struct{})}
+	cc.watchdog = time.AfterFunc(time.Hour, cc.close)
+	cc.watchdog.Stop()
 	go cc.read(stdout)
 	ctx, cancel := context.WithTimeout(ctx, controlStartTimeout)
 	defer cancel()
-	out, err := cc.run(ctx, [][]string{{"display-message", "-p", "#{client_name}"}})
+	out, err := cc.run(ctx, [][]string{{"display-message", "-p", "#{client_name}"}}, controlStartTimeout)
 	if err != nil {
 		cc.close()
 		return nil, err
@@ -119,10 +127,17 @@ func (cc *controlConn) close() {
 
 // run sends commands, each a tmux command and its arguments, and returns their output
 // joined, as tmux would print it run with them separated by ;. A command which fails
-// makes the error, with its message.
-func (cc *controlConn) run(ctx context.Context, commands [][]string) (string, error) {
+// makes the error, with its message. The replies must come by ctx's deadline or, if it
+// has none, within timeout, if that isn't zero, or the client is ended.
+func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout time.Duration) (string, error) {
 	call := controlCalls.Get().(*controlCall) //nolint:forcetypeassert // only calls are pooled
 	call.remaining, call.out, call.failed, call.closed = len(commands), call.out[:0], call.failed[:0], false
+	call.deadline = time.Time{}
+	if deadline, ok := ctx.Deadline(); ok {
+		call.deadline = deadline
+	} else if timeout > 0 {
+		call.deadline = time.Now().Add(timeout)
+	}
 
 	// Commands are answered in the order they're sent: the call is queued and its line
 	// written in turn, so concurrent calls can't swap replies. The lock the reader needs
@@ -136,6 +151,7 @@ func (cc *controlConn) run(ctx context.Context, commands [][]string) (string, er
 		return "", errControlClosed
 	}
 	cc.pending = append(cc.pending, call)
+	cc.armWatchdog()
 	cc.mu.Unlock()
 	line := cc.line[:0]
 	for _, cmd := range commands {
@@ -148,9 +164,16 @@ func (cc *controlConn) run(ctx context.Context, commands [][]string) (string, er
 		line = append(line, '\n')
 	}
 	cc.line = line
-	stop := context.AfterFunc(ctx, cc.close)
-	_, err := cc.stdin.Write(line)
-	stop()
+	var err error
+	if call.deadline.IsZero() && ctx.Done() != nil {
+		// No deadline for the watchdog: a write the client doesn't take is given up
+		// when ctx is cancelled.
+		stop := context.AfterFunc(ctx, cc.close)
+		_, err = cc.stdin.Write(line)
+		stop()
+	} else {
+		_, err = cc.stdin.Write(line)
+	}
 	cc.writeMu.Unlock()
 	if err != nil {
 		// The call is let go as the client ends.
@@ -168,6 +191,10 @@ func (cc *controlConn) run(ctx context.Context, commands [][]string) (string, er
 	}
 	defer controlCalls.Put(call)
 	switch {
+	case call.closed && !call.deadline.IsZero() && !time.Now().Before(call.deadline):
+		// The watchdog ended it: the commands timed out, and would again run the usual
+		// way.
+		return "", context.DeadlineExceeded
 	case call.closed:
 		return "", errControlClosed
 	case len(call.failed) > 0:
@@ -192,6 +219,7 @@ func (cc *controlConn) read(stdout io.Reader) {
 			call.done <- struct{}{}
 		}
 		cc.pending = nil
+		cc.watchdog.Stop()
 		cc.mu.Unlock()
 		close(cc.done)
 		cc.stop()
@@ -258,9 +286,29 @@ func (cc *controlConn) replied(call *controlCall) {
 		return
 	}
 	cc.mu.Lock()
-	cc.pending = cc.pending[1:]
+	// Shifted down, not resliced, so that appending reuses the space.
+	n := copy(cc.pending, cc.pending[1:])
+	cc.pending[n] = nil
+	cc.pending = cc.pending[:n]
+	cc.armWatchdog()
 	cc.mu.Unlock()
 	call.done <- struct{}{}
+}
+
+// armWatchdog sets the watchdog for the earliest deadline of the pending calls, or stops
+// it if they have none. cc.mu must be held.
+func (cc *controlConn) armWatchdog() {
+	var earliest time.Time
+	for _, call := range cc.pending {
+		if !call.deadline.IsZero() && (earliest.IsZero() || call.deadline.Before(earliest)) {
+			earliest = call.deadline
+		}
+	}
+	if earliest.IsZero() {
+		cc.watchdog.Stop()
+		return
+	}
+	cc.watchdog.Reset(time.Until(earliest))
 }
 
 // readLine reads a line of any length, without its newline. The line is good until the
@@ -469,7 +517,7 @@ func (c *Client) runControl(ctx context.Context, args []string) (string, bool, e
 	if cc == nil {
 		return "", false, nil
 	}
-	out, err := cc.run(ctx, commands)
+	out, err := cc.run(ctx, commands, c.Timeout)
 	var ce *controlError
 	switch {
 	case err == nil:

@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"io"
+	"time"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
 )
@@ -43,12 +44,24 @@ func (c *Client) Run(ctx context.Context, args ...string) (string, error) { retu
 // QuoteControlArg exposes quoteControlArg to the tests.
 var QuoteControlArg = quoteControlArg
 
+// ControlRun runs commands through a control connection, as Client.run does with its
+// Timeout.
+type ControlRun func(ctx context.Context, timeout time.Duration, args []string) (string, error)
+
 // StartControlOn starts a control connection reading tmux's side from stdout, for testing
 // how replies are read.
-func StartControlOn(ctx context.Context, stdin io.WriteCloser, stdout io.Reader) (func([]string) (string, error), error) {
-	cc, err := startControl(ctx, stdin, stdout, func() {})
+func StartControlOn(ctx context.Context, stdin io.WriteCloser, stdout io.Reader) (ControlRun, error) {
+	// Stopping the fake ends its output, as when a process is killed.
+	stop := func() {
+		if c, ok := stdout.(io.Closer); ok {
+			_ = c.Close()
+		}
+	}
+	cc, err := startControl(ctx, stdin, stdout, stop)
 	if err != nil {
 		return nil, err
 	}
-	return func(args []string) (string, error) { return cc.run(ctx, splitCommands(args)) }, nil
+	return func(ctx context.Context, timeout time.Duration, args []string) (string, error) {
+		return cc.run(ctx, splitCommands(args), timeout)
+	}, nil
 }

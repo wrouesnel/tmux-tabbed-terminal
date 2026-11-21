@@ -42,6 +42,11 @@ type Client struct {
 	// SSH, if set, runs tmux on another host. Binary and the socket settings then apply
 	// to the remote tmux.
 	SSH *SSH
+	// Timeout bounds each command run with a context which has no deadline of its own,
+	// if it isn't zero. A context without one costs nothing per command, where one with
+	// a deadline is made for each: pollers, which run commands several times a second,
+	// pass one and leave the limit to Timeout.
+	Timeout time.Duration
 
 	mu           sync.Mutex
 	defaultShell string
@@ -212,6 +217,11 @@ func Environ(env []string) []string {
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 	if out, ran, err := c.runControl(ctx, args); ran {
 		return out, err
+	}
+	if _, ok := ctx.Deadline(); !ok && c.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.Timeout)
+		defer cancel()
 	}
 	if c.SSH != nil {
 		var cancel context.CancelFunc

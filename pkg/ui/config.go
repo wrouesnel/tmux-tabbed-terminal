@@ -50,6 +50,7 @@ type TmuxConfig struct {
 // PATH over the one installed with the application.
 func (c TmuxConfig) Client(useSystem bool) *tmux.Client {
 	client := tmux.NewClient()
+	client.Timeout = commandTimeout
 	if c.Binary != "" {
 		client.Binary = c.Binary
 	}

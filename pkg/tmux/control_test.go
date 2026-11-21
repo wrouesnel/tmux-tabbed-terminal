@@ -169,15 +169,48 @@ func TestControlReplies(t *testing.T) {
 	if err != nil {
 		t.Fatalf("starting: %v", err)
 	}
-	out, err := run([]string{"list-sessions"})
+	out, err := run(ctx, 0, []string{"list-sessions"})
 	if want := "line one\n%end 2 9 1\n%error 1 11 1\nline two\n"; err != nil || out != want {
 		t.Errorf("reply: got %q, %v; want %q", out, err, want)
 	}
-	if _, err := run([]string{"list-windows", "-t", "x"}); err == nil || !strings.Contains(err.Error(), "can't find session") {
+	if _, err := run(ctx, 0, []string{"list-windows", "-t", "x"}); err == nil || !strings.Contains(err.Error(), "can't find session") {
 		t.Errorf("error reply: got %v", err)
 	}
-	if _, err := run([]string{"list-sessions"}); err == nil {
+	if _, err := run(ctx, 0, []string{"list-sessions"}); err == nil {
 		t.Error("a command after the client ended succeeded")
+	}
+}
+
+// TestControlWatchdog checks that a call with no deadline of its own is given up after
+// its timeout when the client stops answering, and the client ended.
+func TestControlWatchdog(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	stdinR, stdinW := io.Pipe()
+	stdoutR, stdoutW := io.Pipe()
+	defer stdoutW.Close()
+	go func() {
+		// The fake tmux answers only the first command, the start's request for the name.
+		lines := bufio.NewScanner(stdinR)
+		if lines.Scan() {
+			_, _ = io.WriteString(stdoutW, "%begin 1 10 1\nclient-7\n%end 1 10 1\n")
+		}
+		_, _ = io.Copy(io.Discard, stdinR)
+	}()
+	run, err := tmux.StartControlOn(ctx, stdinW, stdoutR)
+	if err != nil {
+		t.Fatalf("starting: %v", err)
+	}
+	start := time.Now()
+	_, err = run(context.Background(), 100*time.Millisecond, []string{"list-sessions"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("stuck call: got %v, want a deadline error", err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Errorf("stuck call took %v", took)
+	}
+	if _, err := run(context.Background(), 0, []string{"list-sessions"}); err == nil {
+		t.Error("a command after the watchdog ended the client succeeded")
 	}
 }
 
