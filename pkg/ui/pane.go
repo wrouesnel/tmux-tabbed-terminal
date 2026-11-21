@@ -65,6 +65,8 @@ type Pane struct {
 	// is set.
 	shelfTimer   *time.Timer
 	shelfWaiting bool
+	// shelfScan reads the session for the shelf, once one has been asked for.
+	shelfScan *shelfScanner
 	// file shows a file in place of the terminal, when the pane is a preview, or is nil.
 	file *filePreview
 	// dropZone highlights where a dragged session would land.

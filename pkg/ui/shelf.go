@@ -408,11 +408,20 @@ func linksInLines(lines []string) []textLink {
 
 // appendLinks appends the links in a line, in the order they appear, to links. Only the
 // links' text is copied out of line.
+func appendLinks(links []textLink, line []byte) []textLink {
+	eachLink(line, func(text []byte, kind linkKind) {
+		links = append(links, textLink{text: string(text), kind: kind})
+	})
+	return links
+}
+
+// eachLink gives each link in a line, in the order they appear, to fn. The text is only
+// good until fn returns.
 //
 // The scan runs on new output of busy panes, over every line on screen: to keep
 // allocations down on long runs, lines are only searched for links they could hold, and
 // the matches of each are gathered in space kept on the stack.
-func appendLinks(links []textLink, line []byte) []textLink {
+func eachLink(line []byte, fn func(text []byte, kind linkKind)) {
 	type found struct {
 		start, end int
 		kind       linkKind
@@ -431,9 +440,8 @@ func appendLinks(links []textLink, line []byte) []textLink {
 	}
 	slices.SortFunc(taken, func(a, b found) int { return cmp.Compare(a.start, b.start) })
 	for _, t := range taken {
-		links = append(links, textLink{text: string(line[t.start:t.end]), kind: t.kind})
+		fn(line[t.start:t.end], t.kind)
 	}
-	return links
 }
 
 // linkNeeds is each link pattern's needs, as bytes.
@@ -484,50 +492,143 @@ func (p *Pane) scanForShelf() {
 	if aw == nil {
 		return
 	}
-	store := p.win.app.shelf
-	sf := store.get(key)
-	history := 0
-	if !sf.scanned {
-		history, sf.scanned = shelfHistory, true
+	if p.shelfScan == nil {
+		p.shelfScan = newShelfScanner(p)
 	}
-	window, host, remote := aw.ID, p.hostName, p.hostName != LocalHost
+	sc := p.shelfScan
+	if sc.running {
+		// Read again once the read under way is done.
+		sc.again = true
+		return
+	}
+	sf := p.win.app.shelf.get(key)
+	sc.history = 0
+	if !sf.scanned {
+		sc.history, sf.scanned = shelfHistory, true
+	}
+	sc.h, sc.key, sc.host, sc.remote = h, key, p.hostName, p.hostName != LocalHost
 	// A window of one pane is the snapshot's to read: only one split into panes needs
 	// asking for them, which, for the reads busy panes queue every couple of seconds,
 	// keeps allocations down on long runs.
-	single := aw.Panes <= 1 && aw.PaneID != ""
-	only := tmux.Pane{ID: aw.PaneID, Path: aw.Path}
-	app := p.win.app
-	go func() {
-		// The client's Timeout bounds each command.
-		ctx := app.ctx
-		panes := []tmux.Pane{only}
-		if !single {
-			layout, err := h.client.WindowLayout(ctx, window)
-			if err != nil {
-				app.log.Debug("Could not read the session for the shelf", zap.Error(err))
-				return
-			}
-			panes = layout.Panes
+	sc.window, sc.single = aw.ID, aw.Panes <= 1 && aw.PaneID != ""
+	sc.only = tmux.Pane{ID: aw.PaneID, Path: aw.Path}
+	sc.running = true
+	go sc.run()
+}
+
+// shelfScanner reads a pane's session for the shelf, keeping what a read needs between
+// reads, which busy panes queue every couple of seconds: on a long run, a read's own
+// garbage adds up. Its fields are the main loop's while it isn't running, and its read's
+// while it is.
+type shelfScanner struct {
+	pane *Pane
+	app  *App
+	// What to read, set before a read starts.
+	h                 *Host
+	key, host, window string
+	remote, single    bool
+	only              tmux.Pane
+	history           int
+	// running is set while a read is under way, and again if another was asked for
+	// meanwhile, to start once it's done.
+	running, again bool
+
+	lines tmux.PaneLineReader
+	panes [1]tmux.Pane
+	files []string
+	// ok is whether the read succeeded, so files is to be noticed.
+	ok bool
+	// cwd is the directory of the pane being read.
+	cwd string
+	// seen is the links read before, and what they resolved to, kept while they're on
+	// screen: the same lines are read again and again, and resolving their links again
+	// would make each one's strings again.
+	seen map[string]*seenLink
+	// generation counts reads, to forget links no longer seen.
+	generation uint
+	// run, addLine and finish are the scanner's methods, made once.
+	run     func()
+	addLine func(line []byte)
+	addLink func(text []byte, kind linkKind)
+	finish  func()
+}
+
+// seenLink is what a link resolved to, in a directory, and the read that last saw it.
+type seenLink struct {
+	kind       linkKind
+	cwd, file  string
+	generation uint
+}
+
+func newShelfScanner(p *Pane) *shelfScanner {
+	sc := &shelfScanner{pane: p, app: p.win.app, seen: map[string]*seenLink{}}
+	sc.run, sc.addLine, sc.addLink, sc.finish = sc.read, sc.line, sc.link, sc.done
+	return sc
+}
+
+// read reads the panes, off the main loop, and hands what it found to it.
+func (sc *shelfScanner) read() {
+	// The client's Timeout bounds each command.
+	ctx := sc.app.ctx
+	sc.generation++
+	sc.files, sc.ok = sc.files[:0], false
+	panes := sc.panes[:0]
+	panes = append(panes, sc.only)
+	if !sc.single {
+		layout, err := sc.h.client.WindowLayout(ctx, sc.window)
+		if err != nil {
+			sc.app.log.Debug("Could not read the session for the shelf", zap.Error(err))
+			gtkx.Invoke(sc.finish)
+			return
 		}
-		var links []textLink
-		var files []string
-		for _, pane := range panes {
-			links = links[:0]
-			err := h.client.EachPaneLine(ctx, pane.ID, history, func(line []byte) {
-				links = appendLinks(links, line)
-			})
-			if err != nil {
-				app.log.Debug("Could not read the session for the shelf", zap.Error(err))
-				return
-			}
-			for _, l := range links {
-				if f := resolveLink(vte.Match{Text: l.text}, l.kind, pane.Path, remote).file; f != "" {
-					files = append(files, f)
-				}
-			}
+		panes = layout.Panes
+	}
+	for _, pane := range panes {
+		sc.cwd = pane.Path
+		if err := sc.lines.Each(ctx, sc.h.client, pane.ID, sc.history, sc.addLine); err != nil {
+			sc.app.log.Debug("Could not read the session for the shelf", zap.Error(err))
+			gtkx.Invoke(sc.finish)
+			return
 		}
-		gtkx.Invoke(func() { store.notice(key, host, files) })
-	}()
+	}
+	for text, l := range sc.seen {
+		if l.generation != sc.generation {
+			delete(sc.seen, text)
+		}
+	}
+	sc.ok = true
+	gtkx.Invoke(sc.finish)
+}
+
+func (sc *shelfScanner) line(line []byte) { eachLink(line, sc.addLink) }
+
+// link resolves a link to a file, if it names one, and adds it to the files.
+func (sc *shelfScanner) link(text []byte, kind linkKind) {
+	// Looking a string made from bytes up in a map makes no string; storing one does,
+	// so a link seen before is updated in place.
+	l := sc.seen[string(text)]
+	if l == nil || l.kind != kind || l.cwd != sc.cwd {
+		t := string(text)
+		l = &seenLink{kind: kind, cwd: sc.cwd, file: resolveLink(vte.Match{Text: t}, kind, sc.cwd, sc.remote).file}
+		sc.seen[t] = l
+	}
+	l.generation = sc.generation
+	if l.file != "" {
+		sc.files = append(sc.files, l.file)
+	}
+}
+
+// done puts what a read found on the shelf, on the main loop, and starts the read asked
+// for meanwhile, if any.
+func (sc *shelfScanner) done() {
+	if sc.ok {
+		sc.app.shelf.notice(sc.key, sc.host, sc.files)
+	}
+	sc.running = false
+	if sc.again {
+		sc.again = false
+		sc.pane.scanForShelf()
+	}
 }
 
 // When the shelf shows: popping up when the session mentions a new file, always, even

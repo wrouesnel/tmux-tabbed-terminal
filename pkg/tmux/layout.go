@@ -128,10 +128,26 @@ func (c *Client) PaneLinesFrom(ctx context.Context, pane string, history int) ([
 }
 
 // EachPaneLine is PaneLinesFrom, giving each line to fn rather than returning them. A line
-// is only good until fn returns. It's for reading a pane over and over, as the shelf does
-// as panes print: to keep allocations down on long runs, the lines are read where the
-// output is, without copying it.
+// is only good until fn returns. To read panes over and over, use a PaneLineReader.
 func (c *Client) EachPaneLine(ctx context.Context, pane string, history int, fn func(line []byte)) error {
+	var r PaneLineReader
+	return r.Each(ctx, c, pane, history, fn)
+}
+
+// PaneLineReader reads panes' lines over and over, as the shelf does as panes print. To
+// keep allocations down on long runs, the lines are read where the output is, without
+// copying it, and the reader keeps what a read needs between reads. A reader does one
+// read at a time.
+type PaneLineReader struct {
+	args [7]string
+	fn   func(line []byte)
+	// use is each, made once.
+	use func(out []byte)
+}
+
+// Each gives each line of a pane, as Client.PaneLinesFrom reads them, to fn. A line is
+// only good until fn returns.
+func (r *PaneLineReader) Each(ctx context.Context, c *Client, pane string, history int, fn func(line []byte)) error {
 	version, err := c.ServerVersion(ctx)
 	if err != nil {
 		return err
@@ -139,20 +155,27 @@ func (c *Client) EachPaneLine(ctx context.Context, pane string, history int, fn 
 	if CaptureCrashes(version) {
 		return errors.Wrap(ErrCaptureCrashes, "tmux "+version)
 	}
-	var buf [7]string
-	args := append(buf[:0], "capture-pane", "-p", "-J", "-t", pane)
+	args := append(r.args[:0], "capture-pane", "-p", "-J", "-t", pane)
 	if history > 0 {
 		args = append(args, "-S", strconv.Itoa(-history))
 	}
-	_, err = c.runUsing(ctx, func(out []byte) {
-		for rest := bytes.TrimSuffix(out, newline); ; {
-			line, after, found := bytes.Cut(rest, newline)
-			fn(line)
-			if !found {
-				return
-			}
-			rest = after
-		}
-	}, args...)
+	if r.use == nil {
+		r.use = r.each
+	}
+	r.fn = fn
+	_, err = c.runUsing(ctx, r.use, args...)
+	r.fn = nil
 	return err
+}
+
+// each gives each line of out to fn.
+func (r *PaneLineReader) each(out []byte) {
+	for rest := bytes.TrimSuffix(out, newline); ; {
+		line, after, found := bytes.Cut(rest, newline)
+		r.fn(line)
+		if !found {
+			return
+		}
+		rest = after
+	}
 }
