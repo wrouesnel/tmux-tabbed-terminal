@@ -365,9 +365,9 @@ func (a *App) findSession(hostName, name string) *tmux.Session {
 	if h == nil {
 		return nil
 	}
-	for i := range h.snapshot.Sessions {
-		if h.snapshot.Sessions[i].Name == name {
-			return &h.snapshot.Sessions[i]
+	for _, s := range h.snapshot.Sessions {
+		if s.Name == name {
+			return s
 		}
 	}
 	return nil
@@ -781,8 +781,7 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 	now := time.Now()
 	keys := reuse(&a.seen)
 	for _, host := range a.hosts {
-		for i := range host.snapshot.Sessions {
-			s := &host.snapshot.Sessions[i]
+		for _, s := range host.snapshot.Sessions {
 			key := a.key(host.Name, s.ID)
 			keys[key] = true
 			if host == h {
@@ -838,8 +837,7 @@ func (a *App) updateGroups() {
 	keys := a.groupSeen
 	clear(keys)
 	for _, h := range a.hosts {
-		for i := range h.snapshot.Sessions {
-			s := &h.snapshot.Sessions[i]
+		for _, s := range h.snapshot.Sessions {
 			key := a.key(h.Name, s.ID)
 			// The grouper remembers sessions by ID: give it the key instead.
 			keyed := *s

@@ -767,8 +767,7 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 		}
 		groups := sb.groups
 		clear(groups)
-		for i := range h.snapshot.Sessions {
-			s := &h.snapshot.Sessions[i]
+		for _, s := range h.snapshot.Sessions {
 			key := sb.sessionKey(h.Name, s.ID)
 			groups[s.ID] = app.groups[key]
 			if !h.Local() {

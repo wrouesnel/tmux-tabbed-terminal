@@ -8,8 +8,8 @@ import (
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
 
-func session(id, name, command string) tmux.Session {
-	return tmux.Session{ID: id, Name: name, Windows: []tmux.Window{{Active: true, Name: command, Command: command}}}
+func session(id, name, command string) *tmux.Session {
+	return &tmux.Session{ID: id, Name: name, Windows: []tmux.Window{{Active: true, Name: command, Command: command}}}
 }
 
 func TestApplication(t *testing.T) {
@@ -33,35 +33,35 @@ func TestGrouperHoldsGroupThroughShortCommands(t *testing.T) {
 	start := time.Unix(1000, 0)
 	s := session("$1", "work", "bash")
 
-	if got := g.Group(&s, start); got != sessionlist.ShellGroup {
+	if got := g.Group(s, start); got != sessionlist.ShellGroup {
 		t.Fatalf("first: got %q", got)
 	}
 	// A short command doesn't move the session.
 	s.Windows[0].Command = "ls"
-	if got := g.Group(&s, start.Add(time.Second)); got != sessionlist.ShellGroup {
+	if got := g.Group(s, start.Add(time.Second)); got != sessionlist.ShellGroup {
 		t.Fatalf("short command: got %q", got)
 	}
 	s.Windows[0].Command = "bash"
-	g.Group(&s, start.Add(2*time.Second))
+	g.Group(s, start.Add(2*time.Second))
 
 	// A command running past the hold time does.
 	s.Windows[0].Command = "claude"
-	if got := g.Group(&s, start.Add(3*time.Second)); got != sessionlist.ShellGroup {
+	if got := g.Group(s, start.Add(3*time.Second)); got != sessionlist.ShellGroup {
 		t.Fatalf("new command: got %q, want it held", got)
 	}
-	if got := g.Group(&s, start.Add(6*time.Second)); got != "claude" {
+	if got := g.Group(s, start.Add(6*time.Second)); got != "claude" {
 		t.Fatalf("after hold: got %q, want claude", got)
 	}
 
 	g.Retain(map[string]bool{})
 	s.Windows[0].Command = "vim"
-	if got := g.Group(&s, start.Add(7*time.Second)); got != "vim" {
+	if got := g.Group(s, start.Add(7*time.Second)); got != "vim" {
 		t.Fatalf("after Retain: got %q, want vim straight away", got)
 	}
 }
 
 func TestOrder(t *testing.T) {
-	sessions := []tmux.Session{
+	sessions := []*tmux.Session{
 		session("$1", "a", "bash"),
 		session("$2", "b", "claude"),
 		session("$3", "c", "vim"),
@@ -102,7 +102,7 @@ func TestMatches(t *testing.T) {
 		"   bug   zfs": true,
 		"buildbox":     true,
 	} {
-		if got := sessionlist.Matches(&s, query, "claude", "buildbox"); got != want {
+		if got := sessionlist.Matches(s, query, "claude", "buildbox"); got != want {
 			t.Errorf("%q: got %v, want %v", query, got, want)
 		}
 	}

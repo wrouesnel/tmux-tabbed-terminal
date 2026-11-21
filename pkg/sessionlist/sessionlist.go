@@ -107,13 +107,13 @@ type Entry struct {
 // Order returns the sessions in display order. Ungrouped, that's tmux's order. Grouped,
 // groups are sorted by name with the shell group last, and sessions keep tmux's order
 // within their group.
-func Order(sessions []tmux.Session, groups map[string]string, grouped bool) []Entry {
+func Order(sessions []*tmux.Session, groups map[string]string, grouped bool) []Entry {
 	return AppendOrder(make([]Entry, 0, len(sessions)), sessions, groups, grouped)
 }
 
 // AppendOrder is Order, appending the entries to entries: lists updated on every poll
 // keep one slice, to keep allocations down on long runs.
-func AppendOrder(entries []Entry, sessions []tmux.Session, groups map[string]string, grouped bool) []Entry {
+func AppendOrder(entries []Entry, sessions []*tmux.Session, groups map[string]string, grouped bool) []Entry {
 	start := len(entries)
 	for _, s := range sessions {
 		e := Entry{ID: s.ID}

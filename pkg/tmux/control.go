@@ -100,7 +100,7 @@ func startControl(ctx context.Context, stdin io.WriteCloser, stdout io.Reader, s
 	go cc.read(stdout)
 	ctx, cancel := context.WithTimeout(ctx, controlStartTimeout)
 	defer cancel()
-	out, err := cc.run(ctx, [][]string{{"display-message", "-p", "#{client_name}"}}, controlStartTimeout, "")
+	out, err := cc.run(ctx, [][]string{{"display-message", "-p", "#{client_name}"}}, controlStartTimeout, nil)
 	if err != nil {
 		cc.close()
 		return nil, err
@@ -128,9 +128,9 @@ func (cc *controlConn) close() {
 // run sends commands, each a tmux command and its arguments, and returns their output
 // joined, as tmux would print it run with them separated by ;. A command which fails
 // makes the error, with its message. The replies must come by ctx's deadline or, if it
-// has none, within timeout, if that isn't zero, or the client is ended. If the output is
-// last, last itself is returned.
-func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout time.Duration, last string) (string, error) {
+// has none, within timeout, if that isn't zero, or the client is ended. If use isn't nil,
+// it's given the output instead, which is only good until it returns.
+func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout time.Duration, use func([]byte)) (string, error) {
 	call := controlCalls.Get().(*controlCall) //nolint:forcetypeassert // only calls are pooled
 	call.remaining, call.out, call.failed, call.closed = len(commands), call.out[:0], call.failed[:0], false
 	call.deadline = time.Time{}
@@ -201,10 +201,11 @@ func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout tim
 	case len(call.failed) > 0:
 		return "", &controlError{msg: strings.Join(call.failed, "\n")}
 	}
-	// To keep allocations down on long runs: a poll which finds nothing new gets the
-	// last output back, not a copy of it. The comparison makes no string.
-	if string(call.out) == last {
-		return last, nil
+	if use != nil {
+		// To keep allocations down on long runs: polls read the output where it is,
+		// without a copy.
+		use(call.out)
+		return "", nil
 	}
 	return string(call.out), nil
 }
@@ -479,8 +480,7 @@ func controlSession(snap *Snapshot) string {
 	}
 	best := ""
 	var at time.Time
-	for i := range snap.Sessions {
-		s := &snap.Sessions[i]
+	for _, s := range snap.Sessions {
 		if a := s.Activity(); best == "" || a.After(at) {
 			best, at = s.ID, a
 		}
@@ -548,7 +548,7 @@ func (c *Client) startControl(ctx context.Context, session string) (*controlConn
 
 // runControl runs args through the control connection, if they can be and there is one.
 // It reports whether it did.
-func (c *Client) runControl(ctx context.Context, args []string, last string) (string, bool, error) {
+func (c *Client) runControl(ctx context.Context, args []string, use func([]byte)) (string, bool, error) {
 	// To keep allocations down on long runs, the commands are split into space on the
 	// stack: polls have a few.
 	var buf [8][]string
@@ -560,7 +560,7 @@ func (c *Client) runControl(ctx context.Context, args []string, last string) (st
 	if cc == nil {
 		return "", false, nil
 	}
-	out, err := cc.run(ctx, commands, c.Timeout, last)
+	out, err := cc.run(ctx, commands, c.Timeout, use)
 	// run returns a *controlError itself, never wrapped. It's asserted rather than found
 	// with errors.As, whose target would be allocated on every call, to keep allocations
 	// down on long runs.

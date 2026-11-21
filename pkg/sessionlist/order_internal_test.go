@@ -20,7 +20,7 @@ func TestLowerLess(t *testing.T) {
 
 func TestAppendOrderAllocates(t *testing.T) {
 	groups := map[string]string{"$1": ShellGroup, "$2": "claude", "$3": "Codex"}
-	sessions := []tmux.Session{{ID: "$1"}, {ID: "$2"}, {ID: "$3"}}
+	sessions := []*tmux.Session{{ID: "$1"}, {ID: "$2"}, {ID: "$3"}}
 	entries := AppendOrder(nil, sessions, groups, true)
 	allocs := testing.AllocsPerRun(100, func() {
 		entries = AppendOrder(entries[:0], sessions, groups, true)

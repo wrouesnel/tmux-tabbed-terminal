@@ -291,9 +291,12 @@ func TestParseSnapshotSharesUnchangedWindows(t *testing.T) {
 	// The busy session's history grew; the other's windows are as they were.
 	second := tmux.ParseSnapshotAfter(lines(s1, s2, w1a, w1b, fmt.Sprintf(w2, 11)), first)
 
-	was, now := first.Session("$1").Windows, second.Session("$1").Windows
-	if len(now) != 2 || &now[0] != &was[0] {
-		t.Errorf("unchanged session's windows weren't shared: %+v", now)
+	if first.Session("$1") != second.Session("$1") {
+		t.Error("unchanged session wasn't shared")
+	}
+	now := second.Session("$1").Windows
+	if second.Session("$2") == first.Session("$2") {
+		t.Error("changed session was shared")
 	}
 	busy := second.Session("$2").Windows
 	if len(busy) != 1 || busy[0].Scroll.History != 11 || &busy[0] == &first.Session("$2").Windows[0] {
@@ -306,6 +309,70 @@ func TestParseSnapshotSharesUnchangedWindows(t *testing.T) {
 	if fresh := tmux.ParseSnapshot(lines(s1, s2, w1a, w1b, fmt.Sprintf(w2, 11))); !reflect.DeepEqual(
 		fresh.Session("$1").Windows, now) || !reflect.DeepEqual(fresh.Session("$2").Windows, busy) {
 		t.Errorf("shared windows differ from parsing afresh: %+v", fresh)
+	}
+}
+
+// snapshotOutput makes the snapshot command's output for n sessions of two windows each,
+// the first's history being history, with a client and a buffer.
+func snapshotOutput(n, history int, extra ...string) []byte {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(&b, "S\t$%d\ts%d\t100\t1\n", i, i)
+	}
+	for i := range n {
+		h := 5
+		if i == 0 {
+			h = history
+		}
+		fmt.Fprintf(&b, "W\t$%d\t@%d\t0\t1\t300\tbash\tshell\t/\t%%%d\t0\t0\t0\t%d\t40\t\t1\t80\t\n", i, 2*i, 2*i, h)
+		fmt.Fprintf(&b, "W\t$%d\t@%d\t1\t0\t300\tvim\tedit\t/\t%%%d\t0\t0\t0\t5\t40\t\t1\t80\ttitle\n", i, 2*i+1, 2*i+1)
+	}
+	b.WriteString("C\t/dev/pts/1\t$0\tattached\n")
+	for _, e := range extra {
+		b.WriteString(e + "\n")
+	}
+	b.WriteString("B\tbuffer0\t400\t11\n")
+	return []byte(strings.ReplaceAll(b.String(), "\t", "^|^"))
+}
+
+func TestParseSnapshotSharesUnchanged(t *testing.T) {
+	first := tmux.ParseSnapshotBytes(snapshotOutput(3, 10), nil)
+	second := tmux.ParseSnapshotBytes(snapshotOutput(3, 11), first)
+	if second.Session("$0") == first.Session("$0") || second.Session("$0").Windows[0].Scroll.History != 11 {
+		t.Errorf("changed session: got %+v", second.Session("$0"))
+	}
+	for _, id := range []string{"$1", "$2"} {
+		if second.Session(id) != first.Session(id) {
+			t.Errorf("session %s wasn't shared", id)
+		}
+	}
+	if second.Buffer != first.Buffer || second.Clients[0].TTY != "/dev/pts/1" {
+		t.Errorf("buffer or clients: %+v, %+v", second.Buffer, second.Clients)
+	}
+	// A watching control client on $1 changes its count of clients, if not its line.
+	third := tmux.ParseSnapshotBytes(snapshotOutput(3, 11, "C\t\t$1\tcontrol-mode,no-output"), second)
+	if s := third.Session("$1"); s == second.Session("$1") || s.Attached != 0 {
+		t.Errorf("session with a watching client: got %+v, want 0 attached", s)
+	}
+	if fourth := tmux.ParseSnapshotBytes(snapshotOutput(3, 11), third); fourth.Session("$1").Attached != 1 {
+		t.Errorf("session after the watching client left: got %+v, want 1 attached", fourth.Session("$1"))
+	}
+}
+
+// TestParseSnapshotAllocations checks that what a poll allocates when one session changed
+// doesn't grow with the number of sessions, beyond the list of them.
+func TestParseSnapshotAllocations(t *testing.T) {
+	allocs := func(n int) float64 {
+		a, b := snapshotOutput(n, 10), snapshotOutput(n, 11)
+		prev := tmux.ParseSnapshotBytes(a, nil)
+		return testing.AllocsPerRun(50, func() {
+			prev = tmux.ParseSnapshotBytes(b, prev)
+			a, b = b, a
+		})
+	}
+	few, many := allocs(5), allocs(100)
+	if few != many || many > 8 {
+		t.Errorf("allocations for one changed session: %v with 5 sessions, %v with 100", few, many)
 	}
 }
 
