@@ -244,7 +244,7 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 		dest = markdownDestination(m.Text)
 	case kind == linkPath || kind == linkCode || kind == linkRelative:
 		// A path is taken as it is, not as a URL, whose ? and # it may hold.
-		dest = lineSuffix.ReplaceAllString(strings.Trim(dest, "\x60"), "")
+		dest = trimLineSuffix(strings.Trim(dest, "\x60"))
 		if runtime.GOOS == "windows" && !remote {
 			return link{text: dest}
 		}
@@ -280,11 +280,23 @@ func resolveLink(m vte.Match, kind linkKind, cwd string, remote bool) link {
 	return resolvePath(l, u.Path, cwd, remote)
 }
 
-// lineSuffix is the line, and perhaps column, after a path in compilers' messages, such
-// as :12 or :12:5.
-//
-//nolint:gochecknoglobals
-var lineSuffix = regexp.MustCompile(`(?::\d+){1,2}$`)
+// trimLineSuffix removes the line, and perhaps column, after a path in compilers'
+// messages, such as :12 or :12:5, from the end of s: one or two groups of a colon and
+// digits. It's done by hand, not with a regexp, as the shelf does it for every path a
+// busy pane prints.
+func trimLineSuffix(s string) string {
+	for range 2 {
+		i := len(s)
+		for i > 0 && s[i-1] >= '0' && s[i-1] <= '9' {
+			i--
+		}
+		if i == len(s) || i == 0 || s[i-1] != ':' {
+			break
+		}
+		s = s[:i-1]
+	}
+	return s
+}
 
 // resolvePath sets the file, and on this host the URI, of a link to path p, which is
 // relative to cwd unless it's absolute or starts with ~/. On another host, it's left

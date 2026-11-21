@@ -194,7 +194,7 @@ func TestResolveLink(t *testing.T) {
 			if !strings.HasPrefix(c.m.Text, "file:") && strings.HasPrefix(c.wantURI, "file:") {
 				c.wantURI, c.wantText = "", markdownDestination(c.m.Text)
 				if c.kind == linkPath || c.kind == linkCode || c.kind == linkRelative {
-					c.wantText = lineSuffix.ReplaceAllString(strings.Trim(c.m.Text, "`"), "")
+					c.wantText = trimLineSuffix(strings.Trim(c.m.Text, "`"))
 				}
 			}
 			c.wantFile = ""
@@ -304,6 +304,19 @@ func TestMissingFile(t *testing.T) {
 		path, ok := missingFile(c.uri)
 		if path != c.wantPath || ok != c.want {
 			t.Errorf("%s: got %q %v, want %q %v", c.uri, path, ok, c.wantPath, c.want)
+		}
+	}
+}
+
+// TestTrimLineSuffix checks trimLineSuffix strips what the regexp it replaced did.
+func TestTrimLineSuffix(t *testing.T) {
+	lineSuffix := regexp.MustCompile(`(?::\d+){1,2}$`)
+	for _, s := range []string{
+		"", "a", "a:", "a:1", "a:12:5", "a:1:2:3", ":1", "1", "a:b", "a:1b", "a::1", "C:\\x:3",
+		"/p/f.go:10:", "f.go:7:9", "x:12:ab", "::",
+	} {
+		if got, want := trimLineSuffix(s), lineSuffix.ReplaceAllString(s, ""); got != want {
+			t.Errorf("trimLineSuffix(%q) = %q, want %q", s, got, want)
 		}
 	}
 }

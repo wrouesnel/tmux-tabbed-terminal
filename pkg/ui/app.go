@@ -10,7 +10,6 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
@@ -752,8 +751,10 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 		return
 	}
 	// Polls mostly find nothing new: then, unless a session's activity state moved on
-	// with time, the windows are left as they are (issue #17).
-	unchanged := h.polled && sameError(h.err, err) && (err != nil || reflect.DeepEqual(h.snapshot, snap))
+	// with time, the windows are left as they are (issue #17). A snapshot of output as
+	// it was is the last one itself, and one of other output differs, so comparing them
+	// is comparing pointers.
+	unchanged := h.polled && sameError(h.err, err) && (err != nil || h.snapshot == snap)
 	h.polled, h.err = true, err
 	a.offerHostKeyFixOnce(h)
 	if err == nil {
