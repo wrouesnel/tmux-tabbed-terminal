@@ -215,7 +215,14 @@ func Environ(env []string) []string {
 
 // run runs a tmux command and returns its standard output.
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
-	if out, ran, err := c.runControl(ctx, args); ran {
+	return c.runSame(ctx, "", args...)
+}
+
+// runSame is run, returning last itself if the output is the same, rather than a copy:
+// to keep allocations down on long runs, a poll which finds nothing new makes no new
+// string.
+func (c *Client) runSame(ctx context.Context, last string, args ...string) (string, error) {
+	if out, ran, err := c.runControl(ctx, args, last); ran {
 		return out, err
 	}
 	if _, ok := ctx.Deadline(); !ok && c.Timeout > 0 {
@@ -253,6 +260,9 @@ func (c *Client) run(ctx context.Context, args ...string) (string, error) {
 			return "", errors.Wrap(ErrNoSession, msg)
 		}
 		return "", errors.Wrapf(err, "tmux %s: %s", strings.Join(args, " "), msg)
+	}
+	if string(stdout.Bytes()) == last { //nolint:staticcheck // compared without making a string
+		return last, nil
 	}
 	return stdout.String(), nil
 }
@@ -431,7 +441,10 @@ var (
 // running has no sessions. The snapshot may be the one returned last time, when nothing
 // changed, so it must not be modified.
 func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
-	out, err := c.run(ctx,
+	c.mu.Lock()
+	last := c.lastOutput
+	c.mu.Unlock()
+	out, err := c.runSame(ctx, last,
 		"list-sessions", "-F", sessionFormat, ";",
 		"list-windows", "-a", "-F", windowFormat, ";",
 		"list-clients", "-F", clientFormat, ";",

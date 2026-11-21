@@ -249,6 +249,12 @@ func (a *App) pollHost(ctx context.Context, h *Host) {
 	defer h.client.Close()
 	var last time.Time
 	var lastErr string
+	// wait holds polls asked for too soon after the last. It's one timer, reset each
+	// time, rather than one made by time.After for each, to keep allocations down on
+	// long runs.
+	wait := time.NewTimer(time.Hour)
+	wait.Stop()
+	defer wait.Stop()
 
 	for {
 		// The client's Timeout bounds the poll: a context with a deadline would be one
@@ -273,11 +279,12 @@ func (a *App) pollHost(ctx context.Context, h *Host) {
 			return
 		case <-ticker.C:
 		case <-h.kick:
-			if wait := minKickInterval - time.Since(last); wait > 0 {
+			if d := minKickInterval - time.Since(last); d > 0 {
+				wait.Reset(d)
 				select {
 				case <-ctx.Done():
 					return
-				case <-time.After(wait):
+				case <-wait.C:
 				}
 			}
 		}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -59,6 +60,21 @@ func TestControlSnapshot(t *testing.T) {
 	}
 	if len(snap.Sessions) != 2 {
 		t.Errorf("got %d sessions, want 2", len(snap.Sessions))
+	}
+	// A layout, which asks display-message for the target's status, reads the same
+	// through the control client as through tmux run for it.
+	window := snap.Sessions[0].Windows[0].ID
+	viaControl, err := c.WindowLayout(ctx, window)
+	if err != nil {
+		t.Fatalf("WindowLayout: %v", err)
+	}
+	c.SetControl(false)
+	direct, err := c.WindowLayout(ctx, window)
+	if err != nil {
+		t.Fatalf("WindowLayout without control: %v", err)
+	}
+	if !reflect.DeepEqual(viaControl, direct) {
+		t.Errorf("layout through the control client %+v, run directly %+v", viaControl, direct)
 	}
 }
 
@@ -122,6 +138,27 @@ func TestControlArgumentsAndErrors(t *testing.T) {
 	}
 	if _, err := c.Run(ctx, "list-windows", "-t", "nosuch"); !errors.Is(err, tmux.ErrNoSession) {
 		t.Errorf("missing session: got %v, want ErrNoSession", err)
+	}
+}
+
+func TestControllable(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		want bool
+	}{
+		{[]string{"list-sessions", "-F", "x", ";", "list-clients"}, true},
+		{[]string{"list-panes", "-t", "@1", ";", "display-message", "-p", "-t", "@1", "#{status}"}, true},
+		{[]string{"display-message", "-t", "@1", "-p", "#{status}"}, true},
+		// No target: it would print about the control client's own session.
+		{[]string{"display-message", "-p", "#{version}"}, false},
+		{[]string{"display-message", "-t", "@1", "hello"}, false},
+		{[]string{"display-message", "-c", "/dev/pts/1", "-p", "-t", "@1", "x"}, false},
+		{[]string{"kill-session", "-t", "x"}, false},
+		{[]string{"list-sessions", ";"}, false},
+	} {
+		if got := tmux.Controllable(tc.args); got != tc.want {
+			t.Errorf("Controllable(%q) = %v, want %v", tc.args, got, tc.want)
+		}
 	}
 }
 

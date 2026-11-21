@@ -41,6 +41,9 @@ func (c *Client) ControlName() string { return c.controlName() }
 // Run exposes run to the tests.
 func (c *Client) Run(ctx context.Context, args ...string) (string, error) { return c.run(ctx, args...) }
 
+// Controllable reports whether args would be sent through a control connection.
+func Controllable(args []string) bool { return controllable(splitCommands(nil, args)) }
+
 // QuoteControlArg exposes quoteControlArg to the tests.
 var QuoteControlArg = quoteControlArg
 
@@ -62,6 +65,6 @@ func StartControlOn(ctx context.Context, stdin io.WriteCloser, stdout io.Reader)
 		return nil, err
 	}
 	return func(ctx context.Context, timeout time.Duration, args []string) (string, error) {
-		return cc.run(ctx, splitCommands(args), timeout)
+		return cc.run(ctx, splitCommands(nil, args), timeout, "")
 	}, nil
 }

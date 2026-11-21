@@ -95,6 +95,12 @@ type App struct {
 	spareGroups map[string]string
 	// groupSeen is updateGroups' scratch space: the sessions it found.
 	groupSeen map[string]bool
+	// visible, ttys and clients are what visibleSessions, ownTTYs and ownClients
+	// return, filled again on each call rather than made: they're called on every poll,
+	// and for every window, and making them was a steady source of garbage on long runs.
+	visible map[string]bool
+	ttys    map[string]bool
+	clients map[string]int
 	// grouped is whether session lists are grouped by application.
 	grouped bool
 	// sidebarRight puts session lists on the right of windows.
@@ -685,9 +691,21 @@ func (a *App) requestPoll(hostName string) {
 	}
 }
 
-// visibleSessions returns the keys of the sessions shown in any pane of any window.
+// reuse returns *m emptied, making it first if it's nil. Maps reused between polls keep
+// allocations down on long runs.
+func reuse[K comparable, V any](m *map[K]V) map[K]V {
+	if *m == nil {
+		*m = map[K]V{}
+	} else {
+		clear(*m)
+	}
+	return *m
+}
+
+// visibleSessions returns the keys of the sessions shown in any pane of any window. The
+// map is good until the next call.
 func (a *App) visibleSessions() map[string]bool {
-	visible := map[string]bool{}
+	visible := reuse(&a.visible)
 	for w := range a.windows {
 		for _, p := range w.panes() {
 			if p.Running() {
@@ -698,9 +716,10 @@ func (a *App) visibleSessions() map[string]bool {
 	return visible
 }
 
-// ownTTYs returns the ttys of this application's local tmux clients.
+// ownTTYs returns the ttys of this application's local tmux clients. The map is good
+// until the next call.
 func (a *App) ownTTYs() map[string]bool {
-	ttys := map[string]bool{}
+	ttys := reuse(&a.ttys)
 	for w := range a.windows {
 		for _, p := range w.panes() {
 			if p.tty != "" && p.hostName == LocalHost {
@@ -711,9 +730,10 @@ func (a *App) ownTTYs() map[string]bool {
 	return ttys
 }
 
-// ownClients counts this application's panes attached to each session.
+// ownClients counts this application's panes attached to each session. The map is good
+// until the next call.
 func (a *App) ownClients() map[string]int {
-	counts := map[string]int{}
+	counts := reuse(&a.clients)
 	for w := range a.windows {
 		for _, p := range w.panes() {
 			if p.Running() {
@@ -759,11 +779,7 @@ func (a *App) applySnapshot(h *Host, snap *tmux.Snapshot, err error) {
 
 	visible := a.visibleSessions()
 	now := time.Now()
-	if a.seen == nil {
-		a.seen = map[string]bool{}
-	}
-	keys := a.seen
-	clear(keys)
+	keys := reuse(&a.seen)
 	for _, host := range a.hosts {
 		for i := range host.snapshot.Sessions {
 			s := &host.snapshot.Sessions[i]

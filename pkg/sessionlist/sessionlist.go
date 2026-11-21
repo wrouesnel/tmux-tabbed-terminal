@@ -8,9 +8,11 @@ package sessionlist
 
 import (
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
@@ -106,7 +108,13 @@ type Entry struct {
 // groups are sorted by name with the shell group last, and sessions keep tmux's order
 // within their group.
 func Order(sessions []tmux.Session, groups map[string]string, grouped bool) []Entry {
-	entries := make([]Entry, 0, len(sessions))
+	return AppendOrder(make([]Entry, 0, len(sessions)), sessions, groups, grouped)
+}
+
+// AppendOrder is Order, appending the entries to entries: lists updated on every poll
+// keep one slice, to keep allocations down on long runs.
+func AppendOrder(entries []Entry, sessions []tmux.Session, groups map[string]string, grouped bool) []Entry {
+	start := len(entries)
 	for _, s := range sessions {
 		e := Entry{ID: s.ID}
 		if grouped {
@@ -115,8 +123,15 @@ func Order(sessions []tmux.Session, groups map[string]string, grouped bool) []En
 		entries = append(entries, e)
 	}
 	if grouped {
-		sort.SliceStable(entries, func(i, j int) bool {
-			return groupLess(entries[i].Group, entries[j].Group)
+		// slices' sort, unlike sort.SliceStable, allocates nothing.
+		slices.SortStableFunc(entries[start:], func(a, b Entry) int {
+			switch {
+			case groupLess(a.Group, b.Group):
+				return -1
+			case groupLess(b.Group, a.Group):
+				return 1
+			}
+			return 0
 		})
 	}
 	return entries
@@ -126,7 +141,23 @@ func groupLess(a, b string) bool {
 	if (a == ShellGroup) != (b == ShellGroup) {
 		return b == ShellGroup
 	}
-	return strings.ToLower(a) < strings.ToLower(b)
+	return lowerLess(a, b)
+}
+
+// lowerLess reports whether a sorts before b, ignoring case, as strings.ToLower(a) <
+// strings.ToLower(b) would but without making lowered copies: it's called on every
+// comparison of every sort, on every poll, so to keep allocations down on long runs.
+func lowerLess(a, b string) bool {
+	for a != "" && b != "" {
+		ra, na := utf8.DecodeRuneInString(a)
+		rb, nb := utf8.DecodeRuneInString(b)
+		la, lb := unicode.ToLower(ra), unicode.ToLower(rb)
+		if la != lb {
+			return la < lb
+		}
+		a, b = a[na:], b[nb:]
+	}
+	return a == "" && b != ""
 }
 
 // Matches reports whether a session matches a search. Every word of the query must

@@ -95,6 +95,8 @@ type sidebar struct {
 	groups map[string]string
 	keep   map[string]bool
 	spare  []listEntry
+	// entries is the scratch space for each host's sessions in order.
+	entries []sessionlist.Entry
 }
 
 // sessionKey returns the key of a host's session, kept from earlier updates.
@@ -169,11 +171,14 @@ type hostRow struct {
 	icon   *gtk.Image
 	// filter shows only this host's sessions while it's active.
 	filter *gtk.ToggleButton
-	// shown is what it last showed: its status, tooltip and whether it's in error.
+	// shown is what it last showed: its status, tooltip and whether it's in error, and
+	// the session count the tooltip was made for, so that it's made only when that
+	// changes, not on every poll, keeping allocations down on long runs.
 	shown struct {
 		set             bool
 		status, tooltip string
 		failed          bool
+		count           int
 	}
 }
 
@@ -505,7 +510,11 @@ func (r *hostRow) update(h *Host) {
 		status = "connecting…"
 	default:
 		n := len(h.snapshot.Sessions)
-		status, tooltip = strconv.Itoa(n), fmt.Sprintf("%d sessions", n)
+		status, tooltip = strconv.Itoa(n), r.shown.tooltip
+		if !r.shown.set || r.shown.failed || r.shown.count != n || tooltip == "" {
+			tooltip = fmt.Sprintf("%d sessions", n)
+		}
+		r.shown.count = n
 	}
 	was := r.shown
 	if !was.set || was.status != status {
@@ -772,7 +781,8 @@ func (sb *sidebar) update(shown map[string]bool, selected string) {
 			}
 			row.update(s, app.tracker.State(key, now), shown[key], others[s.ID], "")
 		}
-		for _, e := range sessionlist.Order(h.snapshot.Sessions, groups, app.grouped) {
+		sb.entries = sessionlist.AppendOrder(sb.entries[:0], h.snapshot.Sessions, groups, app.grouped)
+		for _, e := range sb.entries {
 			order = append(order, listEntry{key: sb.sessionKey(h.Name, e.ID), host: h.Name, group: e.Group})
 		}
 	}

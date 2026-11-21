@@ -82,6 +82,11 @@ type Window struct {
 	fullscreen    bool
 	// status replaces the title bar subtitle while something is in progress.
 	status string
+	// shown is refresh's scratch space for the sessions in the window's panes, and
+	// subtitleOf what the last session subtitle was made from, with it: refresh runs on
+	// polls, and making them each time was a steady source of garbage on long runs.
+	shown      map[string]bool
+	subtitleOf windowSubtitleOf
 }
 
 func newWindow(app *App) *Window {
@@ -884,12 +889,7 @@ func (w *Window) refresh() {
 	title, subtitle := version.Name, ""
 	if h, s := w.app.lookup(selected); s != nil {
 		title = s.Name
-		if aw := s.ActiveWindow(); aw != nil {
-			subtitle = windowSubtitle(aw)
-		}
-		if !h.Local() {
-			subtitle = h.Name + " · " + subtitle
-		}
+		subtitle = w.subtitleOf.get(h, s.ActiveWindow())
 	}
 	if p := w.activePane; selected == "" && p != nil && p.file != nil {
 		title, subtitle = p.file.title(), p.file.path.GetLabel()
@@ -905,9 +905,9 @@ func (w *Window) refresh() {
 }
 
 // shownSessions returns the sessions shown in the window's panes, and the one in the
-// focused pane, or "".
+// focused pane, or "". The map is good until the next call.
 func (w *Window) shownSessions() (map[string]bool, string) {
-	shown := map[string]bool{}
+	shown := reuse(&w.shown)
 	for _, p := range w.panes() {
 		if p.running {
 			shown[p.SessionKey()] = true
@@ -947,6 +947,38 @@ func (w *Window) copyLinkText(text string) {
 const copiedMaxChars = 60
 
 // windowSubtitle describes a tmux window for the title bar.
+// windowSubtitleOf is what a window's subtitle was made from, and the subtitle, made
+// again only when they change.
+type windowSubtitleOf struct {
+	set                     bool
+	host                    string
+	index                   int
+	name, title             string
+	remote, windowAvailable bool
+	subtitle                string
+}
+
+// get returns the subtitle for a session's active window aw, or nil, on host h.
+func (o *windowSubtitleOf) get(h *Host, aw *tmux.Window) string {
+	now := windowSubtitleOf{set: true, host: h.Name, remote: !h.Local(), windowAvailable: aw != nil}
+	if aw != nil {
+		now.index, now.name, now.title = aw.Index, aw.Name, aw.Title
+	}
+	now.subtitle = o.subtitle
+	if *o == now {
+		return o.subtitle
+	}
+	now.subtitle = ""
+	if aw != nil {
+		now.subtitle = windowSubtitle(aw)
+	}
+	if now.remote {
+		now.subtitle = h.Name + " · " + now.subtitle
+	}
+	*o = now
+	return now.subtitle
+}
+
 func windowSubtitle(aw *tmux.Window) string {
 	if aw.Title != "" {
 		return fmt.Sprintf("%d: %s — %s", aw.Index, aw.Name, aw.Title)

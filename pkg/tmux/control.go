@@ -29,10 +29,10 @@ import (
 // because it ended.
 var errControlClosed = errors.New("tmux control client ended")
 
-// controlCommands are the commands sent through the control connection. They only read,
-// and each names what it reads, so none of them depends on which client runs it: inside
-// the control connection, a command without a target would act on the control client's
-// own session.
+// controlCommands are the commands sent through the control connection, with
+// display-message when targetedPrint says so. They only read, and each names what it
+// reads, so none of them depends on which client runs it: inside the control
+// connection, a command without a target would act on the control client's own session.
 //
 //nolint:gochecknoglobals // a fixed set
 var controlCommands = map[string]bool{
@@ -100,7 +100,7 @@ func startControl(ctx context.Context, stdin io.WriteCloser, stdout io.Reader, s
 	go cc.read(stdout)
 	ctx, cancel := context.WithTimeout(ctx, controlStartTimeout)
 	defer cancel()
-	out, err := cc.run(ctx, [][]string{{"display-message", "-p", "#{client_name}"}}, controlStartTimeout)
+	out, err := cc.run(ctx, [][]string{{"display-message", "-p", "#{client_name}"}}, controlStartTimeout, "")
 	if err != nil {
 		cc.close()
 		return nil, err
@@ -128,8 +128,9 @@ func (cc *controlConn) close() {
 // run sends commands, each a tmux command and its arguments, and returns their output
 // joined, as tmux would print it run with them separated by ;. A command which fails
 // makes the error, with its message. The replies must come by ctx's deadline or, if it
-// has none, within timeout, if that isn't zero, or the client is ended.
-func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout time.Duration) (string, error) {
+// has none, within timeout, if that isn't zero, or the client is ended. If the output is
+// last, last itself is returned.
+func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout time.Duration, last string) (string, error) {
 	call := controlCalls.Get().(*controlCall) //nolint:forcetypeassert // only calls are pooled
 	call.remaining, call.out, call.failed, call.closed = len(commands), call.out[:0], call.failed[:0], false
 	call.deadline = time.Time{}
@@ -199,6 +200,11 @@ func (cc *controlConn) run(ctx context.Context, commands [][]string, timeout tim
 		return "", errControlClosed
 	case len(call.failed) > 0:
 		return "", &controlError{msg: strings.Join(call.failed, "\n")}
+	}
+	// To keep allocations down on long runs: a poll which finds nothing new gets the
+	// last output back, not a copy of it. The comparison makes no string.
+	if string(call.out) == last {
+		return last, nil
 	}
 	return string(call.out), nil
 }
@@ -355,9 +361,9 @@ func appendControlArg(dst []byte, arg string) []byte {
 	return append(dst, '\'')
 }
 
-// splitCommands splits a command line of tmux commands separated by ; arguments.
-func splitCommands(args []string) [][]string {
-	var commands [][]string
+// splitCommands splits a command line of tmux commands separated by ; arguments,
+// appending them to commands.
+func splitCommands(commands [][]string, args []string) [][]string {
 	start := 0
 	for i, arg := range args {
 		if arg == ";" {
@@ -372,11 +378,45 @@ func splitCommands(args []string) [][]string {
 // connection.
 func controllable(commands [][]string) bool {
 	for _, cmd := range commands {
-		if len(cmd) == 0 || !controlCommands[cmd[0]] {
+		if len(cmd) == 0 {
+			return false
+		}
+		if cmd[0] == "display-message" {
+			if !targetedPrint(cmd[1:]) {
+				return false
+			}
+			continue
+		}
+		if !controlCommands[cmd[0]] {
 			return false
 		}
 	}
 	return true
+}
+
+// targetedPrint reports whether display-message arguments print, with -p, about a target
+// named with -t. Only then is it sent through the control connection: without a target it
+// would print about the control client's own session. ServerVersion's, which has none,
+// mustn't be either, as starting a control connection asks it.
+func targetedPrint(args []string) bool {
+	var print, target bool
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "-p":
+			print = true
+		case "-t":
+			target = i+1 < len(args)
+			i++
+		default:
+			if !strings.HasPrefix(args[i], "-") {
+				// The message: the options are over.
+				return print && target
+			}
+			// Other options, as -c or -d, or a combined form: not sent.
+			return false
+		}
+	}
+	return print && target
 }
 
 // supportsControl reports whether a tmux version, as ServerVersion returns it, can attach
@@ -508,8 +548,11 @@ func (c *Client) startControl(ctx context.Context, session string) (*controlConn
 
 // runControl runs args through the control connection, if they can be and there is one.
 // It reports whether it did.
-func (c *Client) runControl(ctx context.Context, args []string) (string, bool, error) {
-	commands := splitCommands(args)
+func (c *Client) runControl(ctx context.Context, args []string, last string) (string, bool, error) {
+	// To keep allocations down on long runs, the commands are split into space on the
+	// stack: polls have a few.
+	var buf [8][]string
+	commands := splitCommands(buf[:0], args)
 	if !controllable(commands) {
 		return "", false, nil
 	}
@@ -517,12 +560,15 @@ func (c *Client) runControl(ctx context.Context, args []string) (string, bool, e
 	if cc == nil {
 		return "", false, nil
 	}
-	out, err := cc.run(ctx, commands, c.Timeout)
-	var ce *controlError
+	out, err := cc.run(ctx, commands, c.Timeout, last)
+	// run returns a *controlError itself, never wrapped. It's asserted rather than found
+	// with errors.As, whose target would be allocated on every call, to keep allocations
+	// down on long runs.
+	ce, isControlError := err.(*controlError) //nolint:errorlint // never wrapped
 	switch {
 	case err == nil:
 		return out, true, nil
-	case errors.As(err, &ce):
+	case isControlError:
 		if isNoSessionError(ce.msg) {
 			return "", true, errors.Wrap(ErrNoSession, ce.msg)
 		}
