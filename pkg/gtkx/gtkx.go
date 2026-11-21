@@ -21,6 +21,9 @@ static void ttt_set_class(void *w, const char *class, int on) {
 static int ttt_row_selected(void *list, void *row) {
 	return gtk_list_box_get_selected_row(GTK_LIST_BOX(list)) == GTK_LIST_BOX_ROW(row);
 }
+// tttRunQueued is invoke.go's: it runs the functions queued for the main loop.
+extern gboolean tttRunQueued(gpointer data);
+static void ttt_schedule_queued(void) { g_idle_add(tttRunQueued, NULL); }
 static void ttt_set_source_pixbuf(uintptr_t cr, void *pb, double x, double y) {
 	gdk_cairo_set_source_pixbuf((cairo_t *)cr, GDK_PIXBUF(pb), x, y);
 }
@@ -226,3 +229,6 @@ func SetClass(w gtk.IWidget, class string, on bool) {
 func RowSelected(list *gtk.ListBox, row *gtk.ListBoxRow) bool {
 	return C.ttt_row_selected(unsafe.Pointer(list.GObject), unsafe.Pointer(row.GObject)) != 0
 }
+
+// scheduleQueued has the main loop run the functions Invoke queued, when it's next idle.
+func scheduleQueued() { C.ttt_schedule_queued() }

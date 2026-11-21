@@ -6,14 +6,15 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/gotk3/gotk3/glib"
 	"github.com/pkg/errors"
 	"go.uber.org/zap"
 	"go.yaml.in/yaml/v4"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/askpass"
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 	"github.com/wrouesnel/tmux-tabbed-terminal/version"
 )
@@ -102,6 +103,17 @@ type Host struct {
 
 	kick   chan struct{}
 	cancel context.CancelFunc
+
+	// result is the poller's latest result, for the main loop to take: pending is set
+	// while it's waiting. A result not taken yet is replaced by the next. It's handed over
+	// this way, with one function to take it made once, to keep allocations down on long
+	// runs: a closure queued for each poll was garbage several times a second.
+	result struct {
+		sync.Mutex
+		snap    *tmux.Snapshot
+		err     error
+		pending bool
+	}
 }
 
 func newHost(name string, cfg HostConfig, client *tmux.Client) *Host {
@@ -234,7 +246,7 @@ func runAsync[T any](a *App, fn func(ctx context.Context) (T, error), then func(
 		ctx, cancel := a.commandContext()
 		defer cancel()
 		result, err := fn(ctx)
-		glib.IdleAdd(func() { then(result, err) })
+		gtkx.Invoke(func() { then(result, err) })
 	}()
 }
 
@@ -249,6 +261,13 @@ func (a *App) pollHost(ctx context.Context, h *Host) {
 	defer h.client.Close()
 	var last time.Time
 	var lastErr string
+	apply := func() {
+		h.result.Lock()
+		snap, err := h.result.snap, h.result.err
+		h.result.snap, h.result.err, h.result.pending = nil, nil, false
+		h.result.Unlock()
+		a.applySnapshot(h, snap, err)
+	}
 	// wait holds polls asked for too soon after the last. It's one timer, reset each
 	// time, rather than one made by time.After for each, to keep allocations down on
 	// long runs.
@@ -272,7 +291,14 @@ func (a *App) pollHost(ctx context.Context, h *Host) {
 		} else {
 			lastErr = ""
 		}
-		glib.IdleAdd(func() { a.applySnapshot(h, snap, err) })
+		h.result.Lock()
+		h.result.snap, h.result.err = snap, err
+		queue := !h.result.pending
+		h.result.pending = true
+		h.result.Unlock()
+		if queue {
+			gtkx.Invoke(apply)
+		}
 
 		select {
 		case <-ctx.Done():
