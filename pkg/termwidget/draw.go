@@ -67,20 +67,20 @@ func (t *Terminal) SetColors(fg, bg Color, palette []Color) {
 	t.theme.palette = xtermPalette()
 	copy(t.theme.palette[:], palette)
 	t.applyThemeToEmulator()
-	t.QueueDraw()
+	t.redrawAll()
 }
 
 // SetCursorColors sets the cursor color and the color of text under it. A nil color
 // restores the default, which is the reverse of the text.
 func (t *Terminal) SetCursorColors(cursor, cursorFg *Color) {
 	t.theme.cursor, t.theme.cursorFg = cursor, cursorFg
-	t.QueueDraw()
+	t.redrawAll()
 }
 
 // SetBoldIsBright sets whether bold text uses the bright palette colors.
 func (t *Terminal) SetBoldIsBright(b bool) {
 	t.theme.boldBright = b
-	t.QueueDraw()
+	t.redrawAll()
 }
 
 func (t *Terminal) applyThemeToEmulator() {
@@ -197,104 +197,105 @@ func (t *Terminal) loadFonts() {
 		t.setMinimumSize()
 	}
 	t.fitToAllocation()
-	t.QueueDraw()
+	t.redrawAll()
 }
 
-// draw draws the screen: the rows from clipTop to clipBottom, as cairo's clip extents
-// give them.
-//
-//nolint:funlen,cyclop // one pass over the screen
+// draw draws the screen: it paints the backing, rendering the rows that changed, then the
+// cursor over it. Before the widget has a window to make a backing like, it draws the
+// rows from clipTop to clipBottom, as cairo's clip extents give them, directly.
 func (t *Terminal) draw(cr *cairo.Context, clipTop, clipBottom float64) {
-	f := &t.fonts
 	cols, rows := t.emu.Size()
-	setColor := func(c Color) { cr.SetSourceRGBA(c.R, c.G, c.B, c.A) }
-	setColor(t.theme.bg)
-	cr.Paint()
-
-	// One layout is kept, and brought up to date with each context: pango's makes a new
-	// one each time, which gotk3 never frees.
-	if t.layout == nil {
-		t.layout = pango.CairoCreateLayout(cr)
+	if b := &t.back; b.ensure(t) {
+		b.render(t)
+		cr.SetSourceSurface(b.surface, 0, 0)
+		cr.Paint()
 	} else {
-		pango.CairoUpdateLayout(cr, t.layout)
+		bg := t.theme.bg
+		cr.SetSourceRGBA(bg.R, bg.G, bg.B, bg.A)
+		cr.Paint()
+		layout := t.layoutFor(cr)
+		// Only the rows in the area being drawn, and one each side, whose text can
+		// overhang into it.
+		first := max(int(math.Floor(clipTop/t.fonts.cellH))-1, 0)
+		last := min(int(math.Ceil(clipBottom/t.fonts.cellH))+1, rows)
+		for y := first; y < last; y++ {
+			t.drawRow(cr, layout, y, cols)
+		}
 	}
-	layout := t.layout
 	cx, cy := t.emu.Cursor()
-	modes := t.emu.Modes()
-	focused := t.HasFocus()
-	// Only the rows in the area being drawn, and one each side, whose text can overhang
-	// into it.
-	first := max(int(math.Floor(clipTop/f.cellH))-1, 0)
-	last := min(int(math.Ceil(clipBottom/f.cellH))+1, rows)
+	if modes := t.emu.Modes(); modes.CursorVisible && cy < rows && cx < cols {
+		t.drawCursor(cr, t.layoutFor(cr), cx, cy, t.HasFocus(), modes.CursorShape)
+	}
+}
 
-	for y := first; y < last; y++ {
-		line := t.emu.Line(y)
-		top := float64(y) * f.cellH
-		// Backgrounds first, so that text overhanging its cell isn't painted over.
-		for x := 0; x < cols; x++ {
-			c := &line.Cells[x]
-			if c.Width == 0 {
-				continue
-			}
-			_, bg := t.cellColors(c.Style, t.sel.contains(x, y))
-			if bg != t.theme.bg {
-				setColor(bg)
-				cr.Rectangle(math.Floor(float64(x)*f.cellW), top, math.Ceil(float64(c.Width)*f.cellW), f.cellH)
-				cr.Fill()
-			}
+// drawRow draws row y of the screen: its backgrounds, then its text.
+//
+//nolint:funlen,cyclop // one pass over a row
+func (t *Terminal) drawRow(cr *cairo.Context, layout *pango.Layout, y, cols int) {
+	f := &t.fonts
+	setColor := func(c Color) { cr.SetSourceRGBA(c.R, c.G, c.B, c.A) }
+	line := t.emu.Line(y)
+	top := float64(y) * f.cellH
+	// Backgrounds first, so that text overhanging its cell isn't painted over.
+	for x := 0; x < cols; x++ {
+		c := &line.Cells[x]
+		if c.Width == 0 {
+			continue
 		}
-		// Then text, in runs of ASCII cells of the same style, which a monospace font
-		// lays out on the grid. Other characters are placed in their cells one by one.
-		for x := 0; x < cols; {
-			c := &line.Cells[x]
-			if c.Width == 0 || (c.Rune == ' ' && c.Flags&(emulator.Underline|emulator.Strike) == 0) {
-				x++
-				continue
-			}
-			selected := t.sel.contains(x, y)
-			fg, _ := t.cellColors(c.Style, selected)
-			start := x
-			x += int(c.Width)
-			var text string
-			if isPlain(c) {
-				// A run is gathered in space kept between draws, and given to pango,
-				// which copies it, as a string over that space: the screen is drawn
-				// many times a second, and making a string per run, let alone per
-				// character, was most of what the application allocated.
-				run := append(t.runText[:0], byte(c.Rune))
-				for x < cols {
-					n := &line.Cells[x]
-					if !isPlain(n) || n.Style != c.Style || t.sel.contains(x, y) != selected {
-						break
-					}
-					run = append(run, byte(n.Rune))
-					x++
-				}
-				t.runText = run
-				text = unsafe.String(unsafe.SliceData(run), len(run))
-			} else {
-				text = c.Text()
-			}
-			left := float64(start) * f.cellW
-			setColor(fg)
-			layout.SetFontDescription(f.styled(c.Flags))
-			layout.SetText(text, -1)
-			cr.MoveTo(left, top)
-			pango.CairoShowLayout(cr, layout)
-			width := float64(x-start) * f.cellW
-			if c.Flags&emulator.Underline != 0 || c.Link != 0 && c.Link == t.matches.hoverLink {
-				cr.Rectangle(left, top+f.cellH-2, width, 1)
-				cr.Fill()
-			}
-			if c.Flags&emulator.Strike != 0 {
-				cr.Rectangle(left, top+math.Floor(f.cellH/2), width, 1) //nolint:mnd // the middle
-				cr.Fill()
-			}
+		_, bg := t.cellColors(c.Style, t.sel.contains(x, y))
+		if bg != t.theme.bg {
+			setColor(bg)
+			cr.Rectangle(math.Floor(float64(x)*f.cellW), top, math.Ceil(float64(c.Width)*f.cellW), f.cellH)
+			cr.Fill()
 		}
 	}
-
-	if modes.CursorVisible && cy < rows && cx < cols {
-		t.drawCursor(cr, layout, cx, cy, focused, modes.CursorShape)
+	// Then text, in runs of ASCII cells of the same style, which a monospace font
+	// lays out on the grid. Other characters are placed in their cells one by one.
+	for x := 0; x < cols; {
+		c := &line.Cells[x]
+		if c.Width == 0 || (c.Rune == ' ' && c.Flags&(emulator.Underline|emulator.Strike) == 0) {
+			x++
+			continue
+		}
+		selected := t.sel.contains(x, y)
+		fg, _ := t.cellColors(c.Style, selected)
+		start := x
+		x += int(c.Width)
+		var text string
+		if isPlain(c) {
+			// A run is gathered in space kept between draws, and given to pango,
+			// which copies it, as a string over that space: the screen is drawn
+			// many times a second, and making a string per run, let alone per
+			// character, was most of what the application allocated.
+			run := append(t.runText[:0], byte(c.Rune))
+			for x < cols {
+				n := &line.Cells[x]
+				if !isPlain(n) || n.Style != c.Style || t.sel.contains(x, y) != selected {
+					break
+				}
+				run = append(run, byte(n.Rune))
+				x++
+			}
+			t.runText = run
+			text = unsafe.String(unsafe.SliceData(run), len(run))
+		} else {
+			text = c.Text()
+		}
+		left := float64(start) * f.cellW
+		setColor(fg)
+		layout.SetFontDescription(f.styled(c.Flags))
+		layout.SetText(text, -1)
+		cr.MoveTo(left, top)
+		pango.CairoShowLayout(cr, layout)
+		width := float64(x-start) * f.cellW
+		if c.Flags&emulator.Underline != 0 || c.Link != 0 && c.Link == t.matches.hoverLink {
+			cr.Rectangle(left, top+f.cellH-2, width, 1)
+			cr.Fill()
+		}
+		if c.Flags&emulator.Strike != 0 {
+			cr.Rectangle(left, top+math.Floor(f.cellH/2), width, 1) //nolint:mnd // the middle
+			cr.Fill()
+		}
 	}
 }
 

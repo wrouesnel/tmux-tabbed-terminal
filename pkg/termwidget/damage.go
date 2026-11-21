@@ -19,13 +19,28 @@ type damage struct {
 	dirty []bool
 }
 
-// queueChanges queues drawing the rows that changed since it was last called.
+// queueChanges queues drawing the rows that changed since it was last called. When the
+// screen scrolled, what the backing shows is moved first, with the rows' hashes, so that
+// only the rows which then differ are rendered again.
+//
+//nolint:funlen,cyclop // one pass over the screen
 func (t *Terminal) queueChanges() {
 	cols, rows := t.emu.Size()
 	d := &t.damage
+	b := &t.back
 	full := len(d.rows) != rows
 	if full {
 		d.rows = make([]uint64, rows)
+		b.invalidate()
+	}
+	// The selection is drawn where it is on the screen, not with the text, so what's
+	// drawn isn't moved while there is one.
+	top, bottom, n, scrolled := t.emu.TakeScroll()
+	scrolled = scrolled && !full && !t.sel.active() && bottom < rows &&
+		b.scroll(t.fonts.cellH, top, bottom, n)
+	if scrolled {
+		// Hashes no row has, for the rows moved in.
+		shiftRows(d.rows[top:bottom+1], n, 0)
 	}
 	// The rows changed are marked in space kept between calls: output is handed over many
 	// times a second.
@@ -38,9 +53,11 @@ func (t *Terminal) queueChanges() {
 		h := hashLine(t.emu.Line(y))
 		if h != d.rows[y] {
 			d.rows[y], dirty[y] = h, true
+			b.mark(y, rows)
 		}
 	}
 
+	// The cursor is drawn over the backing: moving it only needs its rows drawn.
 	cx, cy := t.emu.Cursor()
 	modes := t.emu.Modes()
 	if !modes.CursorVisible || cy >= rows || cx >= cols {
@@ -55,11 +72,12 @@ func (t *Terminal) queueChanges() {
 		d.cursor, d.cursorCol, d.cursorShape = cy, cx, modes.CursorShape
 	}
 
-	if full {
+	if full || scrolled {
 		t.QueueDraw()
 		return
 	}
-	// Runs of changed rows, the width of the widget.
+	// Runs of changed rows, with a row each side for text overhanging them, the width of
+	// the widget.
 	width := t.GetAllocatedWidth()
 	for y := 0; y < rows; {
 		if !dirty[y] {
@@ -70,10 +88,18 @@ func (t *Terminal) queueChanges() {
 		for y < rows && dirty[y] {
 			y++
 		}
-		top := int(math.Floor(float64(start) * t.fonts.cellH))
-		bottom := int(math.Ceil(float64(y) * t.fonts.cellH))
+		first, end := max(start-1, 0), min(y+1, rows)
+		top := int(math.Floor(float64(first) * t.fonts.cellH))
+		bottom := int(math.Ceil(float64(end) * t.fonts.cellH))
 		t.QueueDrawArea(0, top, width, bottom-top)
 	}
+}
+
+// redrawAll renders and draws the whole screen again, for a change to how every row is
+// drawn, such as its colors, its font or the selection.
+func (t *Terminal) redrawAll() {
+	t.back.invalidate()
+	t.QueueDraw()
 }
 
 // hashLine returns an FNV-1a hash of what a line shows.

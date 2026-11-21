@@ -90,7 +90,7 @@ func (t *Terminal) keyPress(_ interface{}, ev *gdk.Event) bool {
 func (t *Terminal) typed(b []byte) {
 	if t.sel.active() {
 		t.sel.clear()
-		t.QueueDraw()
+		t.redrawAll()
 	}
 	t.write(b)
 }
@@ -125,7 +125,7 @@ func (t *Terminal) buttonPress(_ interface{}, ev *gdk.Event) bool {
 	switch b.Button() {
 	case gdk.BUTTON_PRIMARY:
 		t.sel.start(col, row)
-		t.QueueDraw()
+		t.redrawAll()
 	case gdk.BUTTON_MIDDLE:
 		t.pasteFrom(gdk.SELECTION_PRIMARY)
 	}
@@ -148,7 +148,7 @@ func (t *Terminal) buttonRelease(_ interface{}, ev *gdk.Event) bool {
 		} else if cb, err := gtk.ClipboardGet(gdk.SELECTION_PRIMARY); err == nil {
 			cb.SetText(t.selectedText())
 		}
-		t.QueueDraw()
+		t.redrawAll()
 	}
 	return true
 }
@@ -167,7 +167,7 @@ func (t *Terminal) motion(_ interface{}, ev *gdk.Event) bool {
 	}
 	if t.sel.dragging {
 		t.sel.extend(col, row)
-		t.QueueDraw()
+		t.redrawAll()
 	}
 	return false
 }

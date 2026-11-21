@@ -84,6 +84,8 @@ type Emulator struct {
 	parser *vtparser.Parser
 	// oscText is where an OSC sequence's text is put together, kept between them.
 	oscText []byte
+	// scroll is how the screen has scrolled since TakeScroll was last called.
+	scroll scrollRecord
 
 	// Respond receives replies to the program's queries, to be written to it.
 	Respond func([]byte)
@@ -113,6 +115,7 @@ func (e *Emulator) reset() {
 	e.primary = buffer{lines: e.blankLines(e.rows)}
 	e.alt = buffer{lines: e.blankLines(e.rows)}
 	e.altActive = false
+	e.scroll.mixed = true
 	e.cur = cursor{}
 	e.top, e.bottom = 0, e.rows-1
 	e.modes = Modes{AutoWrap: true, CursorVisible: true}
@@ -186,6 +189,7 @@ func (e *Emulator) respond(s string) {
 // right, and rows leave or join at the bottom, or at the top when the cursor would
 // otherwise fall off the screen.
 func (e *Emulator) Resize(cols, rows int) {
+	e.scroll.mixed = true
 	cols, rows = max(cols, 1), max(rows, 1)
 	if cols == e.cols && rows == e.rows {
 		return
@@ -417,6 +421,7 @@ func (e *Emulator) scrollRegion(top, bottom, n int) {
 	if n < -height {
 		n = -height
 	}
+	e.scroll.add(top, bottom, n)
 	// The lines scrolled off are blanked and reused for those scrolled in: a busy
 	// program scrolls many times a second, and a new line for each was most of what the
 	// emulator allocated.
@@ -437,6 +442,40 @@ func (e *Emulator) scrollRegion(top, bottom, n int) {
 			e.blankLine(&lines[i])
 		}
 	}
+}
+
+// scrollRecord is how the screen has scrolled: rows top to bottom, by n lines up, or
+// down if negative. mixed is set when more than one region scrolled, or the screen was
+// replaced, so that no one shift describes it.
+type scrollRecord struct {
+	top, bottom, n int
+	scrolled       bool
+	mixed          bool
+}
+
+func (r *scrollRecord) add(top, bottom, n int) {
+	switch {
+	case n == 0 || r.mixed:
+	case !r.scrolled:
+		*r = scrollRecord{top: top, bottom: bottom, n: n, scrolled: true}
+	case r.top == top && r.bottom == bottom:
+		r.n += n
+	default:
+		r.mixed = true
+	}
+}
+
+// TakeScroll returns how the screen scrolled since it was last called: rows top to
+// bottom moved up n lines, or down if n is negative. ok is false if it didn't scroll, or
+// scrolled in ways no one such shift describes. A terminal widget can move what it drew
+// of the region by as much, and draw only the rows that then differ.
+func (e *Emulator) TakeScroll() (top, bottom, n int, ok bool) {
+	r := e.scroll
+	e.scroll = scrollRecord{}
+	if !r.scrolled || r.mixed || r.n == 0 {
+		return 0, 0, 0, false
+	}
+	return r.top, r.bottom, r.n, true
 }
 
 // blankLine erases a line in the current style, in place, if it's as wide as the screen.
@@ -504,12 +543,14 @@ func (e *Emulator) setAltScreen(on, saveCursor, clear bool) {
 			e.saveCursor()
 		}
 		e.altActive = true
+		e.scroll.mixed = true
 		if clear {
 			e.alt.lines = e.blankLines(e.rows)
 		}
 		return
 	}
 	e.altActive = false
+	e.scroll.mixed = true
 	if saveCursor {
 		e.restoreCursor()
 	}

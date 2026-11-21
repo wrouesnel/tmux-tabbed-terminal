@@ -51,6 +51,8 @@ type Terminal struct {
 	// runText is where draw gathers a run of text, and layout the layout it draws with.
 	runText []byte
 	layout  *pango.Layout
+	// back is the screen as rendered.
+	back backing
 	// generation counts started programs, so that output a replaced one wrote late is
 	// dropped.
 	generation int
@@ -256,7 +258,7 @@ func (t *Terminal) resize(cols, rows int) {
 	if t.pty != nil {
 		_ = t.pty.Resize(cols, rows)
 	}
-	t.QueueDraw()
+	t.redrawAll()
 }
 
 // fitToAllocation sizes the terminal to as many cells as fit in the widget.
@@ -296,6 +298,7 @@ func (t *Terminal) bell() {
 
 func (t *Terminal) focusChanged(focused bool) {
 	t.write(t.emu.EncodeFocus(focused))
+	// Focus only changes how the cursor is drawn, over the backing.
 	t.QueueDraw()
 }
 

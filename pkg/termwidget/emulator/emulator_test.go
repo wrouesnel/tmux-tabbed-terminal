@@ -335,3 +335,31 @@ func TestStyledOutputDoesntAllocate(t *testing.T) {
 		t.Errorf("styled output allocated %v objects", allocs)
 	}
 }
+
+func TestTakeScroll(t *testing.T) {
+	e := New(10, 5)
+	if _, _, _, ok := e.TakeScroll(); ok {
+		t.Error("a new screen scrolled")
+	}
+	_, _ = e.Write([]byte("\x1b[5;1H\n\n\n"))
+	if top, bottom, n, ok := e.TakeScroll(); !ok || top != 0 || bottom != 4 || n != 3 {
+		t.Errorf("full screen: %d-%d by %d, %v", top, bottom, n, ok)
+	}
+	if _, _, _, ok := e.TakeScroll(); ok {
+		t.Error("taking it twice")
+	}
+	// A region, as tmux keeps for its status line, up two and down one.
+	_, _ = e.Write([]byte("\x1b[1;4r\x1b[4;1H\n\n\x1b[1;1H\x1bM"))
+	if top, bottom, n, ok := e.TakeScroll(); !ok || top != 0 || bottom != 3 || n != 1 {
+		t.Errorf("region: %d-%d by %d, %v", top, bottom, n, ok)
+	}
+	// Two regions: no one shift.
+	_, _ = e.Write([]byte("\x1b[4;1H\n\x1b[r\x1b[5;1H\n"))
+	if _, _, _, ok := e.TakeScroll(); ok {
+		t.Error("two regions made one shift")
+	}
+	_, _ = e.Write([]byte("\x1b[5;1H\n\x1b[?1049h"))
+	if _, _, _, ok := e.TakeScroll(); ok {
+		t.Error("switching screens made a shift")
+	}
+}

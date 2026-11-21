@@ -118,6 +118,6 @@ func (m *matcher) hover(t *Terminal, x, y float64) {
 	}
 	if id != m.hoverLink {
 		m.hoverLink = id
-		t.QueueDraw()
+		t.redrawAll()
 	}
 }
