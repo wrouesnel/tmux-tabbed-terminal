@@ -4,8 +4,9 @@ import (
 	"math"
 	"time"
 
-	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
+
+	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/gtkx"
 )
 
 const (
@@ -23,7 +24,7 @@ const (
 // while one is shown.
 type pulser struct {
 	shown map[*gtk.Widget]struct{}
-	timer glib.SourceHandle
+	timer gtkx.Timer
 	step  int
 }
 
@@ -64,7 +65,9 @@ func (p *pulser) start() {
 	if p.timer != 0 {
 		return
 	}
-	p.timer = glib.TimeoutAdd(uint((pulsePeriod / pulseSteps).Milliseconds()), func() bool {
+	// gtkx's timer, unlike glib's, allocates nothing as it ticks, several times a
+	// second for as long as a session is busy.
+	p.timer = gtkx.TimeoutAdd(pulsePeriod/pulseSteps, func() bool {
 		p.step = (p.step + 1) % pulseSteps
 		opacity := p.opacity()
 		for w := range p.shown {
@@ -76,7 +79,7 @@ func (p *pulser) start() {
 
 func (p *pulser) stop() {
 	if p.timer != 0 {
-		glib.SourceRemove(p.timer)
+		p.timer.Remove()
 		p.timer = 0
 	}
 }

@@ -24,6 +24,16 @@ static int ttt_row_selected(void *list, void *row) {
 // tttRunQueued is invoke.go's: it runs the functions queued for the main loop.
 extern gboolean tttRunQueued(gpointer data);
 static void ttt_schedule_queued(void) { g_idle_add(tttRunQueued, NULL); }
+// tttTimeoutTick and tttTimeoutDone are timeout.go's: they run a timer's function, and
+// forget it once its source is gone.
+extern gboolean tttTimeoutTick(uintptr_t handle);
+extern void tttTimeoutDone(uintptr_t handle);
+static gboolean ttt_timeout_tick(gpointer data) { return tttTimeoutTick((uintptr_t)data); }
+static void ttt_timeout_done(gpointer data) { tttTimeoutDone((uintptr_t)data); }
+static guint ttt_timeout_add(guint ms, uintptr_t handle) {
+	return g_timeout_add_full(G_PRIORITY_DEFAULT, ms, ttt_timeout_tick, (gpointer)handle, ttt_timeout_done);
+}
+static void ttt_source_remove(guint id) { g_source_remove(id); }
 static void ttt_set_source_pixbuf(uintptr_t cr, void *pb, double x, double y) {
 	gdk_cairo_set_source_pixbuf((cairo_t *)cr, GDK_PIXBUF(pb), x, y);
 }
@@ -232,3 +242,11 @@ func RowSelected(list *gtk.ListBox, row *gtk.ListBoxRow) bool {
 
 // scheduleQueued has the main loop run the functions Invoke queued, when it's next idle.
 func scheduleQueued() { C.ttt_schedule_queued() }
+
+// addTimeout adds a timeout source calling the function handle holds every ms.
+func addTimeout(ms uint, handle uintptr) uint {
+	return uint(C.ttt_timeout_add(C.guint(ms), C.uintptr_t(handle)))
+}
+
+// removeSource removes a source from the main loop.
+func removeSource(id uint) { C.ttt_source_remove(C.guint(id)) }
