@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"time"
 
 	"github.com/wrouesnel/ctxstdio"
 	"github.com/wrouesnel/kongutil"
@@ -32,6 +33,9 @@ type CLIConfig struct {
 
 	CpuProfile bool `help:"Enable CPU Profiling"`
 	MemProfile bool `help:"Enable Memory Profiling"`
+	// MemProfileEvery writes a memory profile at each interval, for comparing two of
+	// them: Windows has no signal to ask for one.
+	MemProfileEvery time.Duration `help:"Write a memory profile at this interval, as well as on SIGUSR1 (0 for never)"`
 
 	CpuProfileOutputPath string `default:"${application_name}.cpu.pprof"      help:"CPU Profiling Output Path"`
 	MemProfileOutputPath string `default:"${application_name}.mem.pprof"      help:"Memory Profiling Output Path"`
@@ -230,6 +234,21 @@ func Entrypoint(ctx context.Context, args []string) (exitCode int) {
 		}
 		logger.Debug("Signal handling channel closed")
 	}()
+
+	if cli.MemProfileEvery > 0 {
+		go func() {
+			ticker := time.NewTicker(cli.MemProfileEvery)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-sigCtx.Done():
+					return
+				case <-ticker.C:
+					collectMemoryProfile()
+				}
+			}
+		}()
+	}
 
 	// Emit deferred logs
 	for _, line := range deferredLogs {
