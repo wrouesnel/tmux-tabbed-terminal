@@ -61,8 +61,10 @@ type Pane struct {
 	hover     *hoverer
 	hoverText string
 	hoverSpan cellSpan
-	// shelfTimer waits to read the session for files for the shelf.
-	shelfTimer glib.SourceHandle
+	// shelfTimer waits to read the session for files for the shelf, while shelfWaiting
+	// is set.
+	shelfTimer   *time.Timer
+	shelfWaiting bool
 	// file shows a file in place of the terminal, when the pane is a preview, or is nil.
 	file *filePreview
 	// dropZone highlights where a dragged session would land.
@@ -684,10 +686,10 @@ func (p *Pane) detach() {
 // close hangs up the pane's client. The session keeps running.
 func (p *Pane) close() {
 	p.closed = true
-	if p.shelfTimer != 0 {
-		glib.SourceRemove(p.shelfTimer)
-		p.shelfTimer = 0
+	if p.shelfTimer != nil {
+		p.shelfTimer.Stop()
 	}
+	p.shelfWaiting = false
 	p.hidePreview()
 	p.closeFile()
 	if p.client != nil {

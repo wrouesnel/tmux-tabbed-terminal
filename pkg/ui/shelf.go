@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"net/url"
@@ -399,46 +400,72 @@ type textLink struct {
 // left out, such as the path part of a URL.
 func linksInLines(lines []string) []textLink {
 	var links []textLink
+	for _, line := range lines {
+		links = appendLinks(links, []byte(line))
+	}
+	return links
+}
+
+// appendLinks appends the links in a line, in the order they appear, to links. Only the
+// links' text is copied out of line.
+//
+// The scan runs on new output of busy panes, over every line on screen: to keep
+// allocations down on long runs, lines are only searched for links they could hold, and
+// the matches of each are gathered in space kept on the stack.
+func appendLinks(links []textLink, line []byte) []textLink {
 	type found struct {
 		start, end int
 		kind       linkKind
 	}
-	// The scan runs on new output of busy panes, over every line on screen: to keep
-	// allocations down on long runs, lines are only searched for links they could hold,
-	// and the matches of each are gathered in space kept on the stack.
 	var takenBuf [16]found
-	for _, line := range lines {
-		taken := takenBuf[:0]
-		for i, re := range linkRegexps {
-			if !strings.Contains(line, linkPatterns[i].needs) {
-				continue
-			}
-			for _, m := range re.FindAllStringIndex(line, -1) {
-				if !slices.ContainsFunc(taken, func(t found) bool { return m[0] < t.end && t.start < m[1] }) {
-					taken = append(taken, found{m[0], m[1], linkPatterns[i].kind})
-				}
+	taken := takenBuf[:0]
+	for i, re := range linkRegexps {
+		if !bytes.Contains(line, linkNeeds[i]) {
+			continue
+		}
+		for _, m := range re.FindAllIndex(line, -1) {
+			if !slices.ContainsFunc(taken, func(t found) bool { return m[0] < t.end && t.start < m[1] }) {
+				taken = append(taken, found{m[0], m[1], linkPatterns[i].kind})
 			}
 		}
-		slices.SortFunc(taken, func(a, b found) int { return cmp.Compare(a.start, b.start) })
-		for _, t := range taken {
-			links = append(links, textLink{text: line[t.start:t.end], kind: t.kind})
-		}
+	}
+	slices.SortFunc(taken, func(a, b found) int { return cmp.Compare(a.start, b.start) })
+	for _, t := range taken {
+		links = append(links, textLink{text: string(line[t.start:t.end]), kind: t.kind})
 	}
 	return links
 }
+
+// linkNeeds is each link pattern's needs, as bytes.
+//
+//nolint:gochecknoglobals // made once from linkPatterns
+var linkNeeds = func() [][]byte {
+	needs := make([][]byte, len(linkPatterns))
+	for i, p := range linkPatterns {
+		needs[i] = []byte(p.needs)
+	}
+	return needs
+}()
 
 // queueShelfScan reads the pane's session for files to put on the shelf, shelfScanDelay
 // from now, unless a read is already waiting. Nothing is read while it's not needed: the
 // window's shelf is hidden and doesn't show itself for new files.
 func (p *Pane) queueShelfScan() {
-	if p.closed || !p.running || p.file != nil || p.shelfTimer != 0 || !p.win.wantsShelfScan() {
+	if p.closed || !p.running || p.file != nil || p.shelfWaiting || !p.win.wantsShelfScan() {
 		return
 	}
-	p.shelfTimer = glib.TimeoutAdd(uint(shelfScanDelay/time.Millisecond), func() bool {
-		p.shelfTimer = 0
-		p.scanForShelf()
-		return false
-	})
+	p.shelfWaiting = true
+	// One timer per pane, reset for each read, to keep allocations down on long runs:
+	// busy panes queue a read every couple of seconds.
+	if p.shelfTimer == nil {
+		scan := func() {
+			p.shelfWaiting = false
+			p.scanForShelf()
+		}
+		p.shelfTimer = time.AfterFunc(shelfScanDelay, func() { gtkx.Invoke(scan) })
+		return
+	}
+	p.shelfTimer.Reset(shelfScanDelay)
 }
 
 // scanForShelf reads the lines of the panes of the active tmux window of the pane's
@@ -464,31 +491,43 @@ func (p *Pane) scanForShelf() {
 		history, sf.scanned = shelfHistory, true
 	}
 	window, host, remote := aw.ID, p.hostName, p.hostName != LocalHost
-	runAsync(p.win.app, func(ctx context.Context) ([]string, error) {
-		layout, err := h.client.WindowLayout(ctx, window)
-		if err != nil {
-			return nil, err
-		}
-		var files []string
-		for _, pane := range layout.Panes {
-			lines, err := h.client.PaneLinesFrom(ctx, pane.ID, history)
+	// A window of one pane is the snapshot's to read: only one split into panes needs
+	// asking for them, which, for the reads busy panes queue every couple of seconds,
+	// keeps allocations down on long runs.
+	single := aw.Panes <= 1 && aw.PaneID != ""
+	only := tmux.Pane{ID: aw.PaneID, Path: aw.Path}
+	app := p.win.app
+	go func() {
+		// The client's Timeout bounds each command.
+		ctx := app.ctx
+		panes := []tmux.Pane{only}
+		if !single {
+			layout, err := h.client.WindowLayout(ctx, window)
 			if err != nil {
-				return nil, err
+				app.log.Debug("Could not read the session for the shelf", zap.Error(err))
+				return
 			}
-			for _, l := range linksInLines(lines) {
+			panes = layout.Panes
+		}
+		var links []textLink
+		var files []string
+		for _, pane := range panes {
+			links = links[:0]
+			err := h.client.EachPaneLine(ctx, pane.ID, history, func(line []byte) {
+				links = appendLinks(links, line)
+			})
+			if err != nil {
+				app.log.Debug("Could not read the session for the shelf", zap.Error(err))
+				return
+			}
+			for _, l := range links {
 				if f := resolveLink(vte.Match{Text: l.text}, l.kind, pane.Path, remote).file; f != "" {
 					files = append(files, f)
 				}
 			}
 		}
-		return files, nil
-	}, func(files []string, err error) {
-		if err != nil {
-			p.win.app.log.Debug("Could not read the session for the shelf", zap.Error(err))
-			return
-		}
-		store.notice(key, host, files)
-	})
+		gtkx.Invoke(func() { store.notice(key, host, files) })
+	}()
 }
 
 // When the shelf shows: popping up when the session mentions a new file, always, even

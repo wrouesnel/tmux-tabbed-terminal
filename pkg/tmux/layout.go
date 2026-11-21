@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"bytes"
 	"context"
 	"strconv"
 	"strings"
@@ -124,4 +125,34 @@ func (c *Client) PaneLinesFrom(ctx context.Context, pane string, history int) ([
 		return nil, err
 	}
 	return strings.Split(strings.TrimSuffix(out, "\n"), "\n"), nil
+}
+
+// EachPaneLine is PaneLinesFrom, giving each line to fn rather than returning them. A line
+// is only good until fn returns. It's for reading a pane over and over, as the shelf does
+// as panes print: to keep allocations down on long runs, the lines are read where the
+// output is, without copying it.
+func (c *Client) EachPaneLine(ctx context.Context, pane string, history int, fn func(line []byte)) error {
+	version, err := c.ServerVersion(ctx)
+	if err != nil {
+		return err
+	}
+	if CaptureCrashes(version) {
+		return errors.Wrap(ErrCaptureCrashes, "tmux "+version)
+	}
+	var buf [7]string
+	args := append(buf[:0], "capture-pane", "-p", "-J", "-t", pane)
+	if history > 0 {
+		args = append(args, "-S", strconv.Itoa(-history))
+	}
+	_, err = c.runUsing(ctx, func(out []byte) {
+		for rest := bytes.TrimSuffix(out, newline); ; {
+			line, after, found := bytes.Cut(rest, newline)
+			fn(line)
+			if !found {
+				return
+			}
+			rest = after
+		}
+	}, args...)
+	return err
 }

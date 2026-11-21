@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -794,11 +795,32 @@ func TestPaneLines(t *testing.T) {
 			t.Fatal(err)
 		}
 		if strings.Contains(strings.Join(lines, "\n"), long) {
-			return
+			break
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	t.Fatalf("no joined line in %q", lines)
+	if !strings.Contains(strings.Join(lines, "\n"), long) {
+		t.Fatalf("no joined line in %q", lines)
+	}
+	// EachPaneLine reads the same lines, with and without a control client.
+	for _, control := range []bool{false, true} {
+		c.SetControl(control)
+		if _, err := c.Snapshot(ctx); err != nil {
+			t.Fatal(err)
+		}
+		var each []string
+		err := c.EachPaneLine(ctx, layout.Panes[1].ID, 0, func(line []byte) { each = append(each, string(line)) })
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := c.PaneLines(ctx, layout.Panes[1].ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(each, want) {
+			t.Errorf("control %v: EachPaneLine read %q, PaneLines %q", control, each, want)
+		}
+	}
 }
 
 // TestDefaultShell sets the server's default shell as sessions and windows are made.
