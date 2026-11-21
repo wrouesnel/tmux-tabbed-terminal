@@ -15,6 +15,8 @@ type damage struct {
 	// cursor is the cursor's row, or -1 when it isn't shown, and cursorCol its column.
 	cursor, cursorCol int
 	cursorShape       emulator.CursorShape
+	// dirty marks the rows changed, kept between calls.
+	dirty []bool
 }
 
 // queueChanges queues drawing the rows that changed since it was last called.
@@ -25,7 +27,13 @@ func (t *Terminal) queueChanges() {
 	if full {
 		d.rows = make([]uint64, rows)
 	}
-	dirty := make([]bool, rows)
+	// The rows changed are marked in space kept between calls: output is handed over many
+	// times a second.
+	if cap(d.dirty) < rows {
+		d.dirty = make([]bool, rows)
+	}
+	dirty := d.dirty[:rows]
+	clear(dirty)
 	for y := range rows {
 		h := hashLine(t.emu.Line(y))
 		if h != d.rows[y] {

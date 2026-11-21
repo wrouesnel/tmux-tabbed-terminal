@@ -17,6 +17,7 @@ import (
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
+	"github.com/gotk3/gotk3/pango"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/termwidget/emulator"
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/termwidget/pty"
@@ -47,8 +48,9 @@ type Terminal struct {
 	// a second.
 	spare     []byte
 	flushFunc func()
-	// runText is where draw gathers a run of text.
+	// runText is where draw gathers a run of text, and layout the layout it draws with.
 	runText []byte
+	layout  *pango.Layout
 	// generation counts started programs, so that output a replaced one wrote late is
 	// dropped.
 	generation int
@@ -89,7 +91,7 @@ func New() (*Terminal, error) {
 		gdk.LEAVE_NOTIFY_MASK))
 	t.SetFont("Monospace 11")
 
-	t.Connect("draw", t.draw)
+	t.connectDraw()
 	t.Connect("size-allocate", func() {
 		t.fitToAllocation()
 		if t.sizeRequested {

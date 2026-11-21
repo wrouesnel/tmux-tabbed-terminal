@@ -200,23 +200,30 @@ func (t *Terminal) loadFonts() {
 	t.QueueDraw()
 }
 
-// draw draws the screen.
+// draw draws the screen: the rows from clipTop to clipBottom, as cairo's clip extents
+// give them.
 //
 //nolint:funlen,cyclop // one pass over the screen
-func (t *Terminal) draw(_ interface{}, cr *cairo.Context) bool {
+func (t *Terminal) draw(cr *cairo.Context, clipTop, clipBottom float64) {
 	f := &t.fonts
 	cols, rows := t.emu.Size()
 	setColor := func(c Color) { cr.SetSourceRGBA(c.R, c.G, c.B, c.A) }
 	setColor(t.theme.bg)
 	cr.Paint()
 
-	layout := pango.CairoCreateLayout(cr)
+	// One layout is kept, and brought up to date with each context: pango's makes a new
+	// one each time, which gotk3 never frees.
+	if t.layout == nil {
+		t.layout = pango.CairoCreateLayout(cr)
+	} else {
+		pango.CairoUpdateLayout(cr, t.layout)
+	}
+	layout := t.layout
 	cx, cy := t.emu.Cursor()
 	modes := t.emu.Modes()
 	focused := t.HasFocus()
 	// Only the rows in the area being drawn, and one each side, whose text can overhang
 	// into it.
-	_, clipTop, _, clipBottom := cr.ClipExtents()
 	first := max(int(math.Floor(clipTop/f.cellH))-1, 0)
 	last := min(int(math.Ceil(clipBottom/f.cellH))+1, rows)
 
@@ -289,7 +296,6 @@ func (t *Terminal) draw(_ interface{}, cr *cairo.Context) bool {
 	if modes.CursorVisible && cy < rows && cx < cols {
 		t.drawCursor(cr, layout, cx, cy, focused, modes.CursorShape)
 	}
-	return false
 }
 
 // isPlain reports whether a cell is a single ASCII character, which can be drawn in a run.
