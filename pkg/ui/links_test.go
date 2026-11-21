@@ -47,11 +47,19 @@ func TestLinkPatterns(t *testing.T) {
 		{linkRelative, "and/or w/o TCP/IP 10/22/2026 1/2.5 a/b README.md v1.2/3", []string{}},
 	}
 	patterns := map[linkKind]*regexp.Regexp{}
+	needs := map[linkKind]string{}
 	for _, p := range linkPatterns {
 		patterns[p.kind] = regexp.MustCompile("(?i)" + p.pattern)
+		needs[p.kind] = p.needs
 	}
 	for _, c := range cases {
 		got := patterns[c.kind].FindAllString(c.line, -1)
+		// A line is only searched for a pattern if it holds what every match does.
+		for _, m := range got {
+			if !strings.Contains(m, needs[c.kind]) {
+				t.Errorf("%q: match %q lacks %q, so a line of it wouldn't be searched", c.line, m, needs[c.kind])
+			}
+		}
 		if len(got) != len(c.want) {
 			t.Errorf("%q: got %q, want %q", c.line, got, c.want)
 			continue

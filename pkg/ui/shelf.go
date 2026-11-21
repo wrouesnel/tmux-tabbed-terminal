@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"context"
 	"net/url"
 	"os"
@@ -402,16 +403,23 @@ func linksInLines(lines []string) []textLink {
 		start, end int
 		kind       linkKind
 	}
+	// The scan runs on new output of busy panes, over every line on screen: to keep
+	// allocations down on long runs, lines are only searched for links they could hold,
+	// and the matches of each are gathered in space kept on the stack.
+	var takenBuf [16]found
 	for _, line := range lines {
-		var taken []found
+		taken := takenBuf[:0]
 		for i, re := range linkRegexps {
+			if !strings.Contains(line, linkPatterns[i].needs) {
+				continue
+			}
 			for _, m := range re.FindAllStringIndex(line, -1) {
 				if !slices.ContainsFunc(taken, func(t found) bool { return m[0] < t.end && t.start < m[1] }) {
 					taken = append(taken, found{m[0], m[1], linkPatterns[i].kind})
 				}
 			}
 		}
-		sort.Slice(taken, func(i, j int) bool { return taken[i].start < taken[j].start })
+		slices.SortFunc(taken, func(a, b found) int { return cmp.Compare(a.start, b.start) })
 		for _, t := range taken {
 			links = append(links, textLink{text: line[t.start:t.end], kind: t.kind})
 		}
