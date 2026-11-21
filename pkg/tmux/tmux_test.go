@@ -377,10 +377,14 @@ func TestParseSnapshotAllocations(t *testing.T) {
 			a, b = b, a
 		})
 	}
-	// What a poll makes doesn't grow with the sessions, nor with how many changed.
-	few, many := allocs(5, 1), allocs(100, 20)
-	if few != many || many > 5 {
-		t.Errorf("allocations: %v with 5 sessions, one changed; %v with 100, 20 changed", few, many)
+	// What a poll makes doesn't grow with the sessions, nor with how many changed. The
+	// usual numbers make the snapshot with its list of sessions, and the changed sessions
+	// with their windows: two objects, and here a third for the sessions' places, which
+	// the client keeps between polls. More are made apart: four.
+	few, usual, many := allocs(5, 1), allocs(30, 2), allocs(100, 20)
+	if few > 3 || usual > 3 || many > 4 {
+		t.Errorf("allocations: %v with 5 sessions, one changed; %v with 30, 2 changed; %v with 100, 20 changed",
+			few, usual, many)
 	}
 }
 

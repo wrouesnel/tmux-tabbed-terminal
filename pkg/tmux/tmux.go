@@ -612,7 +612,6 @@ func parseSnapshot(out []byte, prev *Snapshot) *Snapshot {
 // parseSnapshotInto is parseSnapshot, appending where the sessions' lines are to spans,
 // whose contents aren't needed.
 func parseSnapshotInto(out []byte, spans []sessionSpan, prev *Snapshot) *Snapshot {
-	snap := &Snapshot{out: out, spans: spans[:0]}
 	// Where the lines are, gathered first: room for the usual numbers is kept on the
 	// stack.
 	var (
@@ -702,17 +701,12 @@ func parseSnapshotInto(out []byte, spans []sessionSpan, prev *Snapshot) *Snapsho
 		plans = append(plans, plan)
 	}
 
-	if len(plans) > 0 {
-		snap.Sessions = make([]*Session, 0, len(plans))
-		if cap(snap.spans) < len(plans) {
-			snap.spans = make([]sessionSpan, 0, len(plans))
-		}
+	snap := newSnapshot(len(plans))
+	snap.out, snap.spans = out, spans[:0]
+	if cap(snap.spans) < len(plans) {
+		snap.spans = make([]sessionSpan, 0, len(plans))
 	}
-	made := make([]Session, changed)
-	var windows []Window
-	if changedWindows > 0 {
-		windows = make([]Window, 0, changedWindows)
-	}
+	made, windows := newSessions(changed, changedWindows)
 	for _, plan := range plans {
 		snap.spans = append(snap.spans, plan.span)
 		if plan.same(prev) {
@@ -756,6 +750,66 @@ func parseSnapshotInto(out []byte, spans []sessionSpan, prev *Snapshot) *Snapsho
 		snap.Buffer = prev.buffer(buffer)
 	}
 	return snap
+}
+
+// newSnapshot makes a snapshot with room for n sessions. The usual numbers of sessions
+// are made with the snapshot, in one object rather than two: a busy session changes the
+// snapshot several times a second.
+func newSnapshot(n int) *Snapshot {
+	switch {
+	case n == 0:
+		return &Snapshot{}
+	case n <= 16: //nolint:mnd // size classes
+		b := new(struct {
+			snap     Snapshot
+			sessions [16]*Session
+		})
+		b.snap.Sessions = b.sessions[:0:n]
+		return &b.snap
+	case n <= 64: //nolint:mnd // size classes
+		b := new(struct {
+			snap     Snapshot
+			sessions [64]*Session
+		})
+		b.snap.Sessions = b.sessions[:0:n]
+		return &b.snap
+	case n <= 256: //nolint:mnd // size classes
+		b := new(struct {
+			snap     Snapshot
+			sessions [256]*Session
+		})
+		b.snap.Sessions = b.sessions[:0:n]
+		return &b.snap
+	}
+	return &Snapshot{Sessions: make([]*Session, 0, n)}
+}
+
+// newSessions makes room for the sessions and windows a snapshot changed: n sessions, to
+// fill, and windows to append. The usual numbers, a busy session or two, are made in one
+// object rather than two. A session keeps its windows alive anyway, so the others in the
+// object are held little longer.
+func newSessions(sessions, windows int) ([]Session, []Window) {
+	switch {
+	case sessions == 0:
+		return nil, nil
+	case sessions <= 2 && windows <= 4: //nolint:mnd // size classes
+		b := new(struct {
+			sessions [2]Session
+			windows  [4]Window
+		})
+		return b.sessions[:sessions:sessions], b.windows[:0:windows]
+	case sessions <= 8 && windows <= 16: //nolint:mnd // size classes
+		b := new(struct {
+			sessions [8]Session
+			windows  [16]Window
+		})
+		return b.sessions[:sessions:sessions], b.windows[:0:windows]
+	}
+	made := make([]Session, sessions)
+	if windows == 0 {
+		return made, nil
+	}
+	return made, make([]Window, 0, windows)
 }
 
 // sessionPlan is what parseSnapshot found about a session before making it: where its
