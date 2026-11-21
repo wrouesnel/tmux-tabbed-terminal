@@ -331,7 +331,8 @@ type Window struct {
 	MouseReporting bool
 	// InMode is set when the active pane is in a mode, such as copy mode.
 	InMode bool
-	// Scroll is the active pane's history and scroll position.
+	// Scroll is the active pane's history and scroll position. Its history is 0 unless
+	// the session is attached, as it is to be shown in a pane.
 	Scroll ScrollState
 	// Panes is how many panes the window has, and Width how many columns it is wide.
 	Panes int
@@ -460,11 +461,17 @@ var (
 		"W", "#{session_id}", "#{window_id}", "#{window_index}", "#{window_active}",
 		"#{window_activity}", "#{pane_current_command}", "#{window_name}", "#{pane_current_path}",
 		"#{pane_id}", "#{alternate_on}", "#{mouse_any_flag}", "#{pane_in_mode}",
-		"#{history_size}", "#{pane_height}", "#{scroll_position}", "#{window_panes}", "#{window_width}",
+		historyFormat, "#{pane_height}", "#{scroll_position}", "#{window_panes}", "#{window_width}",
 		"#{pane_title}",
 	}, fieldSep)
-	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}", "#{client_flags}"}, fieldSep)
-	bufferFormat = strings.Join([]string{"B", "#{buffer_name}", "#{buffer_created}", "#{buffer_size}"}, fieldSep)
+	// historyFormat is a window's history size, for the scrollbar of a pane showing its
+	// session, so only for attached sessions, and 0 for others. A busy pane's history
+	// grows on every poll: reported for every session, it made a busy session that
+	// isn't shown, and so the snapshot, change on every poll, where otherwise its
+	// activity changes once a second.
+	historyFormat = "#{?session_attached,#{history_size},0}"
+	clientFormat  = strings.Join([]string{"C", "#{client_tty}", "#{session_id}", "#{client_flags}"}, fieldSep)
+	bufferFormat  = strings.Join([]string{"B", "#{buffer_name}", "#{buffer_created}", "#{buffer_size}"}, fieldSep)
 
 	// snapshotArgs is the snapshot command. It's made once, not for every poll, to keep
 	// allocations down on long runs: it's only read.
