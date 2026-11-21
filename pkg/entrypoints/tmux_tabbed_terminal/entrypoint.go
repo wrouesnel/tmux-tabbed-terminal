@@ -36,6 +36,10 @@ type CLIConfig struct {
 	// MemProfileEvery writes a memory profile at each interval, for comparing two of
 	// them: Windows has no signal to ask for one.
 	MemProfileEvery time.Duration `help:"Write a memory profile at this interval, as well as on SIGUSR1 (0 for never)"`
+	// CpuProfileDelay and CpuProfileFor profile a stretch of a run, written when it ends,
+	// rather than the whole run, written at exit, which on Windows may not come cleanly.
+	CpuProfileDelay time.Duration `help:"With --cpu-profile, start profiling after this long"`
+	CpuProfileFor   time.Duration `help:"With --cpu-profile, stop profiling, and write the profile, after this long (0 for at exit)"`
 
 	CpuProfileOutputPath string `default:"${application_name}.cpu.pprof"      help:"CPU Profiling Output Path"`
 	MemProfileOutputPath string `default:"${application_name}.mem.pprof"      help:"Memory Profiling Output Path"`
@@ -290,10 +294,29 @@ func Entrypoint(ctx context.Context, args []string) (exitCode int) {
 			return 1
 		}
 		defer f.Close() // error handling omitted for example
-		if err := pprof.StartCPUProfile(f); err != nil {
+		start := func() error {
+			if err := pprof.StartCPUProfile(f); err != nil {
+				return err
+			}
+			if cli.CpuProfileFor > 0 {
+				time.AfterFunc(cli.CpuProfileFor, func() {
+					pprof.StopCPUProfile()
+					logger.Info("CPU profile written", zap.String("filename", cli.CpuProfileOutputPath))
+				})
+			}
+			return nil
+		}
+		if cli.CpuProfileDelay > 0 {
+			time.AfterFunc(cli.CpuProfileDelay, func() {
+				if err := start(); err != nil {
+					logger.Error("Could not start CPU profile", zap.Error(err))
+				}
+			})
+		} else if err := start(); err != nil {
 			logger.Error("Could not start CPU profile", zap.Error(err))
 			return 1
 		}
+		// Stopping twice is harmless, and stopping before starting does nothing.
 		defer pprof.StopCPUProfile()
 	}
 
