@@ -28,6 +28,7 @@ func newTestClient(t *testing.T) *tmux.Client {
 		argv := c.Argv("kill-server")
 		_ = exec.Command(argv[0], argv[1:]...).Run() //nolint:gosec // test helper
 	})
+	t.Cleanup(c.Close)
 	return c
 }
 

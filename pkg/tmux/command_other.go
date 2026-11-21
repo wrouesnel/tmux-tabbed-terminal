@@ -18,3 +18,7 @@ func withoutTerminal(cmd *exec.Cmd) {
 	}
 	cmd.SysProcAttr.Setsid = true
 }
+
+// controlArgv returns the command line of a local control client: argv itself, since
+// tmux reads its commands from a pipe as well as a terminal.
+func controlArgv(argv []string) []string { return argv }

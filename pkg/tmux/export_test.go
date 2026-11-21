@@ -1,6 +1,7 @@
 package tmux
 
 import (
+	"context"
 	"io"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/agent"
@@ -31,4 +32,23 @@ func (s *SSH) SetAgent(c *agent.Client) {
 func (s *SSH) AgentClient() *agent.Client {
 	_, c := s.agentClient()
 	return c
+}
+
+// ControlName exposes controlName to the tests.
+func (c *Client) ControlName() string { return c.controlName() }
+
+// Run exposes run to the tests.
+func (c *Client) Run(ctx context.Context, args ...string) (string, error) { return c.run(ctx, args...) }
+
+// QuoteControlArg exposes quoteControlArg to the tests.
+var QuoteControlArg = quoteControlArg
+
+// StartControlOn starts a control connection reading tmux's side from stdout, for testing
+// how replies are read.
+func StartControlOn(ctx context.Context, stdin io.WriteCloser, stdout io.Reader) (func([]string) (string, error), error) {
+	cc, err := startControl(ctx, stdin, stdout, func() {})
+	if err != nil {
+		return nil, err
+	}
+	return func(args []string) (string, error) { return cc.run(ctx, splitCommands(args)) }, nil
 }

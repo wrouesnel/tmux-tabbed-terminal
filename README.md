@@ -574,8 +574,14 @@ MIT: see [LICENSE](LICENSE). The binary links
 | `magefile.go`, `magefile_pkg.go` | The build system, plus the source tarball, source RPM and Debian source package targets. |
 
 Each host has a background goroutine which polls its tmux server once per `poll-interval` with one command that lists
-sessions, windows and clients. It polls sooner when a visible terminal shows output. Each
-snapshot is handed to the GTK main loop, which updates the session list, the activity
+sessions, windows and clients. It polls sooner when a visible terminal shows output. On
+tmux 3.2 and later the polls, and other commands that only read, go to a tmux control
+client (`tmux -C`) kept running for the host, rather than starting tmux, or ssh, for
+each. It's attached to a session with `no-output,ignore-size`, so it gets none of the
+panes' output and doesn't change window sizes; the session list leaves it out of the
+session's clients. It ends with its session, and another is started on another session.
+On Windows, a Cygwin or MSYS2 tmux runs it under their `script`, since it needs a
+terminal. Setting `TTT_NO_CONTROL` turns it off. Each snapshot is handed to the GTK main loop, which updates the session list, the activity
 indicators, and which session each pane shows (a client can change session inside tmux,
 for example with `prefix s`).
 

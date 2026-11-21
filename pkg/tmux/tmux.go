@@ -52,6 +52,16 @@ type Client struct {
 	// to. Snapshots are only read, so the same one can be returned again.
 	lastOutput   string
 	lastSnapshot *Snapshot
+	// lastControl is the control client's name when lastSnapshot was parsed.
+	lastControl string
+
+	// control is the control connection, if one is running, and controlRetryAt when to
+	// try starting one again after one couldn't be.
+	controlMu      sync.Mutex
+	control        *controlConn
+	controlRetryAt time.Time
+	// controlFailures counts control connections which failed to start in a row.
+	controlFailures uint
 }
 
 // versionTTL is how long the server's version is taken as known. It changes only when
@@ -200,6 +210,9 @@ func Environ(env []string) []string {
 
 // run runs a tmux command and returns its standard output.
 func (c *Client) run(ctx context.Context, args ...string) (string, error) {
+	if out, ran, err := c.runControl(ctx, args); ran {
+		return out, err
+	}
 	if c.SSH != nil {
 		var cancel context.CancelFunc
 		var err error
@@ -332,6 +345,8 @@ func (s *Session) ActiveWindow() *Window {
 type ClientInfo struct {
 	TTY       string
 	SessionID string
+	// Name is tmux's name for the client.
+	Name string
 }
 
 // Snapshot is the state of the tmux server at one moment.
@@ -400,7 +415,7 @@ var (
 		"#{history_size}", "#{pane_height}", "#{scroll_position}", "#{window_panes}", "#{window_width}",
 		"#{pane_title}",
 	}, fieldSep)
-	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}"}, fieldSep)
+	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}", "#{client_name}"}, fieldSep)
 	bufferFormat = strings.Join([]string{"B", "#{buffer_name}", "#{buffer_created}", "#{buffer_size}"}, fieldSep)
 )
 
@@ -422,10 +437,15 @@ func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
 	}
 	// Most polls find nothing new: then the last snapshot is the same, and parsing it
 	// again would only make garbage.
+	// The control client, if there's one, is left out: it's this program's, and it isn't
+	// showing anything.
+	control := c.controlName()
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.lastSnapshot == nil || out != c.lastOutput {
-		c.lastOutput, c.lastSnapshot = out, ParseSnapshot(out)
+	if c.lastSnapshot == nil || out != c.lastOutput || control != c.lastControl {
+		snap := ParseSnapshot(out)
+		snap.dropClient(control)
+		c.lastOutput, c.lastSnapshot, c.lastControl = out, snap, control
 	}
 	return c.lastSnapshot, nil
 }
@@ -515,7 +535,11 @@ func ParseSnapshot(out string) *Snapshot {
 			if len(fields) < 3 {
 				continue
 			}
-			snap.Clients = append(snap.Clients, ClientInfo{TTY: fields[1], SessionID: fields[2]})
+			ci := ClientInfo{TTY: fields[1], SessionID: fields[2]}
+			if len(fields) > 3 {
+				ci.Name = fields[3]
+			}
+			snap.Clients = append(snap.Clients, ci)
 		case "B":
 			// Buffers are listed newest first: keep the first.
 			if len(fields) < 4 || snap.Buffer != nil {
@@ -558,6 +582,24 @@ func ParseSnapshot(out string) *Snapshot {
 		start = end
 	}
 	return snap
+}
+
+// dropClient leaves the client called name out of the snapshot, and out of its session's
+// count of attached clients.
+func (s *Snapshot) dropClient(name string) {
+	if name == "" {
+		return
+	}
+	for i, ci := range s.Clients {
+		if ci.Name != name {
+			continue
+		}
+		s.Clients = slices.Delete(s.Clients, i, i+1)
+		if sess := s.Session(ci.SessionID); sess != nil && sess.Attached > 0 {
+			sess.Attached--
+		}
+		return
+	}
 }
 
 // windowFields is how many fields a window's line has. The last, its title, may itself

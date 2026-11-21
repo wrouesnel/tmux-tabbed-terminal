@@ -242,6 +242,8 @@ func runAsync[T any](a *App, fn func(ctx context.Context) (T, error), then func(
 func (a *App) pollHost(ctx context.Context, h *Host) {
 	ticker := time.NewTicker(a.cfg.Activity.PollInterval)
 	defer ticker.Stop()
+	// Polling keeps a tmux control client running: end it with the polling.
+	defer h.client.Close()
 	var last time.Time
 	var lastErr string
 
