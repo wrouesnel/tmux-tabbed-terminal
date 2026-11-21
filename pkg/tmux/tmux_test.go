@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/wrouesnel/tmux-tabbed-terminal/pkg/tmux"
 )
@@ -316,13 +317,18 @@ func TestParseSnapshotSharesUnchangedWindows(t *testing.T) {
 // snapshotOutput makes the snapshot command's output for n sessions of two windows each,
 // the first's history being history, with a client and a buffer.
 func snapshotOutput(n, history int, extra ...string) []byte {
+	return busySnapshotOutput(n, 1, history, extra...)
+}
+
+// busySnapshotOutput is snapshotOutput with the first busy sessions' history at history.
+func busySnapshotOutput(n, busy, history int, extra ...string) []byte {
 	var b strings.Builder
 	for i := range n {
 		fmt.Fprintf(&b, "S\t$%d\ts%d\t100\t1\n", i, i)
 	}
 	for i := range n {
 		h := 5
-		if i == 0 {
+		if i < busy {
 			h = history
 		}
 		fmt.Fprintf(&b, "W\t$%d\t@%d\t0\t1\t300\tbash\tshell\t/\t%%%d\t0\t0\t0\t%d\t40\t\t1\t80\t\n", i, 2*i, 2*i, h)
@@ -363,17 +369,49 @@ func TestParseSnapshotSharesUnchanged(t *testing.T) {
 // TestParseSnapshotAllocations checks that what a poll allocates when one session changed
 // doesn't grow with the number of sessions, beyond the list of them.
 func TestParseSnapshotAllocations(t *testing.T) {
-	allocs := func(n int) float64 {
-		a, b := snapshotOutput(n, 10), snapshotOutput(n, 11)
+	allocs := func(n, busy int) float64 {
+		a, b := busySnapshotOutput(n, busy, 10), busySnapshotOutput(n, busy, 11)
 		prev := tmux.ParseSnapshotBytes(a, nil)
 		return testing.AllocsPerRun(50, func() {
 			prev = tmux.ParseSnapshotBytes(b, prev)
 			a, b = b, a
 		})
 	}
-	few, many := allocs(5), allocs(100)
-	if few != many || many > 8 {
-		t.Errorf("allocations for one changed session: %v with 5 sessions, %v with 100", few, many)
+	// What a poll makes doesn't grow with the sessions, nor with how many changed.
+	few, many := allocs(5, 1), allocs(100, 20)
+	if few != many || many > 5 {
+		t.Errorf("allocations: %v with 5 sessions, one changed; %v with 100, 20 changed", few, many)
+	}
+}
+
+func TestParseSnapshotKeepsStrings(t *testing.T) {
+	first := tmux.ParseSnapshotBytes(snapshotOutput(3, 10), nil)
+	second := tmux.ParseSnapshotBytes(snapshotOutput(3, 11), first)
+	was, is := first.Session("$0"), second.Session("$0")
+	if was == is || is.Windows[0].Scroll.History != 11 {
+		t.Fatalf("changed session: got %+v", is)
+	}
+	same := func(a, b string) bool { return unsafe.StringData(a) == unsafe.StringData(b) }
+	for i := range is.Windows {
+		w, old := is.Windows[i], was.Windows[i]
+		if !same(w.ID, old.ID) || !same(w.Name, old.Name) || !same(w.Command, old.Command) ||
+			!same(w.Path, old.Path) || !same(w.PaneID, old.PaneID) || !same(w.Title, old.Title) {
+			t.Errorf("window %s's strings weren't kept", w.ID)
+		}
+	}
+	if !same(is.ID, was.ID) || !same(is.Name, was.Name) {
+		t.Error("the session's strings weren't kept")
+	}
+	if &second.Clients[0] != &first.Clients[0] {
+		t.Error("the clients weren't shared")
+	}
+
+	// A renamed window and session get the new names.
+	renamed := strings.ReplaceAll(string(snapshotOutput(3, 12)), "^|^edit^|^", "^|^notes^|^")
+	renamed = strings.Replace(renamed, "^|^s0^|^", "^|^main^|^", 1)
+	third := tmux.ParseSnapshotBytes([]byte(renamed), second)
+	if s := third.Session("$0"); s.Name != "main" || s.Windows[1].Name != "notes" || s.Windows[0].Name != "shell" {
+		t.Errorf("renamed: got %q, windows %+v", s.Name, s.Windows)
 	}
 }
 

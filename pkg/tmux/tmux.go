@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,10 +52,16 @@ type Client struct {
 	// version is the server's version as last asked, at versionAt.
 	version   string
 	versionAt time.Time
-	// lastOutput is the snapshot command's last output, and lastSnapshot what it parsed
-	// to. Snapshots are only read, so the same one can be returned again.
-	lastOutput   []byte
+	// lastSnapshot is what the snapshot command's last output parsed to. Snapshots are
+	// only read, so the same one can be returned again. spareOutput is the buffer the
+	// next output is copied to: the snapshot before the last one's, which the next parse
+	// doesn't look at.
 	lastSnapshot *Snapshot
+	spareOutput  []byte
+	// spareSpans is, as spareOutput, where the next snapshot's sessions' places in the
+	// output go, and useSnapshot takeSnapshot, made once.
+	spareSpans  []sessionSpan
+	useSnapshot func([]byte)
 
 	// control is the control connection, if one is running, and controlRetryAt when to
 	// try starting one again after one couldn't be.
@@ -342,13 +347,6 @@ type Session struct {
 	// last snapshot's session, if they haven't changed: like the rest of a snapshot,
 	// they're only read.
 	Windows []Window
-
-	// line is the session's line in the snapshot's output, and windowLines the text of
-	// its windows, for the next snapshot to tell whether they changed. windowsMerged is
-	// set if they weren't listed together, so can't be told by it.
-	line          string
-	windowLines   string
-	windowsMerged bool
 }
 
 // Activity is when any window in the session last had output.
@@ -385,6 +383,19 @@ type Snapshot struct {
 	Clients  []ClientInfo
 	// Buffer is the newest paste buffer, or nil if there are none.
 	Buffer *Buffer
+
+	// out is the output the snapshot was parsed from, and spans where each session's
+	// lines are in it, for the next snapshot to tell what changed. out isn't the
+	// snapshot's own: it may be overwritten once the snapshot isn't the latest.
+	out   []byte
+	spans []sessionSpan
+}
+
+// sessionSpan is where a session's line and window lines are in a snapshot's output.
+// merged is set if its windows weren't listed together, so can't be compared as one.
+type sessionSpan struct {
+	line, windows snapshotLine
+	merged        bool
 }
 
 // Buffer is a tmux paste buffer, as copy mode makes.
@@ -450,37 +461,62 @@ var (
 	}, fieldSep)
 	clientFormat = strings.Join([]string{"C", "#{client_tty}", "#{session_id}", "#{client_flags}"}, fieldSep)
 	bufferFormat = strings.Join([]string{"B", "#{buffer_name}", "#{buffer_created}", "#{buffer_size}"}, fieldSep)
+
+	// snapshotArgs is the snapshot command. It's made once, not for every poll, to keep
+	// allocations down on long runs: it's only read.
+	snapshotArgs = []string{
+		"list-sessions", "-F", sessionFormat, ";",
+		"list-windows", "-a", "-F", windowFormat, ";",
+		"list-clients", "-F", clientFormat, ";",
+		// Newest first.
+		"list-buffers", "-F", bufferFormat,
+	}
 )
 
 // Snapshot reads every session, window and client on the server. A server which isn't
 // running has no sessions. The snapshot may be the one returned last time, when nothing
 // changed, so it must not be modified.
 func (c *Client) Snapshot(ctx context.Context) (*Snapshot, error) {
-	var snap *Snapshot
-	// Most polls find nothing new: then the last snapshot is the same, and parsing it
-	// again would only make garbage. Otherwise what's the same is shared with it.
-	use := func(out []byte) {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		if c.lastSnapshot == nil || !bytes.Equal(out, c.lastOutput) {
-			c.lastSnapshot = parseSnapshot(out, c.lastSnapshot)
-			c.lastOutput = append(c.lastOutput[:0], out...)
-		}
-		snap = c.lastSnapshot
+	c.mu.Lock()
+	if c.useSnapshot == nil {
+		// It's made once, not for every poll, to keep allocations down on long runs.
+		c.useSnapshot = c.takeSnapshot
 	}
-	_, err := c.runUsing(ctx, use,
-		"list-sessions", "-F", sessionFormat, ";",
-		"list-windows", "-a", "-F", windowFormat, ";",
-		"list-clients", "-F", clientFormat, ";",
-		// Newest first.
-		"list-buffers", "-F", bufferFormat)
+	use := c.useSnapshot
+	c.mu.Unlock()
+	_, err := c.runUsing(ctx, use, snapshotArgs...)
 	if err != nil {
 		if isNoServerError(err.Error()) {
 			return &Snapshot{}, nil
 		}
 		return nil, err
 	}
-	return snap, nil
+	// It's the one this call took, or a newer one if another call has since.
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastSnapshot, nil
+}
+
+// takeSnapshot parses the snapshot command's output, unless it's the same as last time:
+// most polls find nothing new, and then the last snapshot is the same, and parsing it
+// again would only make garbage. Otherwise what's the same is shared with it.
+func (c *Client) takeSnapshot(out []byte) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	last := c.lastSnapshot
+	if last != nil && bytes.Equal(out, last.out) {
+		return
+	}
+	// The snapshot keeps the output it's parsed from, and where its sessions are in it,
+	// for the next to compare with, so the output is copied out of the connection's
+	// buffer. The snapshot before the last one's buffers are used again, which the
+	// next parse doesn't look at, to keep allocations down on long runs.
+	next := append(c.spareOutput[:0], out...)
+	spans := c.spareSpans
+	if last != nil {
+		c.spareOutput, c.spareSpans = last.out, last.spans
+	}
+	c.lastSnapshot = parseSnapshotInto(next, spans, last)
 }
 
 // parseUnix parses a decimal unix timestamp, returning the zero time if it's invalid.
@@ -508,12 +544,15 @@ func unixTime(secs int64) time.Time {
 // to its name, cmd. A Cygwin or MSYS2 tmux gives such paths, with their backslashes
 // escaped, as the command of a pane running a Windows program, and names its window
 // after it. Anything else is returned unchanged.
-func programName(s string) string {
-	if len(s) < 3 || s[1] != ':' || s[2] != '\\' || !strings.EqualFold(filepath.Ext(s), ".exe") {
+func programName[T string | []byte](s T) T {
+	if len(s) < len(`C:\.exe`) || s[1] != ':' || s[2] != '\\' || !strings.EqualFold(string(s[len(s)-len(".exe"):]), ".exe") {
 		return s
 	}
-	name := s[strings.LastIndexByte(s, '\\')+1:]
-	return name[:len(name)-len(".exe")]
+	start := len(s)
+	for start > 0 && s[start-1] != '\\' {
+		start--
+	}
+	return s[start : len(s)-len(".exe")]
 }
 
 // ParseSnapshot parses the output of the snapshot command. Malformed lines are skipped.
@@ -544,17 +583,25 @@ var (
 )
 
 // parseSnapshot parses the output of the snapshot command, sharing with prev, the last
-// snapshot, if it isn't nil, whatever is as it was.
+// snapshot, if it isn't nil, whatever is as it was. The snapshot keeps out, to compare
+// the next one's output with: it mustn't change while the snapshot may be a parse's prev.
 //
 // It's written to keep allocations down on long runs with many sessions. Busy sessions
 // change the output on almost every poll, as their history grows, so it's parsed
-// several times a second. It's read from the output's bytes, which aren't kept: only
-// the lines which changed are made strings. A session whose line and window lines are
-// as they were is the last snapshot's own, and one whose window lines are shares their
-// windows: snapshots are only read. So what a poll allocates grows with the sessions
-// which changed, not with every session on the server.
+// several times a second. It's read from the output's bytes, compared with the last
+// output's. A session whose lines are as they were is the last snapshot's own, and one
+// whose window lines are shares their windows: snapshots are only read. A window that
+// changed keeps the last one's strings for the fields that didn't, and the sessions and
+// windows that changed are made together. So a poll makes a handful of objects, and
+// strings only for text that changed, however many sessions there are or changed.
 func parseSnapshot(out []byte, prev *Snapshot) *Snapshot {
-	snap := &Snapshot{}
+	return parseSnapshotInto(out, nil, prev)
+}
+
+// parseSnapshotInto is parseSnapshot, appending where the sessions' lines are to spans,
+// whose contents aren't needed.
+func parseSnapshotInto(out []byte, spans []sessionSpan, prev *Snapshot) *Snapshot {
+	snap := &Snapshot{out: out, spans: spans[:0]}
 	// Where the lines are, gathered first: room for the usual numbers is kept on the
 	// stack.
 	var (
@@ -604,75 +651,154 @@ func parseSnapshot(out []byte, prev *Snapshot) *Snapshot {
 		}
 	}
 
-	if len(sessions) > 0 {
-		snap.Sessions = make([]*Session, 0, len(sessions))
-	}
-	var groupBuf2 [stackSessions]int
-	groupFor := assignGroups(groupBuf2[:0], out, sessions, groups)
+	// What's changed is found first, so that what changed can be made together.
+	var (
+		groupForBuf [stackSessions]int
+		planBuf     [stackSessions]sessionPlan
+	)
+	groupFor := assignGroups(groupForBuf[:0], out, sessions, groups)
+	plans := planBuf[:0]
+	changed, changedWindows := 0, 0
 	for i, at := range sessions {
 		line := out[at.start:at.end]
 		fields := splitFieldBytes(line, fieldBuf[:0])
 		if len(fields) < 5 { //nolint:mnd // S, id, name, created, attached
 			continue
 		}
-		attached := atoiBytes(fields[4])
+		plan := sessionPlan{span: sessionSpan{line: at, merged: groupFor[i] == -2}, group: groupFor[i]}
+		plan.attached = atoiBytes(fields[4])
 		for _, m := range monitors {
-			if attached > 0 && bytes.Equal(m, fields[1]) {
-				attached--
+			if plan.attached > 0 && bytes.Equal(m, fields[1]) {
+				plan.attached--
 			}
 		}
-		var windows []byte
-		group := groupFor[i]
-		if group >= 0 {
-			windows = out[groups[group].start:groups[group].end]
+		if plan.group >= 0 {
+			plan.span.windows = snapshotLine{groups[plan.group].start, groups[plan.group].end}
 		}
-		was := prev.sessionAt(i, fields[1])
-		if was != nil && was.line == string(line) && was.Attached == attached && group != -2 && !was.windowsMerged &&
-			was.windowLines == string(windows) {
+		plan.was = prev.sessionIndex(len(plans), fields[1])
+		if plan.was >= 0 {
+			was := prev.spans[plan.was]
+			plan.sameLine = bytes.Equal(prev.text(was.line), line)
+			plan.sameWindows = !was.merged && !plan.span.merged &&
+				bytes.Equal(prev.text(was.windows), out[plan.span.windows.start:plan.span.windows.end])
+		}
+		if !plan.same(prev) {
+			changed++
+			if !plan.sameWindows && plan.group >= 0 {
+				changedWindows += groups[plan.group].count
+			}
+		}
+		plans = append(plans, plan)
+	}
+
+	if len(plans) > 0 {
+		snap.Sessions = make([]*Session, 0, len(plans))
+		if cap(snap.spans) < len(plans) {
+			snap.spans = make([]sessionSpan, 0, len(plans))
+		}
+	}
+	made := make([]Session, changed)
+	var windows []Window
+	if changedWindows > 0 {
+		windows = make([]Window, 0, changedWindows)
+	}
+	for _, plan := range plans {
+		snap.spans = append(snap.spans, plan.span)
+		if plan.same(prev) {
 			// Nothing about it changed.
-			snap.Sessions = append(snap.Sessions, was)
+			snap.Sessions = append(snap.Sessions, prev.Sessions[plan.was])
 			continue
 		}
-		var s *Session
-		if was != nil && was.line == string(line) {
-			// Only its windows or clients changed: its line's strings are kept.
-			s = &Session{line: was.line, ID: was.ID, Name: was.Name, Created: was.Created}
-		} else {
-			s = parseSession(string(line))
+		var was *Session
+		var old []Window
+		if plan.was >= 0 {
+			was = prev.Sessions[plan.was]
+			old = was.Windows
 		}
-		s.Attached = attached
+		s := &made[0]
+		made = made[1:]
+		parseSession(s, out[plan.span.line.start:plan.span.line.end], was, plan.sameLine)
+		s.Attached = plan.attached
 		switch {
-		case group == -2:
-			mergeWindows(s, out, groups, fields[1])
-		case was != nil && !was.windowsMerged && was.windowLines == string(windows):
-			s.Windows, s.windowLines = was.Windows, was.windowLines
-		case group >= 0:
-			s.windowLines = string(windows)
-			s.Windows = parseWindows(make([]Window, 0, groups[group].count), s.windowLines)
+		case plan.span.merged:
+			id := sessionID(out[plan.span.line.start:plan.span.line.end])
+			for _, g := range groups {
+				if bytes.Equal(out[g.session.start:g.session.end], id) {
+					s.Windows = parseWindows(s.Windows, out[g.start:g.end], old)
+				}
+			}
+			slices.SortStableFunc(s.Windows, compareWindowIndex)
+		case plan.sameWindows:
+			s.Windows = was.Windows
+		case plan.group >= 0:
+			n := len(windows)
+			windows = parseWindows(windows, out[plan.span.windows.start:plan.span.windows.end], old)
+			s.Windows = windows[n:len(windows):len(windows)]
 		}
 		snap.Sessions = append(snap.Sessions, s)
 	}
 
 	if clients > 0 {
-		snap.Clients = make([]ClientInfo, 0, clients)
-		for offset := 0; offset < len(out); {
-			line, _, _ := bytes.Cut(out[offset:], newline)
-			offset += len(line) + 1
-			if !bytes.HasPrefix(line, clientPrefix) {
-				continue
-			}
-			fields := splitFieldBytes(line, fieldBuf[:0:4])
-			if len(fields) < 3 || (len(fields) > 3 && monitorFlagBytes(fields[3])) { //nolint:mnd // as above
-				continue
-			}
-			snap.Clients = append(snap.Clients, prev.client(fields[1], fields[2]))
-		}
+		snap.Clients = parseClients(out, prev, clients)
 	}
-
 	if buffer != nil {
 		snap.Buffer = prev.buffer(buffer)
 	}
 	return snap
+}
+
+// sessionPlan is what parseSnapshot found about a session before making it: where its
+// lines are, its group of windows as assignGroups gives it, its count of attached
+// clients, its index in the last snapshot, or -1, and whether its line and its windows'
+// lines are as they were there.
+type sessionPlan struct {
+	span                  sessionSpan
+	group, attached, was  int
+	sameLine, sameWindows bool
+}
+
+// same reports whether the session is as it was in prev.
+func (p *sessionPlan) same(prev *Snapshot) bool {
+	return p.sameLine && p.sameWindows && prev.Sessions[p.was].Attached == p.attached
+}
+
+// text returns the text of a line of the snapshot's output.
+func (s *Snapshot) text(at snapshotLine) []byte { return s.out[at.start:at.end] }
+
+// parseClients returns the clients in the snapshot's output, of which there are n,
+// sharing prev's if they're the same.
+func parseClients(out []byte, prev *Snapshot, n int) []ClientInfo {
+	var fieldBuf [4][]byte
+	same := prev != nil && len(prev.Clients) == n
+	var list []ClientInfo
+	k := 0
+	for offset := 0; offset < len(out); {
+		line, _, _ := bytes.Cut(out[offset:], newline)
+		offset += len(line) + 1
+		if !bytes.HasPrefix(line, clientPrefix) {
+			continue
+		}
+		fields := splitFieldBytes(line, fieldBuf[:0])
+		if len(fields) < 3 || (len(fields) > 3 && monitorFlagBytes(fields[3])) { //nolint:mnd // C, tty, session
+			continue
+		}
+		c := prev.client(fields[1], fields[2])
+		if same {
+			if k < n && prev.Clients[k] == c {
+				k++
+				continue
+			}
+			same = false
+			list = append(make([]ClientInfo, 0, n), prev.Clients[:k]...)
+		} else if list == nil {
+			list = make([]ClientInfo, 0, n)
+		}
+		list = append(list, c)
+	}
+	if same {
+		return prev.Clients
+	}
+	return list
 }
 
 // stackSessions is how many sessions' lines a snapshot is parsed with room for on the
@@ -727,58 +853,89 @@ func sessionID(line []byte) []byte {
 	return id
 }
 
-// parseSession parses a session's line.
+// parseSession fills in s from its line, keeping was's strings, the session's in the
+// last snapshot, where they're the same. was may be nil.
 //
 //nolint:mnd // field counts are fixed by the format strings
-func parseSession(line string) *Session {
-	var buf [5]string
-	fields := splitFields(line, buf[:0])
-	s := &Session{line: line, ID: fields[1], Name: fields[2], Created: parseUnix(fields[3])}
-	return s
+func parseSession(s *Session, line []byte, was *Session, sameLine bool) {
+	switch {
+	case sameLine:
+		s.ID, s.Name, s.Created = was.ID, was.Name, was.Created
+	case was != nil:
+		var buf [5][]byte
+		fields := splitFieldBytes(line, buf[:0])
+		s.ID, s.Name = was.ID, reuse(fields[2], was.Name)
+		s.Created = unixTime(int64(atoiBytes(fields[3])))
+	default:
+		var buf [5]string
+		fields := splitFields(string(line), buf[:0])
+		s.ID, s.Name, s.Created = fields[1], fields[2], parseUnix(fields[3])
+	}
 }
 
-// parseWindows appends the windows of window lines to windows, in index order.
-func parseWindows(windows []Window, lines string) []Window {
-	var buf [windowFields]string
-	for rest := lines; rest != ""; {
-		var line string
-		line, rest, _ = strings.Cut(rest, "\n")
-		if fields := splitFields(line, buf[:0]); len(fields) == windowFields {
-			windows = append(windows, parseWindow(fields))
+// parseWindows appends the windows of window lines to windows, in index order, keeping
+// the strings of old, the session's windows in the last snapshot, where they're the same.
+func parseWindows(windows []Window, lines []byte, old []Window) []Window {
+	var buf [windowFields][]byte
+	start := len(windows)
+	for rest := lines; len(rest) > 0; {
+		var line []byte
+		line, rest, _ = bytes.Cut(rest, newline)
+		fields := splitFieldBytes(line, buf[:0])
+		if len(fields) != windowFields {
+			continue
 		}
+		if was := windowWithID(old, len(windows)-start, fields[2]); was != nil {
+			windows = append(windows, parseWindowAfter(fields, was))
+			continue
+		}
+		// A new window's strings are made together.
+		var strs [windowFields]string
+		windows = append(windows, parseWindow(splitFields(string(line), strs[:0])))
 	}
-	if !slices.IsSortedFunc(windows, compareWindowIndex) {
-		slices.SortStableFunc(windows, compareWindowIndex)
+	if !slices.IsSortedFunc(windows[start:], compareWindowIndex) {
+		slices.SortStableFunc(windows[start:], compareWindowIndex)
 	}
 	return windows
 }
 
-// mergeWindows gives s the windows of every group of its, for when they weren't listed
-// together, as tmux lists them. They can't be compared as one text, so aren't shared.
-func mergeWindows(s *Session, out []byte, groups []windowGroup, id []byte) {
-	s.windowsMerged = true
-	for _, g := range groups {
-		if bytes.Equal(out[g.session.start:g.session.end], id) {
-			s.Windows = parseWindows(s.Windows, string(out[g.start:g.end]))
-		}
+// windowWithID returns the window of windows with an ID, looking first at index i, where
+// it usually is, or nil.
+func windowWithID(windows []Window, i int, id []byte) *Window {
+	if i < len(windows) && windows[i].ID == string(id) {
+		return &windows[i]
 	}
-}
-
-// sessionAt returns the snapshot's session with an ID, looking first at index i, where it
-// usually is, or nil. The snapshot may be nil.
-func (s *Snapshot) sessionAt(i int, id []byte) *Session {
-	if s == nil {
-		return nil
-	}
-	if i < len(s.Sessions) && s.Sessions[i].ID == string(id) {
-		return s.Sessions[i]
-	}
-	for _, sess := range s.Sessions {
-		if sess.ID == string(id) {
-			return sess
+	for j := range windows {
+		if windows[j].ID == string(id) {
+			return &windows[j]
 		}
 	}
 	return nil
+}
+
+// reuse returns old if it's the text of b, or else b as a new string.
+func reuse(b []byte, old string) string {
+	if string(b) == old {
+		return old
+	}
+	return string(b)
+}
+
+// sessionIndex returns the index of the snapshot's session with an ID, looking first at
+// index i, where it usually is, or -1. The snapshot may be nil.
+func (s *Snapshot) sessionIndex(i int, id []byte) int {
+	if s == nil {
+		return -1
+	}
+	if i < len(s.Sessions) && s.Sessions[i].ID == string(id) {
+		return i
+	}
+	for j, sess := range s.Sessions {
+		if sess.ID == string(id) {
+			return j
+		}
+	}
+	return -1
 }
 
 // client returns a client with a tty and session, using the snapshot's strings if it
@@ -835,6 +992,30 @@ func parseWindow(fields []string) Window {
 		Width:           atoi(fields[17]),
 		// The title may contain the separator: splitFields left it in the last field.
 		Title: fields[18],
+	}
+}
+
+// parseWindowAfter parses the fields of a window's line, still in the output's bytes,
+// keeping the strings of was, the window in the last snapshot, where they're the same.
+func parseWindowAfter(fields [][]byte, was *Window) Window {
+	return Window{
+		ID:              was.ID,
+		Index:           atoiBytes(fields[3]),
+		Active:          string(fields[4]) == "1",
+		Activity:        unixTime(int64(atoiBytes(fields[5]))),
+		Command:         reuse(programName(fields[6]), was.Command),
+		Name:            reuse(programName(fields[7]), was.Name),
+		Path:            reuse(fields[8], was.Path),
+		PaneID:          reuse(fields[9], was.PaneID),
+		AlternateScreen: string(fields[10]) == "1",
+		MouseReporting:  string(fields[11]) == "1",
+		InMode:          string(fields[12]) == "1",
+		Scroll: ScrollState{
+			History: atoiBytes(fields[13]), Height: atoiBytes(fields[14]), Position: atoiBytes(fields[15]),
+		},
+		Panes: atoiBytes(fields[16]),
+		Width: atoiBytes(fields[17]),
+		Title: reuse(fields[18], was.Title),
 	}
 }
 

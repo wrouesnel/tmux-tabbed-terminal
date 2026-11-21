@@ -9,7 +9,7 @@ import (
 )
 
 // ProgramName exposes programName to the tests.
-var ProgramName = programName
+var ProgramName = programName[string]
 
 // MasterArgs exposes masterArgs to the tests.
 var SplitPaths = splitPaths
