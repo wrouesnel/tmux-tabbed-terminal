@@ -233,6 +233,33 @@ func TestControlReplies(t *testing.T) {
 	}
 }
 
+// TestControlConnectionLost checks that a command whose line can't be written, because
+// nothing reads the client's input any more, fails once the client's output ends, as
+// when the connection to an agent dies (issue #18), rather than waiting forever.
+func TestControlConnectionLost(t *testing.T) {
+	_, stdinW := io.Pipe() // Nothing reads it, as when the agent's end is gone.
+	stdoutR, stdoutW := io.Pipe()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = stdoutW.CloseWithError(io.ErrUnexpectedEOF)
+	}()
+	done := make(chan error, 1)
+	go func() {
+		// The start has a deadline, so the watchdog guards its write, until the
+		// output ends.
+		_, err := tmux.StartControlOn(context.Background(), stdinW, stdoutR)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Error("starting on a lost connection succeeded")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("starting on a lost connection is still waiting to write")
+	}
+}
+
 // TestControlWatchdog checks that a call with no deadline of its own is given up after
 // its timeout when the client stops answering, and the client ended.
 func TestControlWatchdog(t *testing.T) {

@@ -272,7 +272,10 @@ func (cc *controlConn) read(stdout io.Reader) {
 		cc.watchdog.Stop()
 		cc.mu.Unlock()
 		close(cc.done)
-		cc.stop()
+		// Closing its input too ends a write still waiting on it: with the watchdog
+		// stopped, nothing else would, if the client's end of the input is gone
+		// unclosed, as an agent's is when the connection to it dies (issue #18).
+		cc.close()
 	}()
 	r := bufio.NewReaderSize(stdout, 64*1024) //nolint:mnd // a typical reply's size
 	var (
@@ -551,6 +554,8 @@ func (c *Client) startControl(ctx context.Context, session string) (*controlConn
 				if err != nil {
 					root.agentFailed(ac, err)
 				}
+				// Nothing reads the input any more: a write waiting on it fails.
+				_ = stdinR.CloseWithError(errControlClosed)
 				_ = stdoutW.CloseWithError(errControlClosed)
 			}()
 			return startControl(ctx, stdinW, stdoutR, cancel)
