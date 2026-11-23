@@ -45,7 +45,9 @@ func TestLinkPatternsInVTE(t *testing.T) {
 
 	const cols, rows = 80, 10
 	runtime.LockOSThread()
-	gtk.Init(nil)
+	if err := initTestGTK(); err != nil {
+		t.Fatal(err)
+	}
 	longURL := "https://example.com/" + strings.Repeat("a/", 150) + "end.html"
 	longPath := "docs/" + strings.Repeat("d", 200) + ".md"
 	wiki := "https://en.wikipedia.org/wiki/" + strings.Repeat("x", 100) + "_(software)"

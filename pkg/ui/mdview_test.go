@@ -35,7 +35,9 @@ func TestMdView(t *testing.T) {
 		return
 	}
 	runtime.LockOSThread()
-	gtk.Init(nil)
+	if err := initTestGTK(); err != nil {
+		t.Fatal(err)
+	}
 
 	var followed string
 	var loaded []string

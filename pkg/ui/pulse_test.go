@@ -31,7 +31,7 @@ func TestPulseOpacity(t *testing.T) {
 // TestPulseOnlyWhileActive checks the pulse runs only while a dot is shown and a window
 // is active, and that dots stand still, at full strength, while none is.
 func TestPulseOnlyWhileActive(t *testing.T) {
-	if err := gtk.InitCheck(nil); err != nil {
+	if err := initTestGTK(); err != nil {
 		t.Skipf("no display: %v", err)
 	}
 	dot, err := gtk.LabelNew("●")
