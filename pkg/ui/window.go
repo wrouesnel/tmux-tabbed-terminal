@@ -218,6 +218,7 @@ func (w *Window) installActions() {
 	add("paste", func() { w.activePane.term.PasteClipboard() })
 	add("open-link", func() { w.openLink(w.contextLink.uri) })
 	add("preview-link", func() { w.previewFile(w.contextLink.host, w.contextLink.file) })
+	add("preview-link-window", func() { w.app.NewPreviewWindow(w.contextLink.host, w.contextLink.file, 0, 0, false) })
 	add("download-link", func() { w.downloadLink(w.contextLink) })
 	add("download-link-as", func() { w.downloadLinkAs(w.contextLink) })
 	add("copy-link", func() {
@@ -385,6 +386,7 @@ func (w *Window) updateActionState() {
 	w.actions["paste"].SetEnabled(p.running)
 	w.actions["open-link"].SetEnabled(w.contextLink.uri != "")
 	w.actions["preview-link"].SetEnabled(w.contextLink.file != "" && previewable(w.contextLink.file))
+	w.actions["preview-link-window"].SetEnabled(w.contextLink.file != "" && previewable(w.contextLink.file))
 	w.actions["download-link"].SetEnabled(w.contextLink.downloadable())
 	w.actions["download-link-as"].SetEnabled(w.contextLink.downloadable())
 	w.actions["copy-link"].SetEnabled(w.contextLink.text != "")

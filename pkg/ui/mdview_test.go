@@ -3,10 +3,12 @@
 package ui
 
 import (
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/gtk"
@@ -86,6 +88,58 @@ func TestMdView(t *testing.T) {
 	v.onLink(v.links[0].dest)
 	if followed != "b.md" {
 		t.Errorf("followed %q", followed)
+	}
+
+	// Zooming makes the text bigger, and resetting it puts it back.
+	win, _ := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+	win.SetDefaultSize(600, 400)
+	win.Add(v.view)
+	win.ShowAll()
+	defer win.Destroy()
+	lineHeight := func() int {
+		for until := time.Now().Add(300 * time.Millisecond); time.Now().Before(until); {
+			for gtk.EventsPending() {
+				gtk.MainIteration()
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		_, end := v.buf.GetBounds()
+		_, h := v.view.GetLineYrange(end)
+		return h
+	}
+	before := lineHeight()
+	v.zoomBy(3)
+	if v.zoom <= 1 {
+		t.Errorf("zoomed in to %v", v.zoom)
+	}
+	if after := lineHeight(); after <= before {
+		t.Errorf("zoomed in, the last line is %d high, was %d", after, before)
+	}
+	v.zoomBy(0)
+	if v.zoom != 1 || lineHeight() != before {
+		t.Errorf("reset to %v, the last line %d high, was %d", v.zoom, lineHeight(), before)
+	}
+}
+
+func TestMdBodySize(t *testing.T) {
+	for _, c := range []struct{ desktop, zoom, want float64 }{
+		{11, 1, 12},   // the usual desktop font: GitHub's 16px
+		{9, 1, 12},    // a small one: no smaller than GitHub's
+		{16.5, 1, 18}, // a big one: bigger still, as GitHub's is than the usual
+		{11, 2, 24},
+	} {
+		if got := mdBodySize(c.desktop, c.zoom); math.Abs(got-c.want) > 1e-9 {
+			t.Errorf("mdBodySize(%v, %v) = %v, want %v", c.desktop, c.zoom, got, c.want)
+		}
+	}
+	if got := zoomed(1, 1); got != zoomStep {
+		t.Errorf("a step in: %v", got)
+	}
+	if got := zoomed(1, -100); got != minZoom {
+		t.Errorf("far out: %v, want %v", got, minZoom)
+	}
+	if got := zoomed(3, 0); got != 1 {
+		t.Errorf("reset: %v", got)
 	}
 }
 

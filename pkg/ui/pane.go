@@ -1145,18 +1145,26 @@ func (p *Pane) showScroll(st tmux.ScrollState) {
 	p.settingBar = false
 }
 
-// Zoom changes the font scale by steps, or resets it when steps is 0.
+// Zoom changes the font scale by steps, or resets it when steps is 0: of the markdown
+// file the pane shows, or else of its terminal.
 func (p *Pane) Zoom(steps int) {
-	scale := 1.0
-	if steps != 0 {
-		scale = p.term.FontScale()
-		for ; steps > 0; steps-- {
-			scale *= zoomStep
-		}
-		for ; steps < 0; steps++ {
-			scale /= zoomStep
-		}
-		scale = min(max(scale, minZoom), maxZoom)
+	if p.file != nil && p.stack.GetVisibleChildName() == pageFile {
+		p.file.md.zoomBy(steps)
+		return
 	}
-	p.term.SetFontScale(scale)
+	p.term.SetFontScale(zoomed(p.term.FontScale(), steps))
+}
+
+// zoomed is a scale changed by zoom steps, within the zoom limits, or 1 when steps is 0.
+func zoomed(scale float64, steps int) float64 {
+	if steps == 0 {
+		return 1
+	}
+	for ; steps > 0; steps-- {
+		scale *= zoomStep
+	}
+	for ; steps < 0; steps++ {
+		scale /= zoomStep
+	}
+	return min(max(scale, minZoom), maxZoom)
 }

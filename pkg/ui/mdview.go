@@ -33,6 +33,13 @@ const (
 	mdCodeScale    = 0.9
 	// mdImageMaxSize bounds the size images are decoded at, before they're scaled to fit.
 	mdImageMaxSize = 4096
+	// mdBodyPoints is the least size of the body text, in points: GitHub's 16px at 96dpi.
+	// mdFontScale is how much bigger than the desktop's font it is otherwise, as GitHub's
+	// 16px is than the 11pt fonts desktops default to.
+	mdBodyPoints = 12.0
+	mdFontScale  = 12.0 / 11
+	// mdDefaultPoints is the desktop's font size assumed when it can't be read.
+	mdDefaultPoints = 11.0
 	// diagramDragSlop is how far, in pixels, a press on a diagram moves before it's a drag
 	// rather than a click.
 	diagramDragSlop = 4
@@ -81,6 +88,11 @@ type mdView struct {
 	dark  bool
 	// name is the name of the document, for the title of a diagram's window.
 	name string
+	// zoom scales the text, from Control with the scroll wheel or the zoom keys; font sets
+	// its size; and scrolled gathers smooth scrolling with Control held into whole steps.
+	zoom     float64
+	font     *gtk.CssProvider
+	scrolled float64
 }
 
 // mdLink is a link's tag and destination.
@@ -100,6 +112,17 @@ func newMdView(onLink func(string), loadImage func(string, func(*gdk.Pixbuf))) *
 	v.view.SetTopMargin(mdMargin)
 	v.view.SetBottomMargin(mdMargin)
 	addClass(v.view, "ttt-markdown")
+	v.zoom = 1
+	if v.font, _ = gtk.CssProviderNew(); v.font != nil {
+		if sc, err := v.view.GetStyleContext(); err == nil {
+			sc.AddProvider(v.font, gtk.STYLE_PROVIDER_PRIORITY_APPLICATION+1)
+		}
+		v.setZoom(1)
+	}
+	v.view.AddEvents(int(gdk.SCROLL_MASK | gdk.SMOOTH_SCROLL_MASK))
+	v.view.Connect("scroll-event", func(_ interface{}, ev *gdk.Event) bool {
+		return v.onScroll(gdk.EventScrollNewFromEvent(ev))
+	})
 	v.view.Connect("size-allocate", func() { v.queueFit() })
 	v.view.Connect("style-updated", func() {
 		if dark := v.darkTheme(); dark != v.dark {
@@ -690,6 +713,77 @@ func spansMarkup(spans []markdown.Span) string {
 		b.WriteString(text)
 	}
 	return b.String()
+}
+
+// desktopFontPoints is the size of the desktop's font, in points.
+func desktopFontPoints() float64 {
+	settings, err := gtk.SettingsGetDefault()
+	if err != nil {
+		return mdDefaultPoints
+	}
+	name, err := settings.GetProperty("gtk-font-name")
+	if s, ok := name.(string); err == nil && ok {
+		if fd := pango.FontDescriptionFromString(s); fd != nil && !fd.GetSizeIsAbsolute() && fd.GetSize() > 0 {
+			return float64(fd.GetSize()) / pango.PANGO_SCALE
+		}
+	}
+	return mdDefaultPoints
+}
+
+// mdBodySize is the size of a markdown document's body text, in points, at a zoom: as
+// big as GitHub's at least, and bigger than the desktop's font as GitHub's is than its
+// usual one.
+func mdBodySize(desktop, zoom float64) float64 {
+	return max(desktop*mdFontScale, mdBodyPoints) * zoom
+}
+
+// setZoom scales the text by zoom, within the zoom limits of a terminal.
+func (v *mdView) setZoom(zoom float64) {
+	v.zoom = min(max(zoom, minZoom), maxZoom)
+	if v.font == nil {
+		return
+	}
+	// The text, and the code and tables in it, which are sized relative to it, inherit
+	// it from the view.
+	css := fmt.Sprintf(".ttt-markdown, .ttt-markdown text { font-size: %.2fpt; }", mdBodySize(desktopFontPoints(), v.zoom))
+	if err := v.font.LoadFromData(css); err != nil {
+		return
+	}
+	// The code and tables in the text change size with it, which the view only takes in
+	// when the text is laid out again.
+	if v.buf != nil {
+		v.relayout()
+	}
+}
+
+// zoomBy changes the zoom by steps, as Pane.Zoom does a terminal's, or resets it when
+// steps is 0.
+func (v *mdView) zoomBy(steps int) {
+	v.setZoom(zoomed(v.zoom, steps))
+}
+
+// onScroll zooms the text when Control is held, a step a notch, and otherwise lets the
+// view scroll.
+func (v *mdView) onScroll(ev *gdk.EventScroll) bool {
+	if ev.State()&gdk.CONTROL_MASK == 0 {
+		return false
+	}
+	switch ev.Direction() {
+	case gdk.SCROLL_UP:
+		v.zoomBy(1)
+	case gdk.SCROLL_DOWN:
+		v.zoomBy(-1)
+	case gdk.SCROLL_SMOOTH:
+		v.scrolled -= ev.DeltaY()
+		for ; v.scrolled >= 1; v.scrolled-- {
+			v.zoomBy(1)
+		}
+		for ; v.scrolled <= -1; v.scrolled++ {
+			v.zoomBy(-1)
+		}
+	case gdk.SCROLL_LEFT, gdk.SCROLL_RIGHT:
+	}
+	return true
 }
 
 // darkTheme reports whether the view's theme is dark: whether its text is light.

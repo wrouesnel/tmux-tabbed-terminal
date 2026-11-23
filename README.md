@@ -44,8 +44,8 @@ or split the window to watch several sessions side by side.
   Double-clicking one opens it, as in a file manager: a markdown file or image in the
   preview, a file on another host by downloading it, and anything else in its default
   application. Ctrl+click opens one in its default application, and right-clicking one
-  gives Open Link, Preview in Split, Save, Save As… and Copy Link, which copies where it
-  leads. Links wrapped onto
+  gives Open Link, Preview in Split, Preview in New Window, Save, Save As… and Copy Link,
+  which copies where it leads. Links wrapped onto
   several lines work, in split tmux windows too. Hyperlinks need tmux 3.4 or later on the
   session's host.
 * **File paths.** Paths that start with `/`, `~/`, `./` or `../`, such as
@@ -105,9 +105,9 @@ or split the window to watch several sessions side by side.
   shows only when its button is clicked. With `always` or `never`, what the button chose
   stays as sessions are switched.
 * **File previews.** Right-click a link to a markdown file or an image, local or on a
-  remote host, and choose Preview in Split to show it in a pane beside the terminal, as
-  the plans, reports and screenshots a coding agent writes. Markdown is formatted as
-  GitHub formats it: headings, lists and task lists, tables, code, quotes, links, the
+  remote host, and choose Preview in Split to show it in a pane beside the terminal, or
+  Preview in New Window for a window of its own, as the plans, reports and screenshots a
+  coding agent writes. Markdown is formatted as GitHub formats it: headings, lists and task lists, tables, code, quotes, links, the
   images it shows from the same host, and [Mermaid](https://mermaid.js.org) diagrams,
   drawn with [go-mermaid](https://github.com/zkrebbekx/go-mermaid) in the theme's light
   or dark colors; a kind of diagram it doesn't support shows as code. Diagrams are
@@ -117,8 +117,10 @@ or split the window to watch several sessions side by side.
   of its own, where the wheel zooms about the pointer, dragging moves it, a double-click
   switches between fitting the window and 100%, and the title bar's buttons, or +, −, 0
   and F, zoom; Escape closes it. Code blocks are highlighted by their language, in
-  GitHub's light or dark colors. HTML blocks show as written, without comments; inline
-  tags are hidden, apart from `<br>`. An image is scaled to fit the pane. The preview
+  GitHub's light or dark colors. Its text is the size of GitHub's, 16px, or as much bigger
+  than the desktop's font as that is than the usual 11pt; Ctrl and the wheel, or
+  Ctrl+plus, Ctrl+minus and Ctrl+0, zoom it. HTML blocks show as written, without
+  comments; inline tags are hidden, apart from `<br>`. An image is scaled to fit the pane. The preview
   reloads as soon as the file changes, as when an agent rewrites its plan: a local file,
   or one on a host reached through the [agent](#the-agent), is watched, with inotify,
   kqueue or ReadDirectoryChangesW, and others are checked every two seconds. The next

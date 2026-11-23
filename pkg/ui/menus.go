@@ -132,6 +132,7 @@ func terminalMenu(onLink bool) *glib.MenuModel {
 	var sections []*glib.MenuModel
 	if onLink {
 		sections = append(sections, section("Open Link", "win.open-link", "Preview in Split", "win.preview-link",
+			"Preview in New Window", "win.preview-link-window",
 			"Save", "win.download-link", "Save As…", "win.download-link-as", "Copy Link", "win.copy-link"))
 	}
 	return menuOf(append(sections,
