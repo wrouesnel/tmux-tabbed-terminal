@@ -93,6 +93,8 @@ type mdView struct {
 	zoom     float64
 	font     *gtk.CssProvider
 	scrolled float64
+	// cells are the tables' cells, sized to their text, again whenever its size changes.
+	cells []*gtk.Label
 }
 
 // mdLink is a link's tag and destination.
@@ -125,6 +127,7 @@ func newMdView(onLink func(string), loadImage func(string, func(*gdk.Pixbuf))) *
 	})
 	v.view.Connect("size-allocate", func() { v.queueFit() })
 	v.view.Connect("style-updated", func() {
+		v.queueFitCells()
 		if dark := v.darkTheme(); dark != v.dark {
 			v.dark = dark
 			for _, color := range v.codes {
@@ -150,6 +153,7 @@ func (v *mdView) show(blocks []markdown.Block) {
 	v.view.SetBuffer(v.buf)
 	v.links, v.fits, v.width, v.afterList = nil, nil, 0, false
 	v.codes, v.dark = nil, v.darkTheme()
+	v.cells = nil
 	v.margins = map[string]bool{}
 	v.createTags()
 	for i, b := range blocks {
@@ -659,12 +663,32 @@ func (v *mdView) table(t *markdown.TableData) {
 		}
 	}
 	v.anchor(grid)
-	// The text view gives widgets their least size, at which a label wraps every word:
-	// each is asked for its natural width instead, now it's shown.
+	v.cells = append(v.cells, labels...)
+	fitCells(labels)
+}
+
+// fitCells asks table cells for their natural width: the text view gives widgets their
+// least size, at which a label wraps every word.
+func fitCells(labels []*gtk.Label) {
 	for _, label := range labels {
+		label.SetSizeRequest(-1, -1)
 		_, natural := label.GetPreferredWidth()
 		label.SetSizeRequest(natural, -1)
 	}
+}
+
+// queueFitCells fits the tables' cells to their text again once its new size has reached
+// them, as when the text is zoomed, and lays the text out again around them: the view
+// keeps the sizes widgets had when it last laid them out.
+func (v *mdView) queueFitCells() {
+	buf := v.buf
+	glib.IdleAdd(func() {
+		if buf != v.buf || buf == nil {
+			return
+		}
+		fitCells(v.cells)
+		v.relayout()
+	})
 }
 
 // runsMarkup returns styled text as Pango markup, for a label.
@@ -746,14 +770,8 @@ func (v *mdView) setZoom(zoom float64) {
 	// The text, and the code and tables in it, which are sized relative to it, inherit
 	// it from the view.
 	css := fmt.Sprintf(".ttt-markdown, .ttt-markdown text { font-size: %.2fpt; }", mdBodySize(desktopFontPoints(), v.zoom))
-	if err := v.font.LoadFromData(css); err != nil {
-		return
-	}
-	// The code and tables in the text change size with it, which the view only takes in
-	// when the text is laid out again.
-	if v.buf != nil {
-		v.relayout()
-	}
+	// The view's style changes with it, which fits the tables to it.
+	_ = v.font.LoadFromData(css)
 }
 
 // zoomBy changes the zoom by steps, as Pane.Zoom does a terminal's, or resets it when
