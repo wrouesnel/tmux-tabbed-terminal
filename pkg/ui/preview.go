@@ -777,12 +777,16 @@ func (p *Pane) onMotion(event *gdk.Event) {
 		p.hover.keep()
 		return
 	}
-	_, _, readLines := p.readsPaneLines(m)
+	// Without a match here, tmux may still find a link in its copy of the pane.
+	readsLines := func() bool {
+		_, _, read := p.readsPaneLines(m, p.atEdge(m, matched, row))
+		return read
+	}
 	switch {
 	case p.hover.engaged():
 		// It stays until another link's preview takes its place.
 		p.hover.forget()
-		if !matched && !readLines {
+		if !matched && !readsLines() {
 			return
 		}
 	case p.hover.preview != nil:
@@ -791,7 +795,7 @@ func (p *Pane) onMotion(event *gdk.Event) {
 		return
 	default:
 		p.hover.hide()
-		if !matched && !readLines {
+		if !matched && !readsLines() {
 			return
 		}
 	}

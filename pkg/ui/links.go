@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/text/width"
 
@@ -133,40 +134,71 @@ func cellsOf(text string) int {
 // capture-pane -J returns them, so a line takes as many rows of the pane's width as it
 // needs. It returns the link's text, the kind of pattern it matched and the cells of the
 // pane it covers.
+//
+// A line which fills its last row to the pane's edge, followed by one which starts with
+// something other than a space, is taken to go on in that one, as when a program breaks
+// its output at the pane's width itself rather than leaving it to wrap: a link broken
+// there is found whole.
 func linkInLines(lines []string, paneWidth, col, row int) (string, linkKind, cellSpan, bool) {
 	if paneWidth <= 0 {
 		return "", 0, cellSpan{}, false
 	}
 	top := 0
-	for _, line := range lines {
-		rows := max(1, (cellsOf(line)+paneWidth-1)/paneWidth)
+	for i := 0; i < len(lines); {
+		// The lines broken at the pane's edge, from this one, as one.
+		line, rows := lines[i], 0
+		for {
+			cells := cellsOf(lines[i])
+			rows += max(1, (cells+paneWidth-1)/paneWidth)
+			if i+1 >= len(lines) || !brokenAtEdge(cells, paneWidth, lines[i+1]) {
+				break
+			}
+			i++
+			line += lines[i]
+		}
+		i++
 		if row >= top+rows {
 			top += rows
 			continue
 		}
-		// The byte offset of the character at the cell.
-		target, at := (row-top)*paneWidth+col, -1
-		cell := 0
-		for i, r := range line {
-			if n := runeCells(r); cell+n > target {
-				at = i
-				break
-			} else {
-				cell += n
-			}
+		return linkInLine(line, paneWidth, col, row, top)
+	}
+	return "", 0, cellSpan{}, false
+}
+
+// brokenAtEdge reports whether a line of cells cells seems to go on in next: it fills
+// its last row, and next starts with something other than a space.
+func brokenAtEdge(cells, paneWidth int, next string) bool {
+	if cells == 0 || cells%paneWidth != 0 || next == "" {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(next)
+	return !unicode.IsSpace(r)
+}
+
+// linkInLine is linkInLines for one line, which starts at row top of the pane.
+func linkInLine(line string, paneWidth, col, row, top int) (string, linkKind, cellSpan, bool) {
+	// The byte offset of the character at the cell.
+	target, at := (row-top)*paneWidth+col, -1
+	cell := 0
+	for i, r := range line {
+		if n := runeCells(r); cell+n > target {
+			at = i
+			break
+		} else {
+			cell += n
 		}
-		if at < 0 {
-			return "", 0, cellSpan{}, false
-		}
-		for i, re := range linkRegexps {
-			for _, m := range re.FindAllStringIndex(line, -1) {
-				if m[0] <= at && at < m[1] {
-					span := cellSpan{top: top, width: paneWidth, start: cellsOf(line[:m[0]]), end: cellsOf(line[:m[1]])}
-					return line[m[0]:m[1]], linkPatterns[i].kind, span, true
-				}
-			}
-		}
+	}
+	if at < 0 {
 		return "", 0, cellSpan{}, false
+	}
+	for i, re := range linkRegexps {
+		for _, m := range re.FindAllStringIndex(line, -1) {
+			if m[0] <= at && at < m[1] {
+				span := cellSpan{top: top, width: paneWidth, start: cellsOf(line[:m[0]]), end: cellsOf(line[:m[1]])}
+				return line[m[0]:m[1]], linkPatterns[i].kind, span, true
+			}
+		}
 	}
 	return "", 0, cellSpan{}, false
 }
@@ -191,6 +223,34 @@ type link struct {
 	// shown is the link as the terminal shows it, such as a path with its line number.
 	// A hyperlink's is its URI: the text it's on is the terminal's.
 	shown string
+	// remoteFile is the file the link names on its session's host, when that's another
+	// host, and localURI the file:// URI of the one it names on this machine, read either
+	// way whichever it's taken as, so either reading can be chosen.
+	remoteFile string
+	localURI   string
+}
+
+// remoteLink is the link to the file a link names on its session's host.
+func (l link) remoteLink() link {
+	return link{file: l.remoteFile, host: l.host, text: l.remoteFile, shown: l.shown, remoteFile: l.remoteFile}
+}
+
+// linkReadings returns the link a terminal match is, as resolveLink does, with the file it
+// names on the session's host, if that's another host, and on this machine. host is the
+// session's host, and cwd the directory of the program which printed it.
+func linkReadings(m vte.Match, kind linkKind, cwd, host string) link {
+	remote := host != LocalHost
+	l := resolveLink(m, kind, cwd, remote)
+	l.host = host
+	local := l
+	if remote {
+		l.remoteFile = l.file
+		local = resolveLink(m, kind, cwd, false)
+	}
+	if local.file != "" {
+		l.localURI = (&url.URL{Scheme: "file", Path: local.file}).String()
+	}
+	return l
 }
 
 // downloadable reports whether the link names a file on another host, which can be

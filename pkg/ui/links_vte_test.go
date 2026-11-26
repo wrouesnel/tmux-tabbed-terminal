@@ -101,4 +101,29 @@ func TestLinkPatternsInVTE(t *testing.T) {
 		}
 		win.Destroy()
 	}
+
+	// A line a program broke at the terminal's width, rather than leaving it to wrap: the
+	// terminal matches each part on its own, and the cells at its edge show the link
+	// may go on, so tmux's copy of the lines is read for it.
+	win, _ := gtk.WindowNew(gtk.WINDOW_TOPLEVEL)
+	term := vte.New()
+	win.Add(term)
+	term.SetSize(cols, rows)
+	if _, err := addLinks(term); err != nil {
+		t.Fatal(err)
+	}
+	win.ShowAll()
+	pumpGTK(100 * time.Millisecond) //nolint:mnd
+	first := "open " + "/home/user/" + strings.Repeat("p", cols-16)
+	term.Feed([]byte(first + "\r\nrojects/notes.md now\r\nplain\r\n"))
+	pumpGTK(200 * time.Millisecond) //nolint:mnd
+	if m, ok := term.MatchAtCell(5, 0); !ok || m.Text != first[5:] {
+		t.Errorf("broken line: matched %q at its start, want the part on its first row %q", m.Text, first[5:])
+	} else if e, ok := term.MatchAtCell(cols-1, 0); !ok || e.Text != m.Text {
+		t.Errorf("broken line: the match doesn't reach the edge: %q", e.Text)
+	}
+	if _, ok := term.MatchAtCell(cols-1, 1); ok {
+		t.Error("a line which doesn't reach the edge has a match there")
+	}
+	win.Destroy()
 }

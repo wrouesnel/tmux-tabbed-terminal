@@ -133,7 +133,8 @@ func terminalMenu(onLink bool) *glib.MenuModel {
 	if onLink {
 		sections = append(sections, section("Open Link", "win.open-link", "Preview in Split", "win.preview-link",
 			"Preview in New Window", "win.preview-link-window",
-			"Save", "win.download-link", "Save As…", "win.download-link-as", "Copy Link", "win.copy-link"))
+			"Save", "win.download-link", "Save As…", "win.download-link-as", "Copy Link", "win.copy-link"),
+			section("Save (from Remote)", "win.download-link-remote", "Open on This Machine", "win.open-link-local"))
 	}
 	return menuOf(append(sections,
 		section("Copy", "win.copy", "Paste", "win.paste"),

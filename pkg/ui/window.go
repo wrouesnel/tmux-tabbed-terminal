@@ -216,7 +216,9 @@ func (w *Window) installActions() {
 	add("close-pane", func() { w.ClosePane(w.activePane) })
 	add("copy", func() { w.activePane.copySelection() })
 	add("paste", func() { w.activePane.term.PasteClipboard() })
-	add("open-link", func() { w.openLink(w.contextLink.uri) })
+	add("open-link", func() { w.openLinkFile(w.contextLink) })
+	add("open-link-local", func() { w.openLink(w.contextLink.localURI) })
+	add("download-link-remote", func() { w.downloadLink(w.contextLink.remoteLink()) })
 	add("preview-link", func() { w.previewFile(w.contextLink.host, w.contextLink.file) })
 	add("preview-link-window", func() { w.app.NewPreviewWindow(w.contextLink.host, w.contextLink.file, 0, 0, false) })
 	add("download-link", func() { w.downloadLink(w.contextLink) })
@@ -385,6 +387,8 @@ func (w *Window) updateActionState() {
 	w.actions["copy"].SetEnabled(p.hasSelection())
 	w.actions["paste"].SetEnabled(p.running)
 	w.actions["open-link"].SetEnabled(w.contextLink.uri != "")
+	w.actions["open-link-local"].SetEnabled(w.contextLink.host != LocalHost && w.contextLink.localURI != "")
+	w.actions["download-link-remote"].SetEnabled(w.contextLink.remoteFile != "")
 	w.actions["preview-link"].SetEnabled(w.contextLink.file != "" && previewable(w.contextLink.file))
 	w.actions["preview-link-window"].SetEnabled(w.contextLink.file != "" && previewable(w.contextLink.file))
 	w.actions["download-link"].SetEnabled(w.contextLink.downloadable())
@@ -457,8 +461,37 @@ func (w *Window) openLinkDefault(l link) {
 	case l.downloadable():
 		w.downloadLink(l)
 	case l.uri != "":
-		w.openLink(l.uri)
+		w.openLinkFile(l)
 	}
+}
+
+// remoteFallback reports whether a link opens a file on this machine which doesn't exist,
+// named here, where the link is from another host, whose file it names may be there.
+func remoteFallback(l link) (string, bool) {
+	name, missing := missingFile(l.uri)
+	return name, missing && l.remoteFile != "" && l.host != LocalHost
+}
+
+// openLinkFile opens a link's URI, as openLink does, unless it's a file on this machine
+// which doesn't exist where the link is from another host which has the file it names:
+// then it's that host's file, opened as openLinkDefault opens one.
+func (w *Window) openLinkFile(l link) {
+	name, tryRemote := remoteFallback(l)
+	h := w.app.host(l.host)
+	if !tryRemote || h == nil {
+		w.openLink(l.uri)
+		return
+	}
+	runAsync(w.app, func(ctx context.Context) (string, error) {
+		return fileStamp(ctx, h, l.remoteFile)
+	}, func(_ string, err error) {
+		if err != nil {
+			w.showError("Could not open the link",
+				fmt.Sprintf("%s doesn't exist here, or on %s.", name, l.host))
+			return
+		}
+		w.openLinkDefault(l.remoteLink())
+	})
 }
 
 // previewFile shows a file from a host in the window's preview pane, or in a new one to

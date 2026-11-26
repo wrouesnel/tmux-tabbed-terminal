@@ -45,9 +45,13 @@ or split the window to watch several sessions side by side.
   preview, a file on another host by downloading it, and anything else in its default
   application. Ctrl+click opens one in its default application, and right-clicking one
   gives Open Link, Preview in Split, Preview in New Window, Save, Save As… and Copy Link,
-  which copies where it leads. Links wrapped onto
-  several lines work, in split tmux windows too. Hyperlinks need tmux 3.4 or later on the
-  session's host.
+  which copies where it leads. In a remote session, a link's file is that host's: Save
+  (from Remote) always downloads it from there, and Open on This Machine opens the file of
+  the same path here instead. A file link that would open here, but whose file doesn't
+  exist here, opens the remote host's file if it has one. Links wrapped onto several
+  lines work, in split tmux windows too, and so do those a program broke at the pane's
+  edge itself: a line which fills the pane's width goes on in the next, unless that
+  starts with a space. Hyperlinks need tmux 3.4 or later on the session's host.
 * **File paths.** Paths that start with `/`, `~/`, `./` or `../`, such as
   `/var/log/syslog` or `./src/main.go:12:5`, are links. So are relative paths to files
   with an extension, such as `src/main.go:12:5`, and markdown code spans that hold a path

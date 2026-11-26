@@ -278,6 +278,108 @@ func TestLinkInLines(t *testing.T) {
 	}
 }
 
+func TestLinkInLinesBrokenAtEdge(t *testing.T) {
+	lines := []string{
+		"open /home/user/proj", // fills the row: goes on in the next line
+		"ects/notes.md now",
+		"see https://example.", // fills the row, but the next line starts with a space
+		"  com/a",
+		"x https://example.co", // broken twice
+		"m/aaaaaaaaaaaaaaaaaa",
+		"aa/b.md",
+		"short /tmp/a.md",
+	}
+	path := "/home/user/projects/notes.md"
+	url := "https://example.com/aaaaaaaaaaaaaaaaaaaa/b.md"
+	cases := []struct {
+		col, row int
+		want     string
+	}{
+		{5, 0, path},              // the first part
+		{19, 0, path},             // the last cell of the row
+		{0, 1, path},              // the part after the break
+		{12, 1, path},             // its last cell
+		{14, 1, ""},               // the word after it
+		{4, 2, "https://example"}, // a trailing dot is the sentence's
+		{3, 3, ""},
+		{2, 4, url},
+		{10, 5, url},
+		{6, 6, url},
+		{7, 6, ""},
+		{6, 7, "/tmp/a.md"}, // rows still line up after the joined lines
+	}
+	for _, c := range cases {
+		text, _, span, ok := linkInLines(lines, 20, c.col, c.row)
+		if text != c.want || ok != (c.want != "") {
+			t.Errorf("cell %d,%d: got %q ok %v, want %q", c.col, c.row, text, ok, c.want)
+		}
+		if ok && !span.contains(c.col, c.row) {
+			t.Errorf("cell %d,%d: not in the link's span %+v", c.col, c.row, span)
+		}
+	}
+}
+
+func TestLinkReadings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("local paths aren't links on Windows")
+	}
+	host, _ := os.Hostname()
+	home, _ := os.UserHomeDir()
+	cases := []struct {
+		name              string
+		m                 vte.Match
+		kind              linkKind
+		host              string
+		uri, file         string
+		remoteFile, local string
+	}{
+		{"remote path", vte.Match{Text: "/srv/a.md"}, linkPath, "box", "", "/srv/a.md", "/srv/a.md", "file:///srv/a.md"},
+		{"remote relative path", vte.Match{Text: "out/b.png"}, linkRelative, "box", "", "/w/out/b.png", "/w/out/b.png", "file:///w/out/b.png"},
+		{"remote home path", vte.Match{Text: "~/c.md"}, linkPath, "box", "", "~/c.md", "~/c.md", "file://" + home + "/c.md"},
+		{"remote hyperlink naming this machine", vte.Match{Text: "file://" + host + "/srv/d.md", Hyperlink: true}, 0, "box",
+			"", "/srv/d.md", "/srv/d.md", "file:///srv/d.md"},
+		{"remote hyperlink naming another", vte.Match{Text: "file://elsewhere/srv/e.md", Hyperlink: true}, 0, "box",
+			"", "/srv/e.md", "/srv/e.md", ""},
+		{"local path", vte.Match{Text: "/srv/a.md"}, linkPath, LocalHost, "file:///srv/a.md", "/srv/a.md", "", "file:///srv/a.md"},
+		{"remote url", vte.Match{Text: "https://example.com/x"}, linkURL, "box", "https://example.com/x", "", "", ""},
+	}
+	for _, c := range cases {
+		l := linkReadings(c.m, c.kind, "/w", c.host)
+		if l.uri != c.uri || l.file != c.file || l.remoteFile != c.remoteFile || l.localURI != c.local || l.host != c.host {
+			t.Errorf("%s: got uri %q file %q remote %q local %q host %q, want %q %q %q %q %q", c.name,
+				l.uri, l.file, l.remoteFile, l.localURI, l.host, c.uri, c.file, c.remoteFile, c.local, c.host)
+		}
+	}
+}
+
+func TestRemoteFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("local paths aren't links on Windows")
+	}
+	dir := t.TempDir()
+	here := filepath.Join(dir, "here.md")
+	if err := os.WriteFile(here, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gone := filepath.Join(dir, "gone.md")
+	uri := func(p string) string { return (&url.URL{Scheme: "file", Path: p}).String() }
+	cases := []struct {
+		name string
+		l    link
+		want bool
+	}{
+		{"missing here, from a remote session", link{uri: uri(gone), host: "box", remoteFile: gone}, true},
+		{"there here", link{uri: uri(here), host: "box", remoteFile: here}, false},
+		{"missing, from a local session", link{uri: uri(gone), host: LocalHost}, false},
+		{"a web page", link{uri: "https://example.com/", host: "box", remoteFile: "/x"}, false},
+	}
+	for _, c := range cases {
+		if _, got := remoteFallback(c.l); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestMissingFile(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("file links hold POSIX paths, and Windows doesn't open them yet")

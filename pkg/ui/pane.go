@@ -754,7 +754,7 @@ func (p *Pane) onButtonPress(event *gdk.Event) bool {
 			case l.downloadable():
 				p.win.downloadLink(l)
 			default:
-				p.win.openLink(l.uri)
+				p.win.openLinkFile(l)
 			}
 		})
 	}
@@ -873,8 +873,11 @@ func (p *Pane) withLinkAt(event *gdk.Event, then func(l link, ok bool)) bool {
 // linkAt is withLinkAt for the point x, y of the terminal, where it found the match m, if
 // matched says it did.
 func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link, ok bool)) bool {
-	remote := p.hostName != LocalHost
-	h, aw, readLines := p.readsPaneLines(m)
+	// The session's host when the link was found, should the pane change session while
+	// tmux is asked.
+	host := p.hostName
+	col, row := p.term.CellAt(x, y)
+	h, aw, readLines := p.readsPaneLines(m, p.atEdge(m, matched, row))
 	fromVTE := func() {
 		if !matched {
 			then(link{}, false)
@@ -884,8 +887,9 @@ func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link,
 		if aw != nil {
 			dir = aw.Path
 		}
-		l := resolveLink(m, p.linkTags[m.Tag], dir, remote)
-		l.host, l.shown = p.hostName, m.Text
+		l := linkReadings(m, p.linkTags[m.Tag], dir, host)
+		l.shown = m.Text
+		p.noteLocal(l, p.linkTags[m.Tag])
 		then(l, true)
 	}
 	if !readLines {
@@ -896,7 +900,6 @@ func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link,
 		return true
 	}
 
-	col, row := p.term.CellAt(x, y)
 	window, generation := aw.ID, p.generation
 	runAsync(p.win.app, func(ctx context.Context) (linkResult, error) {
 		layout, err := h.client.WindowLayout(ctx, window)
@@ -931,25 +934,57 @@ func (p *Pane) linkAt(m vte.Match, matched bool, x, y float64, then func(l link,
 		case !r.found:
 			then(link{}, false)
 		default:
-			l := resolveLink(vte.Match{Text: r.text}, r.kind, r.dir, remote)
-			l.span, l.host, l.shown = r.span, p.hostName, r.text
+			l := linkReadings(vte.Match{Text: r.text}, r.kind, r.dir, host)
+			l.span, l.shown = r.span, r.text
+			p.noteLocal(l, r.kind)
 			then(l, true)
 		}
 	})
 	return true
 }
 
+// atEdge reports whether a link at a row of the terminal, where it found the match m if
+// matched says it did, may be broken at the terminal's right edge: the match reaches the
+// edge, or one in the row above does. The terminal only joins the lines it wrapped
+// itself, not those a program broke at its width.
+func (p *Pane) atEdge(m vte.Match, matched bool, row int) bool {
+	cols, _ := p.term.Size()
+	if matched {
+		if e, ok := p.term.MatchAtCell(cols-1, row); ok && e.Text == m.Text {
+			return true
+		}
+	}
+	if row > 0 {
+		if _, ok := p.term.MatchAtCell(cols-1, row-1); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// noteLocal logs a link in a remote session taken as a file on this machine, which it
+// shouldn't be: for finding out how, when it happens.
+func (p *Pane) noteLocal(l link, kind linkKind) {
+	if l.host != LocalHost && strings.HasPrefix(strings.ToLower(l.uri), "file:") {
+		p.win.app.log.Warn("A link in a remote session was taken as a file on this machine",
+			zap.String("host", l.host), zap.String("text", l.shown), zap.Int("kind", int(kind)),
+			zap.String("uri", l.uri), zap.String("file", l.file))
+	}
+}
+
 // readsPaneLines reports whether links are looked for in tmux's copy of the pane's lines,
 // rather than in what the terminal shows, for a point where the terminal found the match
-// m, if any, and returns the host and window to ask for them.
-func (p *Pane) readsPaneLines(m vte.Match) (*Host, *tmux.Window, bool) {
+// m, if any, and returns the host and window to ask for them. In a window of one pane as
+// wide as the terminal, which the terminal wraps, they're only read for a link that may
+// be broken at its edge, as edge says.
+func (p *Pane) readsPaneLines(m vte.Match, edge bool) (*Host, *tmux.Window, bool) {
 	h, s := p.win.app.lookup(p.SessionKey())
 	var aw *tmux.Window
 	if s != nil {
 		aw = s.ActiveWindow()
 	}
 	cols, _ := p.term.Size()
-	if !p.running || m.Hyperlink || aw == nil || aw.InMode || (aw.Panes <= 1 && aw.Width == cols) ||
+	if !p.running || m.Hyperlink || aw == nil || aw.InMode || (aw.Panes <= 1 && aw.Width == cols && !edge) ||
 		h.version == "" || tmux.CaptureCrashes(h.version) {
 		return h, aw, false
 	}
